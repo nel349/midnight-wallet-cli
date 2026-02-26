@@ -62,3 +62,4 @@
 - [ ] `wallet list` — show all wallets in ~/.midnight/
 - [ ] `wallet switch` — change active wallet
 - [ ] `--watch` flag for balance command
+- [ ] DApp connector — local WS server implementing `@midnight-ntwrk/midnight-dapp-connector-api` (v4.0.0), allows browser dApps to request tx approval via CLI
