@@ -1,14 +1,21 @@
 # midnight-wallet-cli — Design Document
 
+## Wallet Storage
+
+Default location: `~/.midnight/wallet.json` (hidden directory).
+
+Commands that accept `--wallet <file>` can point at a different wallet file. Multiple wallets supported via named files (e.g., `~/.midnight/devnet.wallet.json`).
+
+Future: `wallet list` and `wallet switch` for managing multiple wallets.
+
 ## Subcommand Table
 
 | Command | Args / Flags | Description |
 |---------|-------------|-------------|
-| `wallet generate` | `[--network <name>]` `[--seed <hex>]` `[--mnemonic "..."]` `[--output <file>]` | Generate a new wallet (random mnemonic, or restore from seed/mnemonic). Saves to wallet.json. |
+| `wallet generate` | `[--network <name>]` `[--seed <hex>]` `[--mnemonic "..."]` `[--output <file>]` | Generate a new wallet (random mnemonic, or restore from seed/mnemonic). Saves to `~/.midnight/wallet.json`. |
 | `wallet info` | `[--wallet <file>]` | Display wallet address, network, creation date. Does NOT show seed/mnemonic. |
-| `wallet balance` | `[address]` `[--watch]` `[--network <name>]` `[--indexer-ws <url>]` | Check unshielded balance. If no address, reads from wallet.json. `--watch` keeps subscription open. |
-| `wallet send` | `<to> <amount>` `[--wallet <file>]` `[--proof-server <url>]` `[--no-fees]` | Send unshielded NIGHT. Full flow: sync, dust check, build recipe, sign, prove, submit. |
-| `wallet fund` | `<to> <amount>` `[--genesis]` `[--wallet <file>]` `[--proof-server <url>]` | Fund an address. `--genesis` uses seed 0x01 (local devnet). Otherwise reads wallet.json. |
+| `wallet balance` | `[address]` `[--watch]` `[--network <name>]` `[--indexer-ws <url>]` | Check unshielded balance via lightweight GraphQL subscription. If no address, reads from wallet. |
+| `wallet transfer` | `<to> <amount>` `[--wallet <file>]` `[--genesis]` `[--proof-server <url>]` `[--no-fees]` | Transfer unshielded NIGHT. `--genesis` uses seed 0x01 for devnet funding. Full flow: sync, dust check, build recipe, sign, prove, submit. |
 | `wallet dust register` | `[--wallet <file>]` `[--proof-server <url>]` | Register NIGHT UTXOs for dust generation. Required before any fee-paying transaction. |
 | `wallet dust status` | `[--wallet <file>]` | Check dust registration status and current dust balance. |
 | `wallet address` | `[--seed <hex>]` `[--network <name>]` `[--index <n>]` | Derive and display an unshielded address from a seed without creating a wallet file. |
@@ -41,8 +48,7 @@ midnight-wallet-cli/
     ├── wallet.ts                # Entry point — argv dispatch
     ├── commands/
     │   ├── balance.ts
-    │   ├── send.ts
-    │   ├── fund.ts
+    │   ├── transfer.ts
     │   ├── generate.ts
     │   ├── info.ts
     │   ├── dust-register.ts
@@ -78,7 +84,7 @@ All magic values: GENESIS_SEED, NATIVE_TOKEN_TYPE, TOKEN_DECIMALS (6), dust cost
 HD wallet key derivation for the three Midnight roles (Zswap, NightExternal, Dust). All use account=0, index=0.
 
 ### `lib/wallet-config.ts`
-Load/save wallet.json files. The wallet config stores: seed (hex), optional mnemonic, network name, derived address, creation timestamp.
+Load/save wallet files. Default path: `~/.midnight/wallet.json`. Creates `~/.midnight/` directory if it doesn't exist. The wallet config stores: seed (hex), optional mnemonic, network name, derived address, creation timestamp.
 
 ### `lib/facade.ts`
 Build the full WalletFacade from a seed and network config. Assembles ShieldedWallet + UnshieldedWallet + DustWallet. Provides sync helper with progress reporting and clean shutdown.
@@ -122,16 +128,16 @@ argv → parse subcommand + flags
      → exit 0
 ```
 
-### Write Commands (send, fund, dust register)
+### Write Commands (transfer, dust register)
 
 ```
 argv → parse subcommand + flags
-     → load wallet.json
+     → load wallet from ~/.midnight/wallet.json (or --wallet)
      → resolve network config (testcontainer detection for undeployed)
      → build WalletFacade from seed
      → sync wallet (with progress spinner)
      → command-specific logic:
-         send/fund: check balance → ensure dust → build recipe → sign → prove → submit
+         transfer: check balance → ensure dust → build recipe → sign → prove → submit
          dust register: find unregistered UTXOs → register → wait for dust
      → clean shutdown
      → exit 0

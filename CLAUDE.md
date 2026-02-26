@@ -49,6 +49,44 @@ A standalone git-style CLI wallet for the Midnight blockchain.
 5. **Document Results**: Add review section to `tasks/todo.md`
 6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
 
+## Engineering Standards
+
+### Modularity
+- Single responsibility per file — one module, one concern
+- Shared logic lives in `src/lib/`, never duplicated across commands
+- Every command imports from lib/ui — no inline network configs, no inline formatting
+- If you write the same pattern twice, extract it
+
+### Interfaces & Boundaries
+- Define clear interfaces between layers: commands → lib → SDK
+- Commands handle argv parsing and output — nothing else
+- Lib modules are pure logic — no process.exit(), no console output (return values or throw)
+- UI modules own all terminal formatting — commands call them, never raw console.log
+
+### Error Handling
+- Errors are typed and meaningful — no generic "Something went wrong"
+- Throw from lib, catch and format in commands
+- Every user-facing error includes what went wrong and what to do about it
+
+### Naming & Consistency
+- Functions describe what they do: `loadWalletConfig`, not `getConfig`
+- Files match their primary export
+- Consistent patterns across all commands: same arg parsing style, same output structure
+
+### Testing
+- Unit test every lib module — these are pure functions, no excuses
+- Tests live in `src/__tests__/` mirroring the source structure
+- Test runner: vitest
+- Test what the module does, not how it does it — assert on return values and thrown errors
+- No mocks of our own code — if you need to mock it, the boundary is wrong
+- SDK/external dependencies may be stubbed at the interface boundary when needed for isolation
+- Every bug fix comes with a regression test
+
+### Dependencies
+- Minimize external dependencies — use what the SDK provides
+- Wrap third-party APIs behind our own interfaces so they're swappable
+- No transitive dependency leaking into command files
+
 ## Core Principles
 
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
