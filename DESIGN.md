@@ -1,10 +1,12 @@
 # midnight-wallet-cli — Design Document
 
-## Wallet Storage
+## Storage
 
-Default location: `~/.midnight/wallet.json` (hidden directory).
+All wallet CLI state lives in `~/.midnight/` (hidden directory):
+- `~/.midnight/wallet.json` — default wallet file
+- `~/.midnight/config.json` — persistent config (default network, etc.)
 
-Commands that accept `--wallet <file>` can point at a different wallet file. Multiple wallets supported via named files (e.g., `~/.midnight/devnet.wallet.json`).
+`--wallet <file>` on any command points at a custom wallet path. `--output <file>` on generate saves to a custom path.
 
 Future: `wallet list` and `wallet switch` for managing multiple wallets.
 
@@ -12,63 +14,31 @@ Future: `wallet list` and `wallet switch` for managing multiple wallets.
 
 | Command | Args / Flags | Description |
 |---------|-------------|-------------|
-| `wallet generate` | `[--network <name>]` `[--seed <hex>]` `[--mnemonic "..."]` `[--output <file>]` | Generate a new wallet (random mnemonic, or restore from seed/mnemonic). Saves to `~/.midnight/wallet.json`. |
+| `wallet generate` | `[--network <name>]` `[--seed <hex>]` `[--mnemonic "..."]` `[--output <file>]` | Generate a new wallet (random mnemonic, or restore from seed/mnemonic). Saves to `~/.midnight/wallet.json` unless `--output` specifies a custom path. |
 | `wallet info` | `[--wallet <file>]` | Display wallet address, network, creation date. Does NOT show seed/mnemonic. |
-| `wallet balance` | `[address]` `[--watch]` `[--network <name>]` `[--indexer-ws <url>]` | Check unshielded balance via lightweight GraphQL subscription. If no address, reads from wallet. |
-| `wallet transfer` | `<to> <amount>` `[--wallet <file>]` `[--genesis]` `[--proof-server <url>]` `[--no-fees]` | Transfer unshielded NIGHT. `--genesis` uses seed 0x01 for devnet funding. Full flow: sync, dust check, build recipe, sign, prove, submit. |
+| `wallet balance` | `[address]` `[--network <name>]` `[--indexer-ws <url>]` | Check unshielded balance via lightweight GraphQL subscription. If no address, reads from wallet. |
+| `wallet transfer` | `<to> <amount>` `[--wallet <file>]` `[--genesis]` `[--proof-server <url>]` `[--no-fees]` | Transfer unshielded NIGHT. `--genesis` uses seed 0x01 (auto-detects network from `<to>` address). Full flow: sync, dust check, build recipe, sign, prove, submit. |
 | `wallet dust register` | `[--wallet <file>]` `[--proof-server <url>]` | Register NIGHT UTXOs for dust generation. Required before any fee-paying transaction. |
-| `wallet dust status` | `[--wallet <file>]` | Check dust registration status and current dust balance. |
+| `wallet dust status` | `[--wallet <file>]` `[--proof-server <url>]` | Check dust registration status and current dust balance. Requires WalletFacade sync. |
 | `wallet address` | `[--seed <hex>]` `[--network <name>]` `[--index <n>]` | Derive and display an unshielded address from a seed without creating a wallet file. |
 | `wallet genesis-address` | `[--network <name>]` | Display the genesis wallet address (seed 0x01) for a given network. |
 | `wallet inspect-cost` | (none) | Display current block limits derived from LedgerParameters. |
+| `wallet config` | `set <key> <value>` / `get <key>` | Manage persistent config. Keys: `network` (default: `undeployed`). Stored in `~/.midnight/config.json`. |
 | `wallet help` | `[command]` | Show usage for all commands or a specific command. |
 
 ### Network Flag
 
 All commands that accept `--network` support: `preprod`, `preview`, `undeployed`.
 
-When no `--network` is specified:
-- Commands reading from wallet.json use the stored network
-- Commands receiving an address auto-detect from the `mn_addr_<network>` prefix
-- `undeployed` network auto-detects testcontainer ports via `docker ps`
+Network resolution order (first match wins):
+1. Explicit `--network` flag
+2. Wallet file's stored network (for commands that load a wallet)
+3. Auto-detect from address prefix (`mn_addr_<network>`)
+4. Default from `~/.midnight/config.json`
+5. Fallback: `undeployed`
 
-## File Structure
+When network is `undeployed`, auto-detect testcontainer ports via `docker ps`.
 
-```
-midnight-wallet-cli/
-├── CLAUDE.md
-├── DESIGN.md
-├── package.json
-├── tsconfig.json
-├── .gitignore
-├── tasks/
-│   ├── todo.md
-│   └── lessons.md
-└── src/
-    ├── wallet.ts                # Entry point — argv dispatch
-    ├── commands/
-    │   ├── balance.ts
-    │   ├── transfer.ts
-    │   ├── generate.ts
-    │   ├── info.ts
-    │   ├── dust-register.ts
-    │   ├── dust-status.ts
-    │   ├── address.ts
-    │   ├── genesis-address.ts
-    │   ├── inspect-cost.ts
-    │   └── help.ts
-    ├── lib/
-    │   ├── constants.ts
-    │   ├── network.ts
-    │   ├── derivation.ts
-    │   ├── wallet-config.ts
-    │   ├── facade.ts
-    │   └── balance-subscription.ts
-    └── ui/
-        ├── format.ts
-        ├── spinner.ts
-        └── colors.ts
-```
 
 ## Shared Library Modules
 
@@ -117,7 +87,7 @@ Braille animation on stderr: `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`. Updates 
 
 ## Data Flow
 
-### Read-Only Commands (balance, info, address, genesis-address, inspect-cost)
+### Read-Only Commands (balance, info, address, genesis-address, inspect-cost, config)
 
 ```
 argv → parse subcommand + flags
@@ -128,7 +98,7 @@ argv → parse subcommand + flags
      → exit 0
 ```
 
-### Write Commands (transfer, dust register)
+### Write Commands (transfer, dust register, dust status)
 
 ```
 argv → parse subcommand + flags
@@ -139,6 +109,7 @@ argv → parse subcommand + flags
      → command-specific logic:
          transfer: check balance → ensure dust → build recipe → sign → prove → submit
          dust register: find unregistered UTXOs → register → wait for dust
+         dust status: read dust state from synced facade
      → clean shutdown
      → exit 0
 ```
@@ -171,39 +142,6 @@ Build recipe → sign → finalize (ZK proof, can take minutes) → submit
 ### Balance via GraphQL
 WebSocket subscription using `graphql-transport-ws` protocol. Subscribe to `unshieldedTransactions(address)`, track created/spent UTXOs, sum unspent values.
 
-## Network Configs
+## Implementation Reference
 
-| Network | Indexer | Node | Proof Server |
-|---------|--------|------|-------------|
-| preprod | `indexer.preprod.midnight.network` | `rpc.preprod.midnight.network` | localhost:6300 |
-| preview | `indexer.preview.midnight.network` | `rpc.preview.midnight.network` | localhost:6300 |
-| undeployed | localhost:8088 | localhost:9944 | localhost:6300 |
-
-## Key Constants
-
-| Constant | Value |
-|----------|-------|
-| GENESIS_SEED | `00...01` (32 bytes) |
-| NATIVE_TOKEN_TYPE | `00...00` (32 bytes) |
-| TOKEN_DECIMALS | 6 |
-| DUST_COST_OVERHEAD | 300_000_000_000_000 |
-| DUST_FEE_BLOCKS_MARGIN | 5 |
-| TX_TTL_MINUTES | 10 |
-
-## Dependencies
-
-```
-@midnight-ntwrk/wallet-sdk-facade
-@midnight-ntwrk/wallet-sdk-hd
-@midnight-ntwrk/wallet-sdk-shielded
-@midnight-ntwrk/wallet-sdk-unshielded-wallet
-@midnight-ntwrk/wallet-sdk-dust-wallet
-@midnight-ntwrk/wallet-sdk-address-format
-@midnight-ntwrk/wallet-sdk-abstractions
-@midnight-ntwrk/ledger
-@midnight-ntwrk/midnight-js-types
-@midnight-ntwrk/midnight-js-network-id
-@scure/bip39
-rxjs
-ws
-```
+Network configs, key constants, and dependencies are defined in source code (`lib/constants.ts`, `lib/network.ts`, `package.json`). See reference implementation in `/Users/norman/Development/midnight/kuira-verification-test/scripts/` for SDK patterns.
