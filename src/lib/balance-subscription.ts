@@ -63,6 +63,7 @@ export function checkBalance(
     let highestTxId = 0;
     let lastSeenTxId = 0;
     let progressReceived = false;
+    let settled = false;
 
     const buildResult = (): BalanceSummary => {
       const balances = new Map<string, bigint>();
@@ -80,7 +81,8 @@ export function checkBalance(
     };
 
     const checkComplete = () => {
-      if (progressReceived && (highestTxId === 0 || lastSeenTxId >= highestTxId)) {
+      if (!settled && progressReceived && (highestTxId === 0 || lastSeenTxId >= highestTxId)) {
+        settled = true;
         ws.send(JSON.stringify({ id: '1', type: 'complete' }));
         ws.close();
         resolve(buildResult());
@@ -109,8 +111,11 @@ export function checkBalance(
         case 'next': {
           if (message.payload?.errors) {
             const errMsg = message.payload.errors[0]?.message || 'Unknown GraphQL error';
-            ws.close();
-            reject(new Error(`GraphQL error: ${errMsg}`));
+            if (!settled) {
+              settled = true;
+              ws.close();
+              reject(new Error(`GraphQL error: ${errMsg}`));
+            }
             return;
           }
 
@@ -154,8 +159,11 @@ export function checkBalance(
         }
 
         case 'error':
-          ws.close();
-          reject(new Error(`GraphQL subscription error: ${JSON.stringify(message.payload)}`));
+          if (!settled) {
+            settled = true;
+            ws.close();
+            reject(new Error(`GraphQL subscription error: ${JSON.stringify(message.payload)}`));
+          }
           break;
 
         case 'complete':
@@ -164,15 +172,25 @@ export function checkBalance(
     });
 
     ws.on('error', (error: Error) => {
-      reject(new Error(`WebSocket connection failed: ${error.message}`));
+      if (!settled) {
+        settled = true;
+        reject(new Error(`WebSocket connection failed: ${error.message}`));
+      }
     });
 
     ws.on('close', () => {
-      // If we haven't resolved yet, it was an unexpected close
+      if (!settled) {
+        settled = true;
+        reject(new Error(
+          `Indexer closed the connection before balance sync completed. ` +
+          `Indexer: ${indexerWS}`
+        ));
+      }
     });
 
     setTimeout(() => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (!settled) {
+        settled = true;
         ws.close();
         reject(new Error(
           `Balance check timed out after ${BALANCE_CHECK_TIMEOUT_MS / 1000}s. ` +

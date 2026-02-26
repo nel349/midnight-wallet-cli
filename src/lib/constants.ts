@@ -33,3 +33,7 @@ export const STALE_UTXO_ERROR_CODE = 115;
 export const MIDNIGHT_DIR = '.midnight';
 export const DEFAULT_WALLET_FILENAME = 'wallet.json';
 export const DEFAULT_CONFIG_FILENAME = 'config.json';
+
+// File system permissions (POSIX octal)
+export const DIR_MODE = 0o700;   // owner rwx only — directories holding sensitive files
+export const FILE_MODE = 0o600;  // owner rw only — wallet files containing seeds/keys

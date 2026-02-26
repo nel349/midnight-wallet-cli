@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
-import { MIDNIGHT_DIR, DEFAULT_CONFIG_FILENAME } from './constants.ts';
+import { MIDNIGHT_DIR, DEFAULT_CONFIG_FILENAME, DIR_MODE, FILE_MODE } from './constants.ts';
 import { type NetworkName, isValidNetworkName } from './network.ts';
 
 export interface CliConfig {
@@ -25,7 +25,7 @@ function getConfigPath(configDir?: string): string {
 function ensureConfigDir(configDir?: string): void {
   const dir = getConfigDir(configDir);
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
   }
 }
 
@@ -68,7 +68,7 @@ export function loadCliConfig(configDir?: string): CliConfig {
 export function saveCliConfig(config: CliConfig, configDir?: string): void {
   ensureConfigDir(configDir);
   const configPath = getConfigPath(configDir);
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', { mode: FILE_MODE });
 }
 
 /**

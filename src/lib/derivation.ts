@@ -23,7 +23,7 @@ function deriveKey(seedBuffer: Buffer, role: typeof Roles[keyof typeof Roles]): 
  * Derive shielded (Zswap) seed for ZK proofs.
  */
 export function deriveShieldedSeed(seedBuffer: Buffer): Uint8Array {
-  return Buffer.from(deriveKey(seedBuffer, Roles.Zswap));
+  return deriveKey(seedBuffer, Roles.Zswap);
 }
 
 /**

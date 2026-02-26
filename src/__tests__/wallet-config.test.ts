@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { loadWalletConfig, saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
+import { DIR_MODE, FILE_MODE } from '../lib/constants.ts';
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-wallet-test-${process.pid}`);
 
@@ -53,13 +54,13 @@ describe('saveWalletConfig', () => {
     expect(parsed.mnemonic).toBe('abandon abandon abandon');
   });
 
-  it('sets restrictive file permissions (0o600)', () => {
+  it('sets restrictive file permissions (FILE_MODE)', () => {
     const filePath = path.join(TEST_DIR, 'wallet.json');
     saveWalletConfig(VALID_CONFIG, filePath);
     const stat = fs.statSync(filePath);
     // mode includes file type bits; mask to get permission bits only
     const permissions = stat.mode & 0o777;
-    expect(permissions).toBe(0o600);
+    expect(permissions).toBe(FILE_MODE);
   });
 
   it('overwrites existing file completely', () => {
@@ -123,7 +124,7 @@ describe('loadWalletConfig', () => {
       address: 'mn_addr_preprod1test',
       createdAt: '2025-01-01T00:00:00.000Z',
     }));
-    expect(() => loadWalletConfig(filePath)).toThrow('missing required fields');
+    expect(() => loadWalletConfig(filePath)).toThrow('seed');
   });
 
   it('throws when network is missing', () => {
@@ -133,7 +134,7 @@ describe('loadWalletConfig', () => {
       address: 'mn_addr_preprod1test',
       createdAt: '2025-01-01T00:00:00.000Z',
     }));
-    expect(() => loadWalletConfig(filePath)).toThrow('missing required fields');
+    expect(() => loadWalletConfig(filePath)).toThrow('network');
   });
 
   it('throws when address is missing', () => {
@@ -143,7 +144,40 @@ describe('loadWalletConfig', () => {
       network: 'preprod',
       createdAt: '2025-01-01T00:00:00.000Z',
     }));
-    expect(() => loadWalletConfig(filePath)).toThrow('missing required fields');
+    expect(() => loadWalletConfig(filePath)).toThrow('address');
+  });
+
+  it('throws when createdAt is missing', () => {
+    const filePath = path.join(TEST_DIR, 'incomplete.json');
+    fs.writeFileSync(filePath, JSON.stringify({
+      seed: 'aabb00',
+      network: 'preprod',
+      address: 'mn_addr_preprod1test',
+    }));
+    expect(() => loadWalletConfig(filePath)).toThrow('createdAt');
+  });
+
+  it('throws on non-hex seed', () => {
+    const filePath = path.join(TEST_DIR, 'badseed.json');
+    fs.writeFileSync(filePath, JSON.stringify({
+      seed: 'not-a-hex-string!',
+      network: 'preprod',
+      address: 'mn_addr_preprod1test',
+      createdAt: '2025-01-01T00:00:00.000Z',
+    }));
+    expect(() => loadWalletConfig(filePath)).toThrow('Invalid seed format');
+  });
+
+  it('throws on invalid network name', () => {
+    const filePath = path.join(TEST_DIR, 'badnetwork.json');
+    fs.writeFileSync(filePath, JSON.stringify({
+      seed: 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233',
+      network: 'mainnet',
+      address: 'mn_addr_preprod1test',
+      createdAt: '2025-01-01T00:00:00.000Z',
+    }));
+    expect(() => loadWalletConfig(filePath)).toThrow('Invalid network');
+    expect(() => loadWalletConfig(filePath)).toThrow('mainnet');
   });
 
   it('accepts config without optional mnemonic', () => {
@@ -151,6 +185,14 @@ describe('loadWalletConfig', () => {
     saveWalletConfig(VALID_CONFIG, filePath);
     const loaded = loadWalletConfig(filePath);
     expect(loaded.mnemonic).toBeUndefined();
+  });
+
+  it('sets restrictive permissions on custom parent directories', () => {
+    const filePath = path.join(TEST_DIR, 'secure', 'nested', 'wallet.json');
+    saveWalletConfig(VALID_CONFIG, filePath);
+    const dirStat = fs.statSync(path.join(TEST_DIR, 'secure'));
+    const permissions = dirStat.mode & 0o777;
+    expect(permissions).toBe(DIR_MODE);
   });
 });
 

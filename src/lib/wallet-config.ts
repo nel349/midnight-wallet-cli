@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
-import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME } from './constants.ts';
+import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME, DIR_MODE, FILE_MODE } from './constants.ts';
+import { isValidNetworkName } from './network.ts';
 
 export interface WalletConfig {
   seed: string;
@@ -22,7 +23,7 @@ function getDefaultWalletPath(): string {
 function ensureMidnightDir(): void {
   const dir = getMidnightDir();
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
   }
 }
 
@@ -57,9 +58,25 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
     throw new Error(`Invalid JSON in wallet file: ${resolvedPath}`);
   }
 
-  if (!config.seed || !config.network || !config.address) {
+  if (!config.seed || !config.network || !config.address || !config.createdAt) {
+    const missing = ['seed', 'network', 'address', 'createdAt'].filter(
+      (f) => !config[f as keyof WalletConfig],
+    );
     throw new Error(
-      `Wallet file is missing required fields (seed, network, address): ${resolvedPath}`
+      `Wallet file is missing required fields (${missing.join(', ')}): ${resolvedPath}`
+    );
+  }
+
+  if (!/^[0-9a-fA-F]+$/.test(config.seed)) {
+    throw new Error(
+      `Invalid seed format in wallet file (expected hex string): ${resolvedPath}`
+    );
+  }
+
+  if (!isValidNetworkName(config.network)) {
+    throw new Error(
+      `Invalid network "${config.network}" in wallet file: ${resolvedPath}\n` +
+      `Valid networks: preprod, preview, undeployed`
     );
   }
 
@@ -81,10 +98,10 @@ export function saveWalletConfig(config: WalletConfig, walletPath?: string): str
   } else {
     const dir = path.dirname(resolvedPath);
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
     }
   }
 
-  fs.writeFileSync(resolvedPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  fs.writeFileSync(resolvedPath, JSON.stringify(config, null, 2) + '\n', { mode: FILE_MODE });
   return resolvedPath;
 }

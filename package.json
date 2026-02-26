@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@midnight-ntwrk/ledger": "^4.0.0",
+    "@midnight-ntwrk/ledger-v7": "^7.0.0",
     "@midnight-ntwrk/midnight-js-network-id": "3.0.0",
     "@midnight-ntwrk/midnight-js-types": "3.0.0",
     "@midnight-ntwrk/wallet-sdk-abstractions": "1.0.0",

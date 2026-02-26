@@ -18,9 +18,9 @@
 - [x] `balance-subscription.ts` — lightweight GraphQL WS balance check (no proof server)
 
 ## Phase 2b: Core Library Tests
-- [x] `network.test.ts` — detectNetworkFromAddress(), isValidNetworkName(), getNetworkConfig() copy safety (16 tests)
-- [x] `wallet-config.test.ts` — save/load round-trip, missing file error, invalid JSON error, nested dir creation (10 tests)
-- [x] `cli-config.test.ts` — save/load round-trip, defaults when missing, invalid values fallback, get/set validation (12 tests)
+- [x] `network.test.ts` — detectNetworkFromAddress(), isValidNetworkName(), getNetworkConfig(), resolveNetworkConfig() (21 tests)
+- [x] `wallet-config.test.ts` — save/load round-trip, validation (seed hex, network, createdAt), permissions, overwrite (17 tests)
+- [x] `cli-config.test.ts` — save/load round-trip, defaults, validation, corruption recovery, no mocks (21 tests)
 - Skipped: `constants.test.ts` (trivial), `derivation.test.ts` / `facade.test.ts` (SDK integration, test with real flows later)
 
 ## Phase 3: UI Layer (`src/ui/`)
@@ -56,6 +56,7 @@
 - [ ] `commands/transfer.ts` — send unshielded NIGHT (with --genesis support)
 - [ ] `commands/dust-register.ts` — register UTXOs for dust generation
 - [ ] `commands/dust-status.ts` — check dust status and balance (requires WalletFacade sync)
+- [ ] Signal handling (SIGINT/SIGTERM) — clean shutdown of WebSocket connections and WalletFacade during active operations
 
 ## Phase 6: Install + Verify
 - [ ] npm install and resolve any dependency issues
