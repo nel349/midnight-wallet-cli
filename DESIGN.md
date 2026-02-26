@@ -105,7 +105,7 @@ argv → parse subcommand + flags
      → load wallet from ~/.midnight/wallet.json (or --wallet)
      → resolve network config (testcontainer detection for undeployed)
      → build WalletFacade from seed
-     → sync wallet (with progress spinner)
+     → pre-send sync (short timeout ~10s, catches stale UTXOs before building tx)
      → command-specific logic:
          transfer: check balance → ensure dust → build recipe → sign → prove → submit
          dust register: find unregistered UTXOs → register → wait for dust
@@ -114,13 +114,28 @@ argv → parse subcommand + flags
      → exit 0
 ```
 
+### Transfer Resilience
+
+**Pre-send sync**: Always do a quick sync (~10s) before building a transaction. This catches UTXOs that were spent externally and prevents immediate rejection.
+
+**Stale UTXO recovery (error 115)**: The node may reject a transaction because a referenced UTXO was already spent (e.g., by another wallet instance or a concurrent transaction). When this happens:
+1. Mark the rejected UTXOs as spent locally
+2. Re-sync the wallet to get fresh UTXO state
+3. Rebuild and retry the transaction (up to 3 attempts)
+4. On retry, preserve the spent markings from step 1 (don't clear them during re-sync)
+
+If we don't hit error 115 in practice (because the facade handles it internally), document why and remove the retry logic.
+
+**Network retry with exponential backoff**: On connection failures (indexer, node, proof server), retry with delays: 1s → 2s → 4s → 8s, max 3 attempts before failing with an actionable error message.
+
 ### Error Handling
 - All errors to stderr, exit code 1
 - Wallet file missing → suggest `wallet generate`
 - Network detection failure → list valid networks
 - Insufficient balance → show current vs required
+- Stale UTXO (error 115) → auto-retry with re-sync (see above)
 - Proof timeout → show elapsed time
-- Connection errors → show endpoint URL
+- Connection errors → show endpoint URL with retry count
 
 ## Midnight SDK Patterns
 
