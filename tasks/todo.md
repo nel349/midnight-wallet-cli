@@ -25,13 +25,22 @@
 - [ ] `cli-config.test.ts` — save/load round-trip, default values when no config file exists
 
 ## Phase 3: UI Layer (`src/ui/`)
-- [ ] `colors.ts` — ANSI helpers respecting NO_COLOR
-- [ ] `format.ts` — header(), divider(), keyValue(), formatNight(), formatAddress()
-- [ ] `spinner.ts` — braille spinner on stderr
+- [ ] `colors.ts` — Midnight color palette (midnight blue, teal, purple accent), ANSI 256 helpers, NO_COLOR support
+- [ ] `format.ts` — header(), divider(), keyValue(), formatNight(), formatAddress(), box()
+- [ ] `spinner.ts` — braille spinner on stderr, start/stop/update
+- [ ] `art.ts` — ASCII art Midnight logo (block characters), pixel-style frames
+- [ ] `animate.ts` — frame-by-frame renderer for operation animations:
+  - Wallet sync: starfield/particle drift with progress counter
+  - ZK proof: hex stream resolving to `PROVED ✓`
+  - Transfer: byte flow trail from sender to receiver
+  - Dust: dots accumulating during registration wait
+  - Success: character burst effect
+  - Error: red flash + bordered box with recovery suggestion
+  - Idle: subtle twinkling dots while waiting
 
 ## Phase 3b: UI Layer Tests
 - [ ] `colors.test.ts` — colors enabled/disabled via NO_COLOR, each helper wraps correctly
-- [ ] `format.test.ts` — formatNight() decimal precision, formatAddress() truncation, keyValue() alignment
+- [ ] `format.test.ts` — formatNight() decimal precision, formatAddress() truncation, keyValue() alignment, box rendering
 
 ## Phase 4: Read-Only Commands
 - [ ] `wallet.ts` — entry point, subcommand dispatch

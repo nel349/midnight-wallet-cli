@@ -62,19 +62,22 @@ Build the full WalletFacade from a seed and network config. Assembles ShieldedWa
 ### `lib/balance-subscription.ts`
 Direct GraphQL WebSocket subscription for read-only balance checking. No proof server needed. Tracks UTXOs by intentHash:outputIndex, computes unspent balances.
 
-## UX Formatting
+## UX & Visual Design
 
 ### Output Destinations
 - **stdout**: Data output only (addresses, balances, JSON). Pipeable.
-- **stderr**: Spinners, progress indicators, status messages.
+- **stderr**: Spinners, progress indicators, status messages, animations.
 
-### Colors
+### Color Palette (ANSI 256)
 Raw ANSI escape codes. Respect `NO_COLOR` env var.
-- Headers: bold
-- Keys: dim
-- Errors: red
-- Success: green
-- Warnings: yellow
+- Deep midnight blue (`38;5;17`) — borders, backgrounds
+- Teal/cyan (`38;5;38`) — highlights, active elements, spinners
+- Purple accent (`38;5;99`) — ZK/privacy-related operations (proving, dust)
+- White — data values, important text
+- Dim gray — labels, secondary text
+- Red — errors
+- Green — success confirmations
+- Yellow — warnings
 
 ### Spinner
 Braille animation on stderr: `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`. Updates in-place with `\r`.
@@ -84,6 +87,54 @@ Braille animation on stderr: `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`. Updates 
 - Divider: `─` repeated line
 - Key-value: aligned padding (`  Key:       Value`)
 - NIGHT amounts: always 6 decimal places
+- Box drawing for structured output (`╔═╗║╚═╝`)
+
+### Midnight Logo (ASCII Art)
+Block-character rendering of the Midnight symbol (circle + 3 vertical squares). Built with Unicode block characters (`▀▄█░▓▒`). Displayed on `wallet help` and first run.
+
+```
+        ██████████████
+      ██              ██
+    ██      ██████      ██
+   ██       ██████       ██
+   ██                    ██
+   ██       ██████       ██
+   ██       ██████       ██
+    ██                  ██
+      ██              ██
+        ██████████████
+
+       m i d n i g h t
+```
+
+### Operation Animations
+
+All animations write to stderr, respect `NO_COLOR` (degrade to static text when disabled).
+
+**Startup / help** — Logo materialize effect: the Midnight symbol renders pixel-by-pixel from random noise/static, characters resolve into the final logo frame by frame. Then the wordmark `m i d n i g h t` types out letter-by-letter beneath it.
+
+**Wallet sync** — Starfield/particle effect: dots `·` drift across the terminal with a progress counter, evoking the midnight sky aesthetic.
+
+**ZK proof generation** — Randomized hex characters (`a7 3f b2 00 ...`) stream across the line and gradually "resolve" into `PROVED ✓`. Conveys zero-knowledge computation happening.
+
+**Transfer in progress** — Bytes visually flow from sender to receiver with a trail: `████░░░░░░░░████`. Shows movement of value.
+
+**Dust accumulation** — Tiny dots `·` slowly appear and collect, representing dust generation over time. Used during `dust register` wait phase.
+
+**Block confirmation** — After transaction submission, blocks stack like a tiny cityscape silhouette (callback to midnight_sky.png), representing the transaction being confirmed on-chain.
+
+**Success** — Brief character burst effect, then clean success message with tx hash.
+
+**Error** — Line briefly flashes red, then shows the error in a bordered box with recovery suggestion.
+
+**Idle / waiting** — Subtle twinkling dots in empty space while waiting for network responses.
+
+### UI Modules
+- `ui/colors.ts` — Midnight palette constants, ANSI helpers, NO_COLOR support
+- `ui/format.ts` — header(), divider(), keyValue(), formatNight(), formatAddress(), box()
+- `ui/spinner.ts` — braille spinner on stderr, start/stop/update
+- `ui/art.ts` — ASCII art logo, pixel-style frames
+- `ui/animate.ts` — frame-by-frame renderer for operation animations (sync, proof, transfer, dust)
 
 ## Data Flow
 
