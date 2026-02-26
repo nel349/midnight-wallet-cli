@@ -9,20 +9,19 @@
 - [x] Initial git commit
 
 ## Phase 2: Core Library (`src/lib/`)
-- [ ] `constants.ts` — GENESIS_SEED, NATIVE_TOKEN_TYPE, TOKEN_DECIMALS, timeout values, dust parameters
-- [ ] `network.ts` — NETWORK_CONFIGS map, detectNetworkFromAddress(), detectTestcontainerPorts(), resolveNetworkConfig()
-- [ ] `derivation.ts` — deriveShieldedSeed(), deriveUnshieldedSeed(), deriveDustSeed()
-- [ ] `wallet-config.ts` — WalletConfig interface, loadWalletConfig(), saveWalletConfig(), default path ~/.midnight/wallet.json
-- [ ] `cli-config.ts` — loadCliConfig(), saveCliConfig(), default network, stored in ~/.midnight/config.json
-- [ ] `facade.ts` — buildFacade(), syncFacade() with progress, stopFacade()
-- [ ] `balance-subscription.ts` — lightweight GraphQL WS balance check (no proof server)
+- [x] `constants.ts` — GENESIS_SEED, NATIVE_TOKEN_TYPE, TOKEN_DECIMALS, timeout values, dust parameters
+- [x] `network.ts` — NETWORK_CONFIGS map, detectNetworkFromAddress(), detectTestcontainerPorts(), resolveNetworkConfig()
+- [x] `derivation.ts` — deriveShieldedSeed(), deriveUnshieldedSeed(), deriveDustSeed()
+- [x] `wallet-config.ts` — WalletConfig interface, loadWalletConfig(), saveWalletConfig(), default path ~/.midnight/wallet.json
+- [x] `cli-config.ts` — loadCliConfig(), saveCliConfig(), default network, stored in ~/.midnight/config.json
+- [x] `facade.ts` — buildFacade(), startAndSyncFacade(), quickSync(), stopFacade()
+- [x] `balance-subscription.ts` — lightweight GraphQL WS balance check (no proof server)
 
 ## Phase 2b: Core Library Tests
-- [ ] `constants.test.ts` — verify exported values are correct types and formats
-- [ ] `network.test.ts` — detectNetworkFromAddress() with valid/invalid prefixes, network resolution order
-- [ ] `derivation.test.ts` — deterministic derivation (same seed → same output), all three roles
-- [ ] `wallet-config.test.ts` — save/load round-trip, missing file error, invalid JSON error, ~/.midnight/ directory creation
-- [ ] `cli-config.test.ts` — save/load round-trip, default values when no config file exists
+- [x] `network.test.ts` — detectNetworkFromAddress(), isValidNetworkName(), getNetworkConfig() copy safety (16 tests)
+- [x] `wallet-config.test.ts` — save/load round-trip, missing file error, invalid JSON error, nested dir creation (10 tests)
+- [x] `cli-config.test.ts` — save/load round-trip, defaults when missing, invalid values fallback, get/set validation (12 tests)
+- Skipped: `constants.test.ts` (trivial), `derivation.test.ts` / `facade.test.ts` (SDK integration, test with real flows later)
 
 ## Phase 3: UI Layer (`src/ui/`)
 - [ ] `colors.ts` — Midnight color palette (midnight blue, teal, purple accent), ANSI 256 helpers, NO_COLOR support
