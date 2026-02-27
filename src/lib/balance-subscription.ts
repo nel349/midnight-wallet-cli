@@ -202,7 +202,7 @@ export function checkBalance(
 }
 
 /**
- * Format a native NIGHT balance from its raw micro amount.
+ * Check whether a token type is the native NIGHT token.
  */
 export function isNativeToken(tokenType: string): boolean {
   return tokenType === NATIVE_TOKEN_TYPE;

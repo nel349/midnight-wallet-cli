@@ -24,11 +24,11 @@
 - Skipped: `constants.test.ts` (trivial), `derivation.test.ts` / `facade.test.ts` (SDK integration, test with real flows later)
 
 ## Phase 3: UI Layer (`src/ui/`)
-- [ ] `colors.ts` — Midnight color palette (midnight blue, teal, purple accent), ANSI 256 helpers, NO_COLOR support
-- [ ] `format.ts` — header(), divider(), keyValue(), formatNight(), formatAddress(), box()
-- [ ] `spinner.ts` — braille spinner on stderr, start/stop/update
-- [ ] `art.ts` — ASCII art Midnight logo (block characters), pixel-style frames
-- [ ] `animate.ts` — frame-by-frame renderer for operation animations:
+- [x] `colors.ts` — Midnight color palette (midnight blue, teal, purple accent), ANSI 256 helpers, NO_COLOR support
+- [x] `format.ts` — header(), divider(), keyValue(), formatNight(), formatAddress(), box()
+- [x] `spinner.ts` — braille spinner on stderr, start/stop/update
+- [x] `art.ts` — ASCII art Midnight logo (block characters), pixel-style frames
+- [x] `animate.ts` — frame-by-frame renderer for operation animations:
   - Wallet sync: starfield/particle drift with progress counter
   - ZK proof: hex stream resolving to `PROVED ✓`
   - Transfer: byte flow trail from sender to receiver
@@ -38,19 +38,19 @@
   - Idle: subtle twinkling dots while waiting
 
 ## Phase 3b: UI Layer Tests
-- [ ] `colors.test.ts` — colors enabled/disabled via NO_COLOR, each helper wraps correctly
-- [ ] `format.test.ts` — formatNight() decimal precision, formatAddress() truncation, keyValue() alignment, box rendering
+- [x] `colors.test.ts` — colors enabled/disabled via NO_COLOR, each helper wraps correctly
+- [x] `format.test.ts` — formatNight() decimal precision, formatAddress() truncation, keyValue() alignment, box rendering
 
 ## Phase 4: Read-Only Commands
-- [ ] `wallet.ts` — entry point, subcommand dispatch
-- [ ] `commands/help.ts` — usage for all or specific command
-- [ ] `commands/generate.ts` — create wallet from random mnemonic, seed, or mnemonic restore
-- [ ] `commands/info.ts` — display wallet metadata (no secrets)
-- [ ] `commands/balance.ts` — unshielded balance via GraphQL subscription
-- [ ] `commands/address.ts` — derive address from seed
-- [ ] `commands/genesis-address.ts` — show genesis address for a network
-- [ ] `commands/inspect-cost.ts` — display block limits
-- [ ] `commands/config.ts` — get/set persistent config (default network, etc.)
+- [x] `wallet.ts` — entry point, subcommand dispatch
+- [x] `commands/help.ts` — usage for all or specific command
+- [x] `commands/generate.ts` — create wallet from random mnemonic, seed, or mnemonic restore
+- [x] `commands/info.ts` — display wallet metadata (no secrets)
+- [x] `commands/balance.ts` — unshielded balance via GraphQL subscription
+- [x] `commands/address.ts` — derive address from seed
+- [x] `commands/genesis-address.ts` — show genesis address for a network
+- [x] `commands/inspect-cost.ts` — display block limits
+- [x] `commands/config.ts` — get/set persistent config (default network, etc.)
 
 ## Phase 5: Write Commands
 - [ ] `commands/transfer.ts` — send unshielded NIGHT (with --genesis support)

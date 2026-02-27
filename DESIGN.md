@@ -14,7 +14,7 @@ Future: `wallet list` and `wallet switch` for managing multiple wallets.
 
 | Command | Args / Flags | Description |
 |---------|-------------|-------------|
-| `wallet generate` | `[--network <name>]` `[--seed <hex>]` `[--mnemonic "..."]` `[--output <file>]` | Generate a new wallet (random mnemonic, or restore from seed/mnemonic). Saves to `~/.midnight/wallet.json` unless `--output` specifies a custom path. |
+| `wallet generate` | `[--network <name>]` `[--seed <hex>]` `[--mnemonic "..."]` `[--output <file>]` `[--force]` | Generate a new wallet (random mnemonic, or restore from seed/mnemonic). Saves to `~/.midnight/wallet.json` unless `--output` specifies a custom path. Refuses to overwrite an existing file unless `--force` is specified. `--seed` and `--mnemonic` are mutually exclusive. |
 | `wallet info` | `[--wallet <file>]` | Display wallet address, network, creation date. Does NOT show seed/mnemonic. |
 | `wallet balance` | `[address]` `[--network <name>]` `[--indexer-ws <url>]` | Check unshielded balance via lightweight GraphQL subscription. If no address, reads from wallet. |
 | `wallet transfer` | `<to> <amount>` `[--wallet <file>]` `[--genesis]` `[--proof-server <url>]` `[--no-fees]` | Transfer unshielded NIGHT. `--genesis` uses seed 0x01 (auto-detects network from `<to>` address). Full flow: sync, dust check, build recipe, sign, prove, submit. |
