@@ -64,6 +64,7 @@ export function checkBalance(
     let lastSeenTxId = 0;
     let progressReceived = false;
     let settled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     const buildResult = (): BalanceSummary => {
       const balances = new Map<string, bigint>();
@@ -80,9 +81,14 @@ export function checkBalance(
       return { balances, utxoCount, txCount, highestTxId };
     };
 
+    const settle = () => {
+      clearTimeout(timeoutId);
+    };
+
     const checkComplete = () => {
       if (!settled && progressReceived && (highestTxId === 0 || lastSeenTxId >= highestTxId)) {
         settled = true;
+        settle();
         ws.send(JSON.stringify({ id: '1', type: 'complete' }));
         ws.close();
         resolve(buildResult());
@@ -113,6 +119,7 @@ export function checkBalance(
             const errMsg = message.payload.errors[0]?.message || 'Unknown GraphQL error';
             if (!settled) {
               settled = true;
+              settle();
               ws.close();
               reject(new Error(`GraphQL error: ${errMsg}`));
             }
@@ -161,6 +168,7 @@ export function checkBalance(
         case 'error':
           if (!settled) {
             settled = true;
+            settle();
             ws.close();
             reject(new Error(`GraphQL subscription error: ${JSON.stringify(message.payload)}`));
           }
@@ -174,6 +182,7 @@ export function checkBalance(
     ws.on('error', (error: Error) => {
       if (!settled) {
         settled = true;
+        settle();
         reject(new Error(`WebSocket connection failed: ${error.message}`));
       }
     });
@@ -181,6 +190,7 @@ export function checkBalance(
     ws.on('close', () => {
       if (!settled) {
         settled = true;
+        settle();
         reject(new Error(
           `Indexer closed the connection before balance sync completed. ` +
           `Indexer: ${indexerWS}`
@@ -188,7 +198,7 @@ export function checkBalance(
       }
     });
 
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       if (!settled) {
         settled = true;
         ws.close();

@@ -47,20 +47,57 @@ export function formatAddress(address: string, truncate: boolean = false): strin
   return teal(display);
 }
 
+// Strip ANSI escape codes for visible length measurement
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+// Word-wrap a string to a max visible width, preserving ANSI codes
+function wrapLine(line: string, maxWidth: number): string[] {
+  const visible = stripAnsi(line);
+  if (visible.length <= maxWidth) return [line];
+
+  // Split on word boundaries for the visible text, then reconstruct with ANSI
+  const words = line.split(/(\s+)/);
+  const result: string[] = [];
+  let currentLine = '';
+  let currentLen = 0;
+
+  for (const word of words) {
+    const wordLen = stripAnsi(word).length;
+    if (currentLen + wordLen > maxWidth && currentLen > 0) {
+      result.push(currentLine);
+      currentLine = word.trimStart();
+      currentLen = stripAnsi(currentLine).length;
+    } else {
+      currentLine += word;
+      currentLen += wordLen;
+    }
+  }
+  if (currentLine.length > 0) result.push(currentLine);
+  return result;
+}
+
 // Box drawing — light or heavy style
-export function box(lines: string[], style: 'light' | 'heavy' = 'light'): string {
+export function box(lines: string[], style: 'light' | 'heavy' = 'light', maxWidth: number = 70): string {
   const chars = style === 'heavy'
     ? { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' }
     : { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' };
 
-  // Calculate width from longest line (strip ANSI for measurement)
-  const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
-  const maxLen = Math.max(...lines.map(l => stripAnsi(l).length));
+  // Expand multi-line strings and wrap long lines
+  const contentMaxWidth = maxWidth - 4; // account for "║ " and " ║"
+  const expanded: string[] = [];
+  for (const line of lines) {
+    const subLines = line.split('\n');
+    for (const sub of subLines) {
+      expanded.push(...wrapLine(sub, contentMaxWidth));
+    }
+  }
+
+  const maxLen = Math.max(...expanded.map(l => stripAnsi(l).length));
   const innerWidth = Math.max(maxLen + 2, 20); // minimum inner width of 20, +2 for padding
 
   const top = chars.tl + chars.h.repeat(innerWidth) + chars.tr;
   const bottom = chars.bl + chars.h.repeat(innerWidth) + chars.br;
-  const body = lines.map(line => {
+  const body = expanded.map(line => {
     const visibleLen = stripAnsi(line).length;
     const padding = innerWidth - visibleLen - 2; // -2 for the space padding on each side
     return `${chars.v} ${line}${' '.repeat(Math.max(0, padding))} ${chars.v}`;
@@ -71,7 +108,11 @@ export function box(lines: string[], style: 'light' | 'heavy' = 'light'): string
 
 // Error box with red border and optional recovery suggestion
 export function errorBox(error: string, suggestion?: string): string {
-  const lines = [red(bold('Error: ') + error)];
+  // Split error on newlines and color each line separately to avoid ANSI bleed
+  const errorLines = error.split('\n');
+  const lines = errorLines.map((line, i) =>
+    i === 0 ? red(bold('Error: ')) + red(line) : red(line)
+  );
   if (suggestion) {
     lines.push('');
     lines.push(dim('Suggestion: ') + suggestion);
