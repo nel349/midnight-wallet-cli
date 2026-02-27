@@ -4,48 +4,57 @@ import { parseArgs } from '../lib/argv.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
 
 let io: CapturedOutput;
+let savedIsTTY: boolean | undefined;
 
 beforeEach(() => {
   process.env.NO_COLOR = '';
+  savedIsTTY = process.stderr.isTTY;
+  // Ensure the horizontal layout path runs (not the plain-text agent path)
+  Object.defineProperty(process.stderr, 'isTTY', { value: true, configurable: true });
   io = captureOutput();
 });
 
 afterEach(() => {
   delete process.env.NO_COLOR;
+  Object.defineProperty(process.stderr, 'isTTY', { value: savedIsTTY, configurable: true });
   io.restore();
 });
 
 describe('help command — general help', () => {
-  it('displays the logo on stderr', async () => {
+  it('displays the logo and commands on stderr (horizontal layout)', async () => {
     const args = parseArgs(['help']);
     await helpCommand(args);
     const err = io.stderr();
     expect(err).toContain('██████████████');
     expect(err).toContain('m i d n i g h t');
+    expect(err).toContain('Commands');
   });
 
-  it('displays command table on stdout', async () => {
+  it('lists all 8 commands on stderr', async () => {
     const args = parseArgs(['help']);
     await helpCommand(args);
-    const out = io.stdout();
-    expect(out).toContain('Commands');
-    for (const spec of COMMAND_SPECS) {
-      expect(out).toContain(spec.name);
-    }
+    const err = io.stderr();
+    expect(err).toContain('generate');
+    expect(err).toContain('info');
+    expect(err).toContain('balance');
+    expect(err).toContain('address');
+    expect(err).toContain('genesis-address');
+    expect(err).toContain('inspect-cost');
+    expect(err).toContain('config');
+    expect(err).toContain('help');
   });
 
-  it('lists all 8 commands', async () => {
+  it('outputs plain text when stderr is not a TTY (agent-friendly)', async () => {
+    Object.defineProperty(process.stderr, 'isTTY', { value: undefined, configurable: true });
     const args = parseArgs(['help']);
     await helpCommand(args);
-    const out = io.stdout();
-    expect(out).toContain('generate');
-    expect(out).toContain('info');
-    expect(out).toContain('balance');
-    expect(out).toContain('address');
-    expect(out).toContain('genesis-address');
-    expect(out).toContain('inspect-cost');
-    expect(out).toContain('config');
-    expect(out).toContain('help');
+    const err = io.stderr();
+    // No logo animation
+    expect(err).not.toContain('██████████████');
+    // Has command list
+    expect(err).toContain('Commands');
+    expect(err).toContain('generate');
+    expect(err).toContain('balance');
   });
 });
 

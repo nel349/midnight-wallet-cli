@@ -1,11 +1,20 @@
 // midnight-wallet-cli entry point
-// Usage: npm run wallet -- <command> [args]
+// Usage: midnight <command> [args]  (or: mn <command> [args])
 // Dispatches to command handlers via dynamic import
 
+import { createRequire } from 'node:module';
 import { parseArgs, hasFlag } from './lib/argv.ts';
 import { errorBox } from './ui/format.ts';
 
 const args = parseArgs();
+
+// Global --version / -v handling
+if (hasFlag(args, 'version') || hasFlag(args, 'v')) {
+  const require = createRequire(import.meta.url);
+  const { version } = require('../package.json');
+  process.stdout.write(version + '\n');
+  process.exit(0);
+}
 
 // Global --help / -h handling
 if (hasFlag(args, 'help') || hasFlag(args, 'h')) {
@@ -52,12 +61,12 @@ async function run(): Promise<void> {
     default:
       throw new Error(
         `Unknown command: "${command}"\n` +
-        `Run "wallet help" to see available commands.`
+        `Run "midnight help" to see available commands.`
       );
   }
 }
 
 run().catch((err: Error) => {
-  process.stderr.write('\n' + errorBox(err.message, 'Run "wallet help" for usage information.') + '\n\n');
+  process.stderr.write('\n' + errorBox(err.message, 'Run "midnight help" for usage information.') + '\n\n');
   process.exit(1);
 });

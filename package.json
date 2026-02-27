@@ -3,8 +3,17 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Git-style CLI wallet for the Midnight blockchain",
+  "bin": {
+    "midnight": "./dist/wallet.js",
+    "mn": "./dist/wallet.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "wallet": "tsx src/wallet.ts",
+    "build": "bun build src/wallet.ts --outfile dist/wallet.js --target node --format esm --packages external --banner \"#!/usr/bin/env node\"",
+    "prepublishOnly": "npm run build && npm run test",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

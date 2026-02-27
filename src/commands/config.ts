@@ -11,7 +11,7 @@ export default async function configCommand(args: ParsedArgs): Promise<void> {
 
   if (!action || (action !== 'get' && action !== 'set')) {
     throw new Error(
-      `Usage: wallet config <get|set> <key> [value]\n` +
+      `Usage: midnight config <get|set> <key> [value]\n` +
       `Valid keys: ${getValidConfigKeys().join(', ')}`
     );
   }
@@ -30,7 +30,7 @@ export default async function configCommand(args: ParsedArgs): Promise<void> {
   } else {
     const value = args.positionals[1];
     if (value === undefined) {
-      throw new Error(`Missing value for config set.\nUsage: wallet config set ${key} <value>`);
+      throw new Error(`Missing value for config set.\nUsage: midnight config set ${key} <value>`);
     }
     setConfigValue(key, value);
     process.stderr.write(green('✓') + ` ${key} = ${value}\n`);

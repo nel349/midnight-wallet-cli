@@ -46,6 +46,10 @@ npm run wallet -- transfer mn_addr_preprod1... 100
 npm run wallet -- transfer mn_addr_undeployed1... 1000 --genesis
 ```
 
+## Publishing
+
+See [PUBLISHING.md](./PUBLISHING.md) for build, pack, and npm publish instructions.
+
 ## Requirements
 
 - Node.js >= 20

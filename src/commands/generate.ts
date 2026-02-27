@@ -96,6 +96,6 @@ export default async function generateCommand(args: ParsedArgs): Promise<void> {
   process.stderr.write(`  ${seedBuffer.toString('hex')}\n\n`);
 
   process.stderr.write(divider() + '\n');
-  process.stderr.write(dim('  Next: wallet info | wallet balance') + '\n\n');
+  process.stderr.write(dim('  Next: midnight info | midnight balance') + '\n\n');
   process.stderr.write(green('✓') + ' Wallet saved\n');
 }

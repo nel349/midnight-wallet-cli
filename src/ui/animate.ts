@@ -3,7 +3,7 @@
 // All respect NO_COLOR and accept AbortSignal for cancellation
 
 import { teal, purple, green, red, bold, dim, isColorEnabled } from './colors.ts';
-import { getMaterializeFrame, getWordmarkFrame, WORDMARK } from './art.ts';
+import { getMaterializeFrame, getWordmarkFrame, WORDMARK, MIDNIGHT_LOGO } from './art.ts';
 
 const FRAME_MS = 80;
 
@@ -24,37 +24,59 @@ function writeLine(text: string): void {
 }
 
 // Logo materialize: noise → resolved logo + wordmark type-out
-export async function animateMaterialize(signal?: AbortSignal): Promise<void> {
+// sideContent: optional static lines rendered to the right of the logo (indices 0-9 alongside logo, 10 alongside wordmark)
+export async function animateMaterialize(signal?: AbortSignal, sideContent?: string[]): Promise<void> {
   const totalFrames = 20;
+  const logoLines = MIDNIGHT_LOGO.split('\n');
+  const logoLineCount = logoLines.length; // 10
 
   if (!isColorEnabled()) {
-    const { MIDNIGHT_LOGO } = await import('./art.ts');
-    process.stderr.write(MIDNIGHT_LOGO + '\n');
-    process.stderr.write(`       ${WORDMARK}\n`);
+    // Static render: logo + side content, no animation
+    for (let j = 0; j < logoLineCount; j++) {
+      const left = logoLines[j]!.padEnd(30);
+      const right = sideContent?.[j] ?? '';
+      process.stderr.write((sideContent ? left + '    ' + right : left) + '\n');
+    }
+    const wordmarkLine = `       ${WORDMARK}`;
+    const footerSide = sideContent?.[logoLineCount] ?? '';
+    process.stderr.write((footerSide ? wordmarkLine.padEnd(34) + footerSide : wordmarkLine) + '\n');
     return;
   }
 
-  // Materialize the logo
+  // Animated: materialize logo with static side content
   for (let i = 0; i <= totalFrames; i++) {
     if (signal?.aborted) break;
     const progress = i / totalFrames;
     const frame = getMaterializeFrame(progress);
-    // Move cursor up to overwrite previous frame (except first)
+    const frameLines = frame.split('\n');
+
     if (i > 0) {
-      const lineCount = frame.split('\n').length;
-      process.stderr.write(`\x1b[${lineCount}A`);
+      process.stderr.write(`\x1b[${logoLineCount}A`);
     }
-    process.stderr.write(teal(frame) + '\n');
+
+    for (let j = 0; j < logoLineCount; j++) {
+      const left = teal(frameLines[j]!);
+      const right = sideContent?.[j] ?? '';
+      // Pad logo to 30 visible chars using absolute column positioning
+      const line = sideContent ? left + `\x1b[35G` + right : left;
+      process.stderr.write(line + '\x1b[K\n');
+    }
+
     await sleep(FRAME_MS, signal);
   }
 
-  // Type out the wordmark
+  // Type out the wordmark below the logo
   const wordmarkFrames = 15;
+  const footerSide = sideContent?.[logoLineCount] ?? '';
   for (let i = 0; i <= wordmarkFrames; i++) {
     if (signal?.aborted) break;
     const progress = i / wordmarkFrames;
     const partial = getWordmarkFrame(progress);
-    writeLine(`       ${bold(teal(partial))}`);
+    if (footerSide) {
+      writeLine(`       ${bold(teal(partial))}\x1b[35G${footerSide}`);
+    } else {
+      writeLine(`       ${bold(teal(partial))}`);
+    }
     await sleep(FRAME_MS, signal);
   }
   process.stderr.write('\n');

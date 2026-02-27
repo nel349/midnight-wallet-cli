@@ -4,3 +4,4 @@ dist/
 *.wallet.json
 wallet.json
 .DS_Store
+*.tgz

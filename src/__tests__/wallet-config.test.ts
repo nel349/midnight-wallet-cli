@@ -103,7 +103,7 @@ describe('loadWalletConfig', () => {
 
   it('includes actionable recovery guidance in missing file error', () => {
     const filePath = path.join(TEST_DIR, 'nonexistent.json');
-    expect(() => loadWalletConfig(filePath)).toThrow('wallet generate');
+    expect(() => loadWalletConfig(filePath)).toThrow('midnight generate');
   });
 
   it('includes the file path in missing file error', () => {

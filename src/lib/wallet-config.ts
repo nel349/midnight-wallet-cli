@@ -40,7 +40,7 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(
       `Wallet file not found: ${resolvedPath}\n` +
-      `Generate a wallet first: wallet generate --network <name>`
+      `Generate a wallet first: midnight generate --network <name>`
     );
   }
 

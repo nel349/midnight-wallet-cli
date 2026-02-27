@@ -16,6 +16,18 @@ export const MIDNIGHT_LOGO = [
 
 export const WORDMARK = 'm i d n i g h t';
 
+// Short descriptions for the compact horizontal help layout (≤30 chars each)
+export const COMMAND_BRIEFS: [name: string, brief: string][] = [
+  ['generate',        'Generate or restore a wallet'],
+  ['info',            'Display wallet metadata'],
+  ['balance',         'Check unshielded balance'],
+  ['address',         'Derive address from seed'],
+  ['genesis-address', 'Show genesis address'],
+  ['inspect-cost',    'Display block limits'],
+  ['config',          'Manage CLI config'],
+  ['help',            'Show command usage'],
+];
+
 // Characters used for noise/static effect
 const NOISE_CHARS = ['░', '▒', '▓', '█', '·', ' '];
 
