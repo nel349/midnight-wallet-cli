@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   header, divider, keyValue,
-  formatNight, formatAddress,
+  formatNight, formatDust, formatAddress,
   box, errorBox, successMessage,
 } from '../ui/format.ts';
 
@@ -49,6 +49,50 @@ describe('formatNight', () => {
 
   it('handles negative values', () => {
     expect(formatNight(-1_500_000n)).toBe('-1.500000 NIGHT');
+  });
+});
+
+describe('formatDust', () => {
+  it('formats zero correctly', () => {
+    expect(formatDust(0n)).toBe('0.000000 DUST');
+  });
+
+  it('formats 1 Speck (smallest unit)', () => {
+    expect(formatDust(1n)).toBe('0.000000000000001 DUST');
+  });
+
+  it('formats whole DUST amounts', () => {
+    // 1 DUST = 10^15 Specks
+    expect(formatDust(1_000_000_000_000_000n)).toBe('1.000000 DUST');
+  });
+
+  it('formats fractional amounts with trailing zero trimming', () => {
+    // 0.5 DUST = 5 * 10^14 Specks
+    expect(formatDust(500_000_000_000_000n)).toBe('0.500000 DUST');
+  });
+
+  it('keeps at least 6 decimal places', () => {
+    // Even whole numbers show 6 decimals
+    expect(formatDust(5_000_000_000_000_000n)).toBe('5.000000 DUST');
+  });
+
+  it('preserves significant trailing digits', () => {
+    // 1.000000000000001 DUST = 10^15 + 1 Specks
+    expect(formatDust(1_000_000_000_000_001n)).toBe('1.000000000000001 DUST');
+  });
+
+  it('formats the typical dust balance from devnet', () => {
+    // 1388856000000 Specks ≈ 0.001388856 DUST
+    expect(formatDust(1_388_856_000_000n)).toBe('0.001388856 DUST');
+  });
+
+  it('handles negative values', () => {
+    expect(formatDust(-1_000_000_000_000_000n)).toBe('-1.000000 DUST');
+  });
+
+  it('handles large values', () => {
+    // 100 DUST
+    expect(formatDust(100_000_000_000_000_000n)).toBe('100.000000 DUST');
   });
 });
 

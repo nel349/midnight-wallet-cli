@@ -96,6 +96,47 @@ const COMMAND_SPECS: CommandSpec[] = [
     ],
   },
   {
+    name: 'airdrop',
+    description: 'Fund your wallet from the genesis wallet (undeployed network only)',
+    usage: 'midnight airdrop <amount> [--wallet <file>]',
+    flags: [
+      '<amount>            Amount in NIGHT to airdrop',
+      '--wallet <file>     Custom wallet file path',
+    ],
+    examples: [
+      'midnight airdrop 1000',
+      'midnight airdrop 0.5 --wallet my-wallet.json',
+    ],
+  },
+  {
+    name: 'transfer',
+    description: 'Send NIGHT tokens to another address',
+    usage: 'midnight transfer <to> <amount> [--wallet <file>]',
+    flags: [
+      '<to>                Recipient bech32m address',
+      '<amount>            Amount in NIGHT to send',
+      '--wallet <file>     Custom wallet file path',
+    ],
+    examples: [
+      'midnight transfer mn_addr_undeployed1... 100',
+      'midnight transfer mn_addr_preprod1... 50 --wallet my-wallet.json',
+    ],
+  },
+  {
+    name: 'dust',
+    description: 'Register UTXOs for dust (fee token) generation or check status',
+    usage: 'midnight dust <register|status> [--wallet <file>]',
+    flags: [
+      'register            Register NIGHT UTXOs for dust generation',
+      'status              Check dust registration status and balance',
+      '--wallet <file>     Custom wallet file path',
+    ],
+    examples: [
+      'midnight dust register',
+      'midnight dust status',
+    ],
+  },
+  {
     name: 'config',
     description: 'Manage persistent config (default network, etc.)',
     usage: 'midnight config <get|set> <key> [value]',

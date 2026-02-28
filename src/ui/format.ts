@@ -39,6 +39,23 @@ export function formatNight(microNight: bigint): string {
   return `${sign}${whole}.${fracStr} NIGHT`;
 }
 
+// Format Specks bigint to human-readable DUST with 15 decimal places
+// 1 DUST = 10^15 Specks (per midnight-ledger spec)
+const DUST_DECIMALS = 15;
+
+export function formatDust(specks: bigint): string {
+  const isNegative = specks < 0n;
+  const abs = isNegative ? -specks : specks;
+  const multiplier = 10n ** BigInt(DUST_DECIMALS);
+  const whole = abs / multiplier;
+  const frac = abs % multiplier;
+  // Trim trailing zeros for readability, but keep at least 6 decimal places
+  const fracStr = frac.toString().padStart(DUST_DECIMALS, '0');
+  const trimmed = fracStr.replace(/0+$/, '').padEnd(6, '0');
+  const sign = isNegative ? '-' : '';
+  return `${sign}${whole}.${trimmed} DUST`;
+}
+
 // Format address with optional truncation and teal coloring
 export function formatAddress(address: string, truncate: boolean = false): string {
   const display = truncate && address.length > 20

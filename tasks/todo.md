@@ -53,16 +53,26 @@
 - [x] `commands/config.ts` — get/set persistent config (default network, etc.)
 
 ## Phase 5: Write Commands
-- [ ] `commands/transfer.ts` — send unshielded NIGHT (with --genesis support)
-- [ ] `commands/dust-register.ts` — register UTXOs for dust generation
-- [ ] `commands/dust-status.ts` — check dust status and balance (requires WalletFacade sync)
-- [ ] Signal handling (SIGINT/SIGTERM) — clean shutdown of WebSocket connections and WalletFacade during active operations
+- [x] `lib/transfer.ts` — shared transfer execution (facade lifecycle, dust management, tx build/sign/prove/submit, stale UTXO retry)
+- [x] `commands/airdrop.ts` — fund wallet from genesis (seed 0x01), undeployed network only
+- [x] `commands/transfer.ts` — send unshielded NIGHT to another address with address validation
+- [x] `commands/dust.ts` — register UTXOs for dust generation + check dust status (register/status subcommands)
+- [x] Signal handling (SIGINT/SIGTERM) — global AbortController in wallet.ts, clean shutdown of WalletFacade during active operations
+- [x] Fix: pin `ledger-v7` to exact `7.0.0` — prevents duplicate WASM modules in global install (instanceof DustParameters failure)
+- [x] Fix: explicit `process.exit(0)` for facade commands — SDK WebSockets keep event loop alive after `facade.stop()`
+
+## Phase 5b: Write Command Tests
+- [x] `transfer-lib.test.ts` — nightToMicro(), parseAmount(), validateRecipientAddress() (19 tests)
+- [x] `airdrop-command.test.ts` — argument validation, network restriction (8 tests)
+- [x] `transfer-command.test.ts` — argument/address validation (7 tests)
+- [x] `dust-command.test.ts` — subcommand validation (4 tests)
+- [x] Updated `help.test.ts` — new command help specs (3 new tests)
 
 ## Phase 6: Install + Verify
-- [ ] npm install and resolve any dependency issues
+- [x] npm install -g — resolved ledger-v7 deduplication issue
 - [ ] typecheck passes (`npm run typecheck`)
-- [ ] All unit tests pass (`npm test`)
-- [ ] Manual test: generate → info → balance → transfer flow
+- [x] All unit tests pass (`npm test`) — 293 tests
+- [x] Manual test: airdrop flow verified on local devnet
 
 ## Future (not in scope now)
 - [ ] `--json` output flag for machine-readable output

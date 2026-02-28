@@ -24,6 +24,19 @@ if (hasFlag(args, 'help') || hasFlag(args, 'h')) {
 // Default to help when no command given
 const command = args.command ?? 'help';
 
+// Global AbortController for clean shutdown on SIGINT/SIGTERM
+const abortController = new AbortController();
+const { signal } = abortController;
+
+function handleShutdown() {
+  abortController.abort();
+  // Give active operations a moment to clean up, then force exit
+  setTimeout(() => process.exit(130), 5_000).unref();
+}
+
+process.on('SIGINT', handleShutdown);
+process.on('SIGTERM', handleShutdown);
+
 async function run(): Promise<void> {
   switch (command) {
     case 'help': {
@@ -58,6 +71,18 @@ async function run(): Promise<void> {
       const { default: handler } = await import('./commands/config.ts');
       return handler(args);
     }
+    case 'airdrop': {
+      const { default: handler } = await import('./commands/airdrop.ts');
+      return handler(args, signal);
+    }
+    case 'transfer': {
+      const { default: handler } = await import('./commands/transfer.ts');
+      return handler(args, signal);
+    }
+    case 'dust': {
+      const { default: handler } = await import('./commands/dust.ts');
+      return handler(args, signal);
+    }
     default:
       throw new Error(
         `Unknown command: "${command}"\n` +
@@ -66,7 +91,15 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err: Error) => {
+// Commands that start a WalletFacade leave WebSocket connections in the event loop.
+// facade.stop() doesn't fully drain them, so we must exit explicitly.
+const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust']);
+
+run().then(() => {
+  if (FACADE_COMMANDS.has(command)) {
+    process.exit(0);
+  }
+}).catch((err: Error) => {
   process.stderr.write('\n' + errorBox(err.message, 'Run "midnight help" for usage information.') + '\n\n');
   process.exit(1);
 });

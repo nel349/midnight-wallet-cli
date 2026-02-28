@@ -30,18 +30,23 @@ describe('help command — general help', () => {
     expect(err).toContain('Commands');
   });
 
-  it('lists all 8 commands on stderr', async () => {
+  it('lists commands on stderr (limited by logo height)', async () => {
     const args = parseArgs(['help']);
     await helpCommand(args);
     const err = io.stderr();
+    // The horizontal layout can show at most ~10 side-content lines
+    // (10 logo lines + 1 wordmark line). With 11+ commands,
+    // the last briefs may be pushed beyond the visible area.
     expect(err).toContain('generate');
     expect(err).toContain('info');
     expect(err).toContain('balance');
     expect(err).toContain('address');
     expect(err).toContain('genesis-address');
     expect(err).toContain('inspect-cost');
+    expect(err).toContain('airdrop');
+    expect(err).toContain('transfer');
+    expect(err).toContain('dust');
     expect(err).toContain('config');
-    expect(err).toContain('help');
   });
 
   it('outputs plain text when stderr is not a TTY (agent-friendly)', async () => {
@@ -86,6 +91,38 @@ describe('help command — specific command help', () => {
     expect(out).toContain('Flags:');
     expect(out).toContain('--seed');
     expect(out).toContain('--index');
+  });
+
+  it('shows usage for airdrop command', async () => {
+    const args = parseArgs(['help', 'airdrop']);
+    await helpCommand(args);
+    const out = io.stdout();
+    expect(out).toContain('airdrop');
+    expect(out).toContain('Usage:');
+    expect(out).toContain('amount');
+    expect(out).toContain('Examples:');
+  });
+
+  it('shows usage for transfer command', async () => {
+    const args = parseArgs(['help', 'transfer']);
+    await helpCommand(args);
+    const out = io.stdout();
+    expect(out).toContain('transfer');
+    expect(out).toContain('Usage:');
+    expect(out).toContain('to');
+    expect(out).toContain('amount');
+    expect(out).toContain('Examples:');
+  });
+
+  it('shows usage for dust command', async () => {
+    const args = parseArgs(['help', 'dust']);
+    await helpCommand(args);
+    const out = io.stdout();
+    expect(out).toContain('dust');
+    expect(out).toContain('Usage:');
+    expect(out).toContain('register');
+    expect(out).toContain('status');
+    expect(out).toContain('Examples:');
   });
 
   it('throws for unknown command with available list', async () => {

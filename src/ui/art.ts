@@ -24,6 +24,9 @@ export const COMMAND_BRIEFS: [name: string, brief: string][] = [
   ['address',         'Derive address from seed'],
   ['genesis-address', 'Show genesis address'],
   ['inspect-cost',    'Display block limits'],
+  ['airdrop',         'Fund from genesis wallet'],
+  ['transfer',        'Send NIGHT tokens'],
+  ['dust',            'Manage dust (fee tokens)'],
   ['config',          'Manage CLI config'],
   ['help',            'Show command usage'],
 ];
