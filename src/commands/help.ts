@@ -150,6 +150,26 @@ const COMMAND_SPECS: CommandSpec[] = [
     ],
   },
   {
+    name: 'localnet',
+    description: 'Manage a local Midnight network via Docker Compose',
+    usage: 'midnight localnet <up|stop|down|status|logs|clean>',
+    flags: [
+      'up              Start the local network (node, indexer, proof server)',
+      'stop            Stop containers (preserves state for fast restart)',
+      'down            Remove containers, networks, and volumes (full teardown)',
+      'status          Show service status and ports',
+      'logs            Stream service logs (Ctrl+C to stop)',
+      'clean           Remove conflicting containers from other setups',
+    ],
+    examples: [
+      'midnight localnet up',
+      'midnight localnet stop',
+      'midnight localnet status',
+      'midnight localnet down',
+      'midnight localnet clean',
+    ],
+  },
+  {
     name: 'help',
     description: 'Show usage for all commands or a specific command',
     usage: 'midnight help [command]',

@@ -96,6 +96,13 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
     process.stderr.write(dim('  Verify: midnight balance') + '\n\n');
   } catch (err) {
     spinner.stop('Failed');
+    if (err instanceof Error && err.message.toLowerCase().includes('dust')) {
+      throw new Error(
+        `${err.message}\n\n` +
+        `On a fresh localnet, the minimum airdrop is ~1 NIGHT.\n` +
+        `Try: midnight airdrop 1`
+      );
+    }
     throw err;
   }
 }

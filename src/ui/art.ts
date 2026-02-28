@@ -28,6 +28,7 @@ export const COMMAND_BRIEFS: [name: string, brief: string][] = [
   ['transfer',        'Send NIGHT tokens'],
   ['dust',            'Manage dust (fee tokens)'],
   ['config',          'Manage CLI config'],
+  ['localnet',        'Manage local network'],
   ['help',            'Show command usage'],
 ];
 

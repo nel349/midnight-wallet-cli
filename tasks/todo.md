@@ -70,8 +70,8 @@
 
 ## Phase 6: Install + Verify
 - [x] npm install -g — resolved ledger-v7 deduplication issue
-- [ ] typecheck passes (`npm run typecheck`)
-- [x] All unit tests pass (`npm test`) — 293 tests
+- [x] typecheck passes (`npm run typecheck`)
+- [x] All unit tests pass (`npm test`) — 302 tests
 - [x] Manual test: airdrop flow verified on local devnet
 
 ## Future (not in scope now)

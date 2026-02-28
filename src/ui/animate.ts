@@ -40,6 +40,14 @@ export async function animateMaterialize(signal?: AbortSignal, sideContent?: str
     const wordmarkLine = `       ${WORDMARK}`;
     const footerSide = sideContent?.[logoLineCount] ?? '';
     process.stderr.write((footerSide ? wordmarkLine.padEnd(34) + footerSide : wordmarkLine) + '\n');
+    // Render any remaining side content below the logo
+    if (sideContent) {
+      for (let j = logoLineCount + 1; j < sideContent.length; j++) {
+        if (sideContent[j]) {
+          process.stderr.write(' '.repeat(34) + sideContent[j] + '\n');
+        }
+      }
+    }
     return;
   }
 
@@ -80,6 +88,15 @@ export async function animateMaterialize(signal?: AbortSignal, sideContent?: str
     await sleep(FRAME_MS, signal);
   }
   process.stderr.write('\n');
+
+  // Render any remaining side content below the logo/wordmark
+  if (sideContent) {
+    for (let j = logoLineCount + 1; j < sideContent.length; j++) {
+      if (sideContent[j]) {
+        process.stderr.write(`\x1b[35G${sideContent[j]}\x1b[K\n`);
+      }
+    }
+  }
 }
 
 // Sync animation: starfield dots with progress counter

@@ -83,6 +83,10 @@ async function run(): Promise<void> {
       const { default: handler } = await import('./commands/dust.ts');
       return handler(args, signal);
     }
+    case 'localnet': {
+      const { default: handler } = await import('./commands/localnet.ts');
+      return handler(args);
+    }
     default:
       throw new Error(
         `Unknown command: "${command}"\n` +

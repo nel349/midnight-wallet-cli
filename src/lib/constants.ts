@@ -37,3 +37,6 @@ export const DEFAULT_CONFIG_FILENAME = 'config.json';
 // File system permissions (POSIX octal)
 export const DIR_MODE = 0o700;   // owner rwx only — directories holding sensitive files
 export const FILE_MODE = 0o600;  // owner rw only — wallet files containing seeds/keys
+
+// Localnet directory name (under ~/.midnight/)
+export const LOCALNET_DIR_NAME = 'localnet';

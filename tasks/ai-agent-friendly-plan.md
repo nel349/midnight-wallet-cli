@@ -99,7 +99,20 @@ const ErrorCodes = {
 
 ## Pillar 2: DApp Connector — CLI as Wallet Server
 
-Implement the Midnight DApp Connector API (`@midnight-ntwrk/dapp-connector-api` v4.0.0) as a local server. Browser dApps connect to it; the user approves transactions in the terminal.
+Implement the Midnight DApp Connector API (`@midnight-ntwrk/dapp-connector-api` v4.0.1) as a local WebSocket server. Browser dApps connect to it; the user approves transactions in the terminal.
+
+Reference implementation: `/Users/norman/Development/midnight/midnight-libraries/midnight-dapp-connector-api`
+
+### Key Finding: Shielded Support Is NOT a Blocker
+
+The WalletFacade **already handles shielded operations internally**:
+- `buildFacade()` already instantiates `ShieldedWallet` with `ZswapSecretKeys`
+- `facade.transferTransaction()` natively accepts `type: 'shielded'` outputs
+- `facade.initSwap()` accepts shielded inputs/outputs
+- `facade.balanceUnboundTransaction()` handles shielded coin selection internally
+- `state.shielded.balances`, `.address`, `.coinPublicKey`, `.encryptionPublicKey` are all populated after sync
+
+We do NOT need new shielded transaction logic — just pass through `kind: 'shielded'` from the DApp connector to the facade.
 
 ### New Command: `midnight serve`
 
@@ -133,33 +146,71 @@ Browser DApp                          CLI Terminal
     │◄──── void ──────────────────────────┤
 ```
 
-### DApp Connector API Method Mapping
+### DApp Connector API v4.0.1 — Method-by-Method Gap Analysis
 
-**Auto-approved (read-only):**
+#### Read-Only Methods (9 methods) — All data exists in SDK
 
-| Method | Implementation |
-|--------|---------------|
-| `getUnshieldedAddress()` | Return from wallet.json |
-| `getUnshieldedBalances()` | GraphQL subscription (existing balance-subscription.ts) |
-| `getDustBalance()` | WalletFacade state |
-| `getDustAddress()` | Derive from seed |
-| `getShieldedAddresses()` | Derive from seed |
-| `getShieldedBalances()` | WalletFacade state (future) |
-| `getConfiguration()` | Return network config (indexer, node, proof server URIs) |
-| `getConnectionStatus()` | Return connected/disconnected |
-| `getTxHistory(page, size)` | WalletFacade state |
+| Method | Return Type | SDK Source | Current CLI Status | Gap |
+|--------|-------------|------------|-------------------|-----|
+| `getUnshieldedBalances()` | `Record<TokenType, bigint>` | `state.unshielded.balances` | `balance` command | None |
+| `getUnshieldedAddress()` | `{ unshieldedAddress }` | `state.unshielded.address` | `address` command | None |
+| `getShieldedBalances()` | `Record<TokenType, bigint>` | `state.shielded.balances` | Not exposed | Read from FacadeState (data already there) |
+| `getShieldedAddresses()` | `{ shieldedAddress, shieldedCoinPublicKey, shieldedEncryptionPublicKey }` | ShieldedWalletState fields | Not exposed | Read 3 fields from state |
+| `getDustBalance()` | `{ cap: bigint, balance: bigint }` | `state.dust.walletBalance(date)` + `availableCoinsWithFullInfo()` for cap | `dust status` (balance only) | Need to compute `cap` from dust generation details |
+| `getDustAddress()` | `{ dustAddress }` | `state.dust.dustAddress` | Not exposed | Single field read |
+| `getTxHistory(page, size)` | `HistoryEntry[]` | `state.unshielded.transactionHistory` (TransactionHistoryService) | Not exposed | Need to investigate pagination on TransactionHistoryService |
+| `getConfiguration()` | `Configuration` | NetworkConfig has all URIs | `config`/`info` commands | Map our NetworkConfig → `{ indexerUri, indexerWsUri, proverServerUri, substrateNodeUri, networkId }` |
+| `getConnectionStatus()` | `ConnectionStatus` | `state.isSynced` | Not exposed | Track connected/disconnected in serve command |
 
-**Requires terminal approval:**
+#### Write Methods (7 methods) — Most have SDK backing
 
-| Method | Implementation |
-|--------|---------------|
-| `makeTransfer(outputs)` | Show amounts/recipients → approve → build tx via WalletFacade → prove → return |
-| `balanceUnsealedTransaction(tx)` | Show tx summary → approve → balance via WalletFacade → return |
-| `balanceSealedTransaction(tx)` | Show tx summary → approve → balance via WalletFacade → return |
-| `makeIntent(inputs, outputs)` | Show swap details → approve → create intent → return |
-| `signData(data, opts)` | Show data being signed → approve → sign → return |
-| `submitTransaction(tx)` | Submit to node (no additional approval if tx already approved) |
-| `hintUsage(methods)` | Show permissions summary → approve/configure |
+| Method | DApp Sends | SDK Method | Gap |
+|--------|-----------|------------|-----|
+| `makeTransfer(outputs, opts?)` | `DesiredOutput[]` with `kind`, `type`, `value`, `recipient` | `facade.transferTransaction()` → sign → finalize → serialize | Return serialized tx hex instead of submitting (existing transfer pipeline, different exit path) |
+| `submitTransaction(tx)` | Hex-encoded `FinalizedTransaction` | `facade.submitTransaction()` | Deserialize hex → `Transaction.deserialize('signature', 'proof', 'binding', bytes)` → submit |
+| `balanceUnsealedTransaction(tx, opts?)` | Hex-encoded `Transaction<SignatureEnabled, Proof, PreBinding>` (= `UnboundTransaction` in facade) | `facade.balanceUnboundTransaction()` → sign → finalize → serialize | Deserialize, balance, sign, finalize, serialize back |
+| `balanceSealedTransaction(tx, opts?)` | Hex-encoded `Transaction<SignatureEnabled, Proof, Binding>` (= `FinalizedTransaction`) | `facade.balanceFinalizedTransaction()` → sign → finalize → serialize | Same pattern with FinalizedTransaction |
+| `makeIntent(inputs, outputs, opts)` | `DesiredInput[]` + `DesiredOutput[]` + `{ intentId, payFees }` | `facade.initSwap()` → sign → finalize → serialize | New — build swap recipe → sign → finalize → serialize |
+| `signData(data, opts)` | String data + `{ encoding: 'hex'\|'base64'\|'text', keyType: 'unshielded' }` | `keystore.signData(payload)` | Handle encoding conversion, prepend data prefix, return `{ data, signature, verifyingKey }` |
+| `getProvingProvider(keyMaterialProvider)` | `KeyMaterialProvider` with `getZKIR`, `getProverKey`, `getVerifierKey` | Proof server URL configured per network | Bridge KeyMaterialProvider to ledger ProvingProvider via proof server (most complex gap) |
+
+#### Permission Method (1 method)
+
+| Method | Gap |
+|--------|-----|
+| `hintUsage(methodNames)` | Terminal prompt: "DApp wants to use: makeTransfer, getBalances. Allow? [Y/n]". Resolve promise after user grants. |
+
+### Transaction Serialization (Critical Infrastructure)
+
+DApp Connector API passes transactions as hex-encoded serialized bytes. The ledger provides:
+
+```
+// Serialize:   toHex(tx.serialize())                    → hex string
+// Deserialize: Transaction.deserialize(S, P, B, bytes)  → typed Transaction
+
+// Type markers per transaction kind:
+//   Unsealed (UnboundTransaction):     'signature', 'proof', 'pre-binding'
+//   Sealed (FinalizedTransaction):     'signature', 'proof', 'binding'
+//   Unproven (UnprovenTransaction):    'signature', 'pre-proof', 'pre-binding'
+```
+
+Confirmed by bboard and zkloan examples in midnight-libraries (see BrowserDeployedBoardManager.ts, ZKLoanContext.tsx).
+
+### Error Handling
+
+DApp Connector errors use a tagged error type (not class-based — no `instanceof`):
+
+```
+ErrorCodes: InternalError | Rejected | InvalidRequest | PermissionRejected | Disconnected
+
+APIError = Error & {
+  type: 'DAppConnectorAPIError';
+  code: ErrorCode;
+  reason: string;
+}
+
+// Detection: error.type === 'DAppConnectorAPIError'
+```
 
 ### Transport Layer
 
@@ -185,7 +236,7 @@ The DApp Connector spec uses `window.midnight` injection (browser extension mode
 
 ### WebSocket Protocol (Phase 1)
 
-```typescript
+```
 // Client → Server
 { "jsonrpc": "2.0", "id": 1, "method": "connect", "params": { "networkId": "undeployed" } }
 
@@ -208,6 +259,8 @@ The DApp Connector spec uses `window.midnight` injection (browser extension mode
 
 // Error (user rejected)
 { "jsonrpc": "2.0", "id": 3, "error": { "code": -32000, "message": "Rejected", "data": { "type": "DAppConnectorAPIError", "code": "Rejected" } } }
+
+// Note: bigint values serialized as strings in JSON-RPC (JSON has no bigint)
 ```
 
 ### Terminal Approval UI
@@ -230,14 +283,38 @@ Using native `readline` (per project constraints — no inquirer):
 └─────────────────────────────────────────┘
 ```
 
+### Implementation Steps (dependency order)
+
+| Step | Files | What | Depends On |
+|------|-------|------|------------|
+| 1 | `src/lib/tx-serde.ts` | Hex ↔ transaction serialization helpers (toHex/fromHex + typed deserialize wrappers) | Nothing |
+| 2 | `src/lib/errors.ts` | APIError factory matching DApp Connector error codes | Nothing |
+| 3 | `src/lib/dapp-connector.ts` | WalletConnectedAPI implementation — read-only methods first (balances, addresses, config, history) | Step 1 |
+| 4 | `src/lib/dapp-connector.ts` | Write methods: makeTransfer, balanceUnsealed/Sealed, submitTransaction, signData | Steps 1-3 |
+| 5 | `src/lib/dapp-connector.ts` | makeIntent + getProvingProvider | Step 4 |
+| 6 | `src/lib/approval.ts` | Terminal readline prompts (approve/reject/details) for write operations | Nothing |
+| 7 | `src/lib/ws-rpc.ts` | JSON-RPC over WebSocket server (`ws` already in deps) | Nothing |
+| 8 | `src/commands/serve.ts` | Entry point: facade lifecycle + WS server + approval flow + connection management | Steps 2-7 |
+| 9 | Integration test | Test against bboard or counter example DApp from midnight-libraries | Step 8 |
+
 ### New Files
 
 ```
-src/commands/serve.ts          — entry point, WS server setup, connection management
+src/lib/tx-serde.ts            — hex ↔ ledger Transaction serialization/deserialization
+src/lib/errors.ts              — DApp Connector APIError factory + CLI error codes
 src/lib/dapp-connector.ts      — ConnectedAPI implementation backed by WalletFacade
-src/lib/approval.ts            — terminal prompts for transaction approval
+src/lib/approval.ts            — terminal prompts for transaction approval (readline)
 src/lib/ws-rpc.ts              — JSON-RPC over WebSocket transport
+src/commands/serve.ts          — entry point, WS server setup, connection management
 ```
+
+### What We Do NOT Need to Build
+
+- **New shielded transaction code** — WalletFacade already coordinates shielded+unshielded+dust
+- **New SDK dependencies** — `ws`, all wallet-sdk packages, `ledger-v7` already installed
+- **Standalone shielded CLI commands** — useful later but not blocking for DApp connector
+- **Pillar 1 (`--json`/`--quiet`)** — independent, can be done before or after
+- **Pillar 3 (x402)** — completely independent
 
 ---
 
@@ -360,18 +437,22 @@ src/lib/x402.ts                — PaymentRequirements parsing, payload construc
 
 ## Implementation Priority
 
-| Phase | Items | Effort |
-|-------|-------|--------|
-| **Phase 1** | `--json` flag on all commands | 1-2 days |
-| **Phase 1** | `--quiet` flag + structured exit codes | 0.5 day |
-| **Phase 1** | `lib/errors.ts` with error code constants | 0.5 day |
-| **Phase 2** | `midnight serve` (local WS, DApp connector) | 1-2 weeks |
-| **Phase 2** | Terminal approval UI (readline prompts) | 1 week |
-| **Phase 2** | JSON-RPC protocol over WebSocket | 1 week |
-| **Phase 3** | `midnight x402-pay` (HTTP 402 client) | 1 week |
-| **Phase 3** | `midnight x402-serve` (facilitator) | 1 week |
-| **Phase 4** | Companion browser extension (window.midnight bridge) | 1-2 weeks |
-| **Phase 4** | Remote relay / WalletConnect-style pairing | 1 week |
+| Phase | Items | Depends On |
+|-------|-------|------------|
+| **Phase 1a** | `lib/errors.ts` — CLI error codes + DApp Connector APIError factory | Nothing |
+| **Phase 1b** | `--json` flag on all commands | Phase 1a |
+| **Phase 1c** | `--quiet` flag + structured exit codes | Phase 1a |
+| **Phase 2a** | `lib/tx-serde.ts` — transaction hex serialization helpers | Nothing |
+| **Phase 2b** | `lib/dapp-connector.ts` — read-only methods (balances, addresses, config, history) | Phase 2a |
+| **Phase 2c** | `lib/dapp-connector.ts` — write methods (makeTransfer, balance*, submit, signData) | Phase 2a, 2b |
+| **Phase 2d** | `lib/dapp-connector.ts` — makeIntent + getProvingProvider | Phase 2c |
+| **Phase 2e** | `lib/approval.ts` — terminal approval prompts (readline) | Nothing |
+| **Phase 2f** | `lib/ws-rpc.ts` — JSON-RPC over WebSocket server | Nothing |
+| **Phase 2g** | `commands/serve.ts` — `midnight serve` entry point | Phase 1a, 2b-2f |
+| **Phase 2h** | Integration test against bboard/counter example DApp | Phase 2g |
+| **Phase 3** | `midnight x402-pay` + `midnight x402-serve` | Phase 2c |
+| **Phase 4a** | Companion browser extension (window.midnight bridge) | Phase 2g |
+| **Phase 4b** | Remote relay / WalletConnect-style pairing | Phase 2g |
 
 ---
 
@@ -389,7 +470,12 @@ Alongside the above, add:
 
 ## References
 
-- Midnight DApp Connector API v4: https://github.com/midnightntwrk/midnight-dapp-connector-api
+- Midnight DApp Connector API v4.0.1: `/Users/norman/Development/midnight/midnight-libraries/midnight-dapp-connector-api`
+- BBoard example (balanceUnsealedTransaction usage): `/Users/norman/Development/midnight/midnight-libraries/example-bboard/bboard-ui/src/contexts/BrowserDeployedBoardManager.ts`
+- ZKLoan example (wallet connect + balance flow): `/Users/norman/Development/midnight/midnight-libraries/zkloan-credit-scorer/zkloan-credit-scorer-ui/src/contexts/ZKLoanContext.tsx`
+- React wallet connect guide: `/Users/norman/Development/midnight/midnight-libraries/midnight-docs/docs/guides/react-wallet-connect.mdx`
+- WalletFacade types: `node_modules/@midnight-ntwrk/wallet-sdk-facade/dist/index.d.ts`
+- Ledger Transaction class (serialize/deserialize): `node_modules/@midnight-ntwrk/ledger-v7/ledger-v7.d.ts` line 2181
 - x402 Protocol Spec: https://x402.org / https://github.com/coinbase/x402
 - x402 Cardano Examples: https://github.com/masumi-network/x402-cardano-examples
 - Cardano CIP-30 (DApp Connector inspiration): https://cips.cardano.org/cip/CIP-30
