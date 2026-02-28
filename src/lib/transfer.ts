@@ -7,7 +7,7 @@ import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
 import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
-import { type FacadeBundle, buildFacade, startAndSyncFacade, quickSync, stopFacade } from './facade.ts';
+import { type FacadeBundle, buildFacade, startAndSyncFacade, quickSync, stopFacade, suppressSdkTransientErrors } from './facade.ts';
 import {
   NATIVE_TOKEN_TYPE,
   TOKEN_MULTIPLIER,
@@ -34,6 +34,7 @@ export interface TransferParams {
   onDust?: (status: string) => void;
   onProving?: () => void;
   onSubmitting?: () => void;
+  onSyncWarning?: (tag: string, message: string) => void;
 }
 
 export interface TransferResult {
@@ -237,12 +238,16 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     onDust,
     onProving,
     onSubmitting,
+    onSyncWarning,
   } = params;
 
   const amount = nightToMicro(amountNight);
 
   // Validate recipient address
   validateRecipientAddress(recipientAddress, networkConfig);
+
+  // Suppress known transient SDK errors (Wallet.Sync: Internal Server Error, etc.)
+  const unsuppress = suppressSdkTransientErrors(onSyncWarning);
 
   // Build facade
   const bundle = buildFacade(seedBuffer, networkConfig);
@@ -298,6 +303,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     return { txHash, amountMicroNight: amount };
   } finally {
     signal?.removeEventListener('abort', onAbort);
+    unsuppress();
     await cleanup();
   }
 }

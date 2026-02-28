@@ -7,7 +7,7 @@ import * as rx from 'rxjs';
 import { type ParsedArgs, getFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, type FacadeBundle } from '../lib/facade.ts';
+import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
 import { DUST_TIMEOUT_MS, TOKEN_MULTIPLIER } from '../lib/constants.ts';
 import { header, keyValue, divider, formatNight, formatDust, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -46,27 +46,41 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   const onAbort = () => { cleanup(); };
   signal?.addEventListener('abort', onAbort, { once: true });
 
+  // Suppress known transient SDK errors (Wallet.Sync: Internal Server Error, etc.)
+  // The onWarning ref is updated by inner functions so warnings route to the active spinner
+  const warningRef: { current?: (tag: string, msg: string) => void } = {};
+  const unsuppress = suppressSdkTransientErrors((tag, msg) => {
+    warningRef.current?.(tag, msg);
+  });
+
   try {
     if (subcommand === 'register') {
-      await dustRegister(bundle, networkName, signal);
+      await dustRegister(bundle, networkName, signal, warningRef);
     } else {
-      await dustStatus(bundle, networkName, signal);
+      await dustStatus(bundle, networkName, signal, warningRef);
     }
   } finally {
     signal?.removeEventListener('abort', onAbort);
+    unsuppress();
     await cleanup();
   }
 }
+
+type WarningRef = { current?: (tag: string, msg: string) => void };
 
 async function dustRegister(
   bundle: FacadeBundle,
   networkName: string,
   signal?: AbortSignal,
+  warningRef?: WarningRef,
 ): Promise<void> {
   process.stderr.write('\n' + header('Dust Register') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n\n');
 
   const spinner = startSpinner('Syncing wallet...');
+  if (warningRef) {
+    warningRef.current = (_tag, msg) => spinner.update(`Syncing wallet... (${msg}, retrying)`);
+  }
 
   try {
     await startAndSyncFacade(bundle, (applied, highest) => {
@@ -144,11 +158,15 @@ async function dustStatus(
   bundle: FacadeBundle,
   networkName: string,
   signal?: AbortSignal,
+  warningRef?: WarningRef,
 ): Promise<void> {
   process.stderr.write('\n' + header('Dust Status') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n\n');
 
   const spinner = startSpinner('Syncing wallet...');
+  if (warningRef) {
+    warningRef.current = (_tag, msg) => spinner.update(`Syncing wallet... (${msg}, retrying)`);
+  }
 
   try {
     await startAndSyncFacade(bundle, (applied, highest) => {

@@ -76,6 +76,9 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
       onSubmitting() {
         spinner.update('Submitting transaction...');
       },
+      onSyncWarning(_tag, msg) {
+        spinner.update(`Syncing wallet... (${msg}, retrying)`);
+      },
     });
 
     spinner.stop('Transaction submitted');

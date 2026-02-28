@@ -145,3 +145,31 @@ export async function quickSync(bundle: FacadeBundle): Promise<FacadeState> {
 export async function stopFacade(bundle: FacadeBundle): Promise<void> {
   await bundle.facade.stop();
 }
+
+/**
+ * Suppress known transient SDK errors (e.g. Wallet.Sync: Internal Server Error)
+ * that leak as unhandled promise rejections during facade operations.
+ * The SDK retries internally — these are safe to suppress.
+ *
+ * Returns a cleanup function to remove the handler.
+ */
+export function suppressSdkTransientErrors(
+  onWarning?: (tag: string, message: string) => void,
+): () => void {
+  const handler = (reason: unknown) => {
+    const tag = (reason as any)?._tag;
+    if (typeof tag === 'string' && tag.startsWith('Wallet.')) {
+      const msg = (reason as any)?.message ?? 'transient error';
+      onWarning?.(tag, msg);
+      return;
+    }
+    // Not a known SDK error — mimic Node's default unhandled rejection behavior
+    console.error('Unhandled rejection:', reason);
+    process.exit(1);
+  };
+
+  process.on('unhandledRejection', handler);
+  return () => {
+    process.removeListener('unhandledRejection', handler);
+  };
+}

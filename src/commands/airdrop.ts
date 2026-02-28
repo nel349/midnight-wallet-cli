@@ -77,6 +77,9 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
       onSubmitting() {
         spinner.update('Submitting transaction...');
       },
+      onSyncWarning(_tag, msg) {
+        spinner.update(`Syncing genesis wallet... (${msg}, retrying)`);
+      },
     });
 
     spinner.stop('Transaction submitted');
