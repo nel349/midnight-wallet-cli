@@ -8,7 +8,7 @@ import { join } from 'path';
 import { MIDNIGHT_DIR, LOCALNET_DIR_NAME, DIR_MODE } from './constants.ts';
 
 // Version tag — bump when compose content changes so stale files get overwritten
-export const COMPOSE_VERSION = '1.2.0';
+export const COMPOSE_VERSION = '1.4.0';
 
 export const LOCALNET_DIR = join(homedir(), MIDNIGHT_DIR, LOCALNET_DIR_NAME);
 const COMPOSE_PATH = join(LOCALNET_DIR, 'compose.yml');

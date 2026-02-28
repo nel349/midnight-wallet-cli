@@ -9,7 +9,7 @@ export const TOKEN_DECIMALS = 6;
 export const TOKEN_MULTIPLIER = 1_000_000;
 
 // Dust wallet cost parameters
-export const DUST_COST_OVERHEAD = 300_000_000_000_000n;
+export const DUST_COST_OVERHEAD = 300_000_000_000_000_000n;
 export const DUST_FEE_BLOCKS_MARGIN = 5;
 
 // Timeouts (milliseconds)
