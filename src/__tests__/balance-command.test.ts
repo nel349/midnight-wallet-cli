@@ -9,6 +9,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+// Tests that connect to the local indexer require Docker (midnight localnet up).
+// GitHub Actions sets CI=true — skip integration tests there.
+const HAS_INDEXER = !process.env.CI;
+
 const TEST_DIR = path.join(os.tmpdir(), `midnight-balance-cmd-test-${process.pid}`);
 
 // Derive real valid addresses for testing against the local undeployed indexer
@@ -40,7 +44,7 @@ describe('balance command — address resolution errors', () => {
   });
 });
 
-describe('balance command — reads address from wallet file', () => {
+describe.skipIf(!HAS_INDEXER)('balance command — reads address from wallet file', () => {
   it('loads address from wallet file and queries local indexer', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
@@ -63,7 +67,7 @@ describe('balance command — reads address from wallet file', () => {
   });
 });
 
-describe('balance command — positional address with local indexer', () => {
+describe.skipIf(!HAS_INDEXER)('balance command — positional address with local indexer', () => {
   it('checks balance for the genesis address on undeployed', async () => {
     const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'undeployed']);
     await balanceCommand(args);
@@ -117,7 +121,7 @@ describe('balance command — --indexer-ws override', () => {
   });
 });
 
-describe('balance command — JSON output', () => {
+describe.skipIf(!HAS_INDEXER)('balance command — JSON output', () => {
   it('outputs valid JSON with all expected fields', async () => {
     const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'undeployed', '--json']);
     await balanceCommand(args);
@@ -159,7 +163,7 @@ describe('balance command — JSON output', () => {
   });
 });
 
-describe('balance command — spinner lifecycle', () => {
+describe.skipIf(!HAS_INDEXER)('balance command — spinner lifecycle', () => {
   it('shows syncing progress on stderr for successful check', async () => {
     const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'undeployed']);
     await balanceCommand(args);
