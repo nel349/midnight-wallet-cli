@@ -14,12 +14,32 @@ export function suppressStderr(): () => void {
   return () => { process.stderr.write = original; };
 }
 
+// ── Capture target ───────────────────────────────────────
+// When set, writeJsonResult sends output to this callback instead of stdout.
+// Used by captureCommand (MCP server) to avoid hijacking process.stdout.write,
+// which would conflict with StdioServerTransport.
+let captureTarget: ((json: string) => void) | null = null;
+
+/**
+ * Redirect writeJsonResult output to a callback instead of stdout.
+ * Pass null to restore normal stdout behavior.
+ */
+export function setCaptureTarget(fn: ((json: string) => void) | null): void {
+  captureTarget = fn;
+}
+
 /**
  * Write a structured JSON result to stdout.
  * Always outputs a single line of JSON followed by a newline.
+ * If a capture target is set, output goes there instead.
  */
 export function writeJsonResult(data: Record<string, unknown>): void {
-  process.stdout.write(JSON.stringify(data) + '\n');
+  const json = JSON.stringify(data) + '\n';
+  if (captureTarget) {
+    captureTarget(json);
+  } else {
+    process.stdout.write(json);
+  }
 }
 
 /**

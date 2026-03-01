@@ -117,6 +117,48 @@ describe('balance command — --indexer-ws override', () => {
   });
 });
 
+describe('balance command — JSON output', () => {
+  it('outputs valid JSON with all expected fields', async () => {
+    const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'undeployed', '--json']);
+    await balanceCommand(args);
+
+    const data = JSON.parse(io.stdout().trim());
+    expect(data.address).toBe(GENESIS_UNDEPLOYED_ADDRESS);
+    expect(data.network).toBe('undeployed');
+    expect(data.balances).toBeDefined();
+    expect(typeof data.utxoCount).toBe('number');
+    expect(typeof data.txCount).toBe('number');
+  });
+
+  it('reports NIGHT balance in NIGHT units (not micro-NIGHT)', async () => {
+    const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'undeployed', '--json']);
+    await balanceCommand(args);
+
+    const data = JSON.parse(io.stdout().trim());
+    const nightBalance = data.balances.NIGHT;
+    if (nightBalance) {
+      // Should contain a decimal point (NIGHT format), not raw micro-NIGHT
+      expect(nightBalance).toContain('.');
+      // Should have exactly 6 decimal places
+      const decimals = nightBalance.split('.')[1];
+      expect(decimals.length).toBe(6);
+    }
+  });
+
+  it('does not write formatted headers/tables to stderr in JSON mode', async () => {
+    // Note: spinner output still goes to stderr at the command level.
+    // Full stderr suppression happens globally in wallet.ts entry point.
+    const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'undeployed', '--json']);
+    await balanceCommand(args);
+    const err = io.stderr();
+    // Should NOT contain formatted output (headers, key-value pairs, dividers)
+    expect(err).not.toContain('Balance');
+    expect(err).not.toContain('Address');
+    expect(err).not.toContain('UTXOs');
+    expect(err).not.toContain('─');
+  });
+});
+
 describe('balance command — spinner lifecycle', () => {
   it('shows syncing progress on stderr for successful check', async () => {
     const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'undeployed']);

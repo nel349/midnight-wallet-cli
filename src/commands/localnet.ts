@@ -81,7 +81,7 @@ async function handleUp(jsonMode: boolean): Promise<void> {
   if (jsonMode) {
     writeJsonResult({
       subcommand: 'up',
-      services: services.map(s => ({ name: s.name, state: s.state, port: s.port })),
+      services: services.map(s => ({ name: s.name, state: s.state, port: s.port, health: s.health })),
     });
     return;
   }
@@ -106,6 +106,7 @@ async function handleStop(jsonMode: boolean): Promise<void> {
     spinner.stop('Local network stopped (containers preserved)');
     if (jsonMode) {
       writeJsonResult({ subcommand: 'stop', status: 'stopped' });
+      return;
     }
   } catch (err) {
     spinner.stop(red('Failed to stop local network'));
@@ -121,6 +122,7 @@ async function handleDown(jsonMode: boolean): Promise<void> {
     spinner.stop('Local network removed (containers, networks, volumes)');
     if (jsonMode) {
       writeJsonResult({ subcommand: 'down', status: 'removed' });
+      return;
     }
   } catch (err) {
     spinner.stop(red('Failed to tear down local network'));
@@ -174,6 +176,7 @@ async function handleClean(jsonMode: boolean): Promise<void> {
 
     if (jsonMode) {
       writeJsonResult({ subcommand: 'clean', status: 'cleaned', removed });
+      return;
     }
   } catch (err) {
     spinner.stop(red('Failed to clean up'));

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   header, divider, keyValue,
-  formatNight, formatDust, formatAddress,
+  toNight, formatNight, toDust, formatDust, formatAddress,
   box, errorBox, successMessage,
 } from '../ui/format.ts';
 
@@ -16,6 +16,42 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.NO_COLOR;
   Object.assign(process.env, originalEnv);
+});
+
+describe('toNight', () => {
+  it('converts zero', () => {
+    expect(toNight(0n)).toBe('0.000000');
+  });
+
+  it('converts whole NIGHT amounts', () => {
+    expect(toNight(1_000_000n)).toBe('1.000000');
+  });
+
+  it('converts fractional amounts', () => {
+    expect(toNight(1_500_000n)).toBe('1.500000');
+  });
+
+  it('converts micro amounts', () => {
+    expect(toNight(1n)).toBe('0.000001');
+  });
+
+  it('converts large values', () => {
+    expect(toNight(504_850_000_000_000n)).toBe('504850000.000000');
+  });
+
+  it('converts negative values', () => {
+    expect(toNight(-1_500_000n)).toBe('-1.500000');
+  });
+
+  it('does not include NIGHT suffix', () => {
+    expect(toNight(1_000_000n)).not.toContain('NIGHT');
+  });
+});
+
+describe('formatNight uses toNight', () => {
+  it('formatNight appends NIGHT suffix to toNight value', () => {
+    expect(formatNight(1_500_000n)).toBe(toNight(1_500_000n) + ' NIGHT');
+  });
 });
 
 describe('formatNight', () => {
@@ -49,6 +85,38 @@ describe('formatNight', () => {
 
   it('handles negative values', () => {
     expect(formatNight(-1_500_000n)).toBe('-1.500000 NIGHT');
+  });
+});
+
+describe('toDust', () => {
+  it('converts zero', () => {
+    expect(toDust(0n)).toBe('0.000000');
+  });
+
+  it('converts 1 Speck (smallest unit)', () => {
+    expect(toDust(1n)).toBe('0.000000000000001');
+  });
+
+  it('converts whole DUST amounts', () => {
+    expect(toDust(1_000_000_000_000_000n)).toBe('1.000000');
+  });
+
+  it('converts fractional amounts', () => {
+    expect(toDust(500_000_000_000_000n)).toBe('0.500000');
+  });
+
+  it('converts negative values', () => {
+    expect(toDust(-1_000_000_000_000_000n)).toBe('-1.000000');
+  });
+
+  it('does not include DUST suffix', () => {
+    expect(toDust(1_000_000_000_000_000n)).not.toContain('DUST');
+  });
+});
+
+describe('formatDust uses toDust', () => {
+  it('formatDust appends DUST suffix to toDust value', () => {
+    expect(formatDust(500_000_000_000_000n)).toBe(toDust(500_000_000_000_000n) + ' DUST');
   });
 });
 

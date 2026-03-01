@@ -10,7 +10,7 @@ import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
 import { DUST_TIMEOUT_MS, TX_TTL_MINUTES } from '../lib/constants.ts';
-import { header, keyValue, divider, formatNight, formatDust, successMessage } from '../ui/format.ts';
+import { header, keyValue, divider, formatNight, formatDust, successMessage, toNight, toDust } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
@@ -108,7 +108,7 @@ async function dustRegister(
       const dustBal = state.dust.walletBalance(new Date());
       spinner.stop('Dust already available');
       if (jsonMode) {
-        writeJsonResult({ subcommand: 'register', dustBalance: dustBal.toString() });
+        writeJsonResult({ subcommand: 'register', dustBalance: toDust(dustBal) });
         return;
       }
       process.stdout.write(dustBal.toString() + '\n');
@@ -122,6 +122,8 @@ async function dustRegister(
     const nightUtxos = state.unshielded.availableCoins.filter(
       (coin: any) => coin.meta?.registeredForDustGeneration !== true
     );
+
+    let txHash: string | undefined;
 
     if (nightUtxos.length === 0) {
       spinner.update('All UTXOs already registered, waiting for dust generation...');
@@ -156,7 +158,7 @@ async function dustRegister(
       const signedTx = await bundle.facade.dust.addDustGenerationSignature(unprovenTx, signature);
 
       const finalized = await bundle.facade.finalizeTransaction(signedTx);
-      const txHash = await bundle.facade.submitTransaction(finalized);
+      txHash = await bundle.facade.submitTransaction(finalized);
       spinner.update(`Registration submitted (${txHash.slice(0, 12)}...), waiting for dust...`);
     }
 
@@ -176,7 +178,9 @@ async function dustRegister(
     spinner.stop('Dust registration complete');
 
     if (jsonMode) {
-      writeJsonResult({ subcommand: 'register', dustBalance: dustBal.toString() });
+      const result: Record<string, unknown> = { subcommand: 'register', dustBalance: toDust(dustBal) };
+      if (txHash) result.txHash = txHash;
+      writeJsonResult(result);
       return;
     }
 
@@ -236,10 +240,10 @@ async function dustStatus(
     if (jsonMode) {
       writeJsonResult({
         subcommand: 'status',
-        dustBalance: dustBalance.toString(),
+        dustBalance: toDust(dustBalance),
         registered: registeredCount,
         unregistered: unregisteredUtxos.length,
-        nightBalance: unshieldedBalance.toString(),
+        nightBalance: toNight(unshieldedBalance),
         dustAvailable: hasAvailableDust,
       });
       return;

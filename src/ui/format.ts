@@ -27,8 +27,8 @@ export function keyValue(key: string, value: string, padWidth: number = 16): str
   return `  ${gray(paddedKey)}${value}`;
 }
 
-// Format micro-NIGHT bigint to human-readable NIGHT with 6 decimal places
-export function formatNight(microNight: bigint): string {
+// Convert micro-NIGHT bigint to NIGHT string (no unit suffix, for JSON output)
+export function toNight(microNight: bigint): string {
   const isNegative = microNight < 0n;
   const abs = isNegative ? -microNight : microNight;
   const multiplier = BigInt(10 ** TOKEN_DECIMALS);
@@ -36,14 +36,19 @@ export function formatNight(microNight: bigint): string {
   const frac = abs % multiplier;
   const fracStr = frac.toString().padStart(TOKEN_DECIMALS, '0');
   const sign = isNegative ? '-' : '';
-  return `${sign}${whole}.${fracStr} NIGHT`;
+  return `${sign}${whole}.${fracStr}`;
 }
 
-// Format Specks bigint to human-readable DUST with 15 decimal places
+// Format micro-NIGHT bigint to human-readable NIGHT with 6 decimal places
+export function formatNight(microNight: bigint): string {
+  return `${toNight(microNight)} NIGHT`;
+}
+
+// Convert Specks bigint to DUST string (no unit suffix, for JSON output)
 // 1 DUST = 10^15 Specks (per midnight-ledger spec)
 const DUST_DECIMALS = 15;
 
-export function formatDust(specks: bigint): string {
+export function toDust(specks: bigint): string {
   const isNegative = specks < 0n;
   const abs = isNegative ? -specks : specks;
   const multiplier = 10n ** BigInt(DUST_DECIMALS);
@@ -53,7 +58,12 @@ export function formatDust(specks: bigint): string {
   const fracStr = frac.toString().padStart(DUST_DECIMALS, '0');
   const trimmed = fracStr.replace(/0+$/, '').padEnd(6, '0');
   const sign = isNegative ? '-' : '';
-  return `${sign}${whole}.${trimmed} DUST`;
+  return `${sign}${whole}.${trimmed}`;
+}
+
+// Format Specks bigint to human-readable DUST with suffix
+export function formatDust(specks: bigint): string {
+  return `${toDust(specks)} DUST`;
 }
 
 // Format address with optional truncation and teal coloring

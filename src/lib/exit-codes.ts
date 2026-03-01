@@ -35,17 +35,18 @@ interface ClassifiedError {
 /**
  * Inspect an error message to determine the appropriate exit code and error code.
  * Pattern-matches against known error messages from the CLI and Midnight SDK.
+ * Order matters: more specific patterns are checked before broader ones.
  */
 export function classifyError(err: Error): ClassifiedError {
-  const msg = err.message.toLowerCase();
+  const msg = (err.message ?? '').toLowerCase();
 
   // Cancelled by user (SIGINT / AbortController)
-  if (msg.includes('cancelled') || msg.includes('aborted')) {
+  if (msg.includes('operation cancelled') || msg.includes('operation aborted') || msg === 'cancelled' || msg === 'aborted') {
     return { exitCode: EXIT_CANCELLED, errorCode: ERROR_CODES.CANCELLED };
   }
 
   // Wallet file not found
-  if (msg.includes('wallet file not found') || msg.includes('wallet') && msg.includes('not found')) {
+  if (msg.includes('wallet file not found') || (msg.includes('wallet') && msg.includes('not found'))) {
     return { exitCode: EXIT_WALLET_NOT_FOUND, errorCode: ERROR_CODES.WALLET_NOT_FOUND };
   }
 
@@ -66,19 +67,19 @@ export function classifyError(err: Error): ClassifiedError {
     return { exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.INVALID_ARGS };
   }
 
-  // Dust required
-  if (msg.includes('dust')) {
-    return { exitCode: EXIT_INSUFFICIENT_BALANCE, errorCode: ERROR_CODES.DUST_REQUIRED };
+  // Proof timeout (before general timeout/dust checks)
+  if (msg.includes('proof') && msg.includes('timeout')) {
+    return { exitCode: EXIT_TX_REJECTED, errorCode: ERROR_CODES.PROOF_TIMEOUT };
   }
 
-  // Stale UTXO
-  if (msg.includes('stale') || msg.includes('115')) {
+  // Stale UTXO — match the specific error code from the Midnight node
+  if (msg.includes('stale utxo') || msg.includes('error code 115') || msg.includes('errorcode: 115')) {
     return { exitCode: EXIT_TX_REJECTED, errorCode: ERROR_CODES.STALE_UTXO };
   }
 
-  // Proof timeout
-  if (msg.includes('proof') && msg.includes('timeout')) {
-    return { exitCode: EXIT_TX_REJECTED, errorCode: ERROR_CODES.PROOF_TIMEOUT };
+  // Dust required — match specific dust-related failures
+  if (msg.includes('no dust') || msg.includes('dust') && (msg.includes('required') || msg.includes('available') || msg.includes('insufficient'))) {
+    return { exitCode: EXIT_INSUFFICIENT_BALANCE, errorCode: ERROR_CODES.DUST_REQUIRED };
   }
 
   // Insufficient balance
@@ -97,8 +98,8 @@ export function classifyError(err: Error): ClassifiedError {
     msg.includes('enotfound') ||
     msg.includes('etimedout') ||
     msg.includes('websocket') ||
-    msg.includes('connection') ||
-    msg.includes('network') && msg.includes('error')
+    msg.includes('connection refused') ||
+    (msg.includes('network') && msg.includes('error'))
   ) {
     return { exitCode: EXIT_NETWORK_ERROR, errorCode: ERROR_CODES.NETWORK_ERROR };
   }

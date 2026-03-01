@@ -5,14 +5,16 @@
   "description": "Git-style CLI wallet for the Midnight blockchain",
   "bin": {
     "midnight": "./dist/wallet.js",
-    "mn": "./dist/wallet.js"
+    "mn": "./dist/wallet.js",
+    "midnight-mcp": "./dist/mcp-server.js"
   },
   "files": [
     "dist"
   ],
   "scripts": {
     "wallet": "tsx src/wallet.ts",
-    "build": "bun build src/wallet.ts --outfile dist/wallet.js --target node --format esm --packages external --banner \"#!/usr/bin/env node\"",
+    "build": "bun build src/wallet.ts --outfile dist/wallet.js --target node --format esm --packages external --banner \"#!/usr/bin/env node\" && bun build src/mcp-server.ts --outfile dist/mcp-server.js --target node --format esm --packages external --banner \"#!/usr/bin/env node\"",
+    "mcp": "tsx src/mcp-server.ts",
     "prepublishOnly": "npm run build && npm run test",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -29,6 +31,7 @@
     "@midnight-ntwrk/wallet-sdk-hd": "3.0.0",
     "@midnight-ntwrk/wallet-sdk-shielded": "1.0.0",
     "@midnight-ntwrk/wallet-sdk-unshielded-wallet": "1.0.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@scure/bip39": "^2.0.1",
     "rxjs": "^7.8.1",
     "ws": "^8.19.0"

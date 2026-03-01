@@ -259,19 +259,21 @@ const COMMAND_SPECS: CommandSpec[] = [
   },
 ];
 
-// Build the right-side lines for the horizontal layout (indices 0-10)
+// Build the right-side lines for the horizontal layout
 function buildSideContent(): string[] {
   const lines: string[] = [];
   // Line 0: header
   lines.push(bold('Commands'));
-  // Lines 1-8: command briefs
+  // Lines 1-12: command briefs
   for (const [name, brief] of COMMAND_BRIEFS) {
     lines.push(`${teal(name.padEnd(18))}${brief}`);
   }
-  // Line 9: blank (alongside last logo line)
+  // Blank
   lines.push('');
-  // Line 10: footer (alongside wordmark)
+  // Footer
   lines.push(dim(`midnight (or mn) help <command>`));
+  lines.push(dim(`--json flag available on all commands`));
+  lines.push(dim(`midnight help --agent`) + dim(`  AI & MCP reference`));
   return lines;
 }
 
@@ -281,7 +283,9 @@ function printPlainHelp(): void {
   for (const [name, brief] of COMMAND_BRIEFS) {
     process.stderr.write(`  ${name.padEnd(18)}${brief}\n`);
   }
-  process.stderr.write('\n  Usage: midnight <command> (or: mn <command>)\n\n');
+  process.stderr.write('\n  Usage: midnight <command> (or: mn <command>)\n');
+  process.stderr.write('  --json flag available on all commands\n');
+  process.stderr.write('  midnight help --agent   AI & MCP reference\n\n');
 }
 
 function printCommandHelp(spec: CommandSpec): void {
@@ -338,7 +342,140 @@ function outputJsonManifest(): void {
   writeJsonResult(manifest);
 }
 
+function printAgentManual(): void {
+  const require = createRequire(import.meta.url);
+  const pkg = require('../../package.json');
+
+  const manual = `
+MIDNIGHT CLI — AI Agent & MCP Reference
+========================================
+
+Version: ${pkg.version}
+
+STRUCTURED JSON OUTPUT
+──────────────────────
+
+Every command supports the --json flag. When passed:
+  - stdout receives a single line of JSON
+  - stderr is fully suppressed (no spinners, no formatting)
+  - Errors produce JSON: {"error":true,"code":"...","message":"...","exitCode":N}
+
+Usage: midnight <command> [args] --json
+
+CAPABILITY MANIFEST
+───────────────────
+
+  midnight help --json
+
+Outputs a machine-readable JSON manifest containing all commands,
+their flags, examples, and expected JSON output fields. Use this
+for programmatic discovery of CLI capabilities.
+
+COMMANDS & JSON SCHEMAS
+───────────────────────
+${COMMAND_SPECS.filter(s => s.jsonFields).map(spec => {
+  const fields = Object.entries(spec.jsonFields!)
+    .map(([k, v]) => `    ${k.padEnd(20)}${v}`)
+    .join('\n');
+  return `
+  ${spec.name}
+  ${spec.usage}
+  JSON fields:
+${fields}`;
+}).join('\n')}
+
+ERROR CODES
+───────────
+
+When --json is active and an error occurs, the output is:
+  {"error":true,"code":"<CODE>","message":"...","exitCode":N}
+
+  Code                    Exit  Meaning
+  INVALID_ARGS            2     Missing or invalid arguments
+  WALLET_NOT_FOUND        3     Wallet file does not exist
+  NETWORK_ERROR           4     Connection refused, timeout, DNS failure
+  INSUFFICIENT_BALANCE    5     Not enough NIGHT for the operation
+  TX_REJECTED             6     Transaction rejected by the node
+  STALE_UTXO              6     UTXOs consumed by another transaction
+  PROOF_TIMEOUT           6     ZK proof generation timed out
+  DUST_REQUIRED           5     No dust tokens available for fees
+  CANCELLED               7     Operation cancelled (SIGINT)
+  UNKNOWN                 1     Unclassified error
+
+EXIT CODES
+──────────
+
+  0   Success
+  1   General error
+  2   Invalid arguments / usage
+  3   Wallet not found
+  4   Network / connection error
+  5   Insufficient balance
+  6   Transaction rejected
+  7   Operation cancelled (SIGINT)
+
+MCP SERVER
+──────────
+
+The CLI includes an MCP (Model Context Protocol) server for native
+AI agent integration. Instead of parsing CLI output, agents call
+typed tools directly via JSON-RPC over stdio.
+
+Setup for Claude Desktop (~/.config/Claude/claude_desktop_config.json):
+
+  {
+    "mcpServers": {
+      "midnight": {
+        "command": "npx",
+        "args": ["midnight-wallet-cli", "--mcp"]
+      }
+    }
+  }
+
+Or with a local install:
+
+  {
+    "mcpServers": {
+      "midnight": {
+        "command": "midnight-mcp"
+      }
+    }
+  }
+
+The MCP server exposes 17 tools covering all CLI commands
+(excluding help and localnet logs which are not suitable for MCP).
+Run midnight-mcp to start the server (stdio transport).
+
+EXAMPLE WORKFLOW
+────────────────
+
+  # 1. Generate a wallet
+  midnight generate --network undeployed --json
+  # → {"address":"mn_addr_...","network":"undeployed","seed":"...","mnemonic":"...","file":"...","createdAt":"..."}
+
+  # 2. Check balance
+  midnight balance --json
+  # → {"address":"mn_addr_...","network":"undeployed","balances":{},"utxoCount":0,"txCount":0}
+
+  # 3. Airdrop tokens (undeployed network)
+  midnight airdrop 1000 --json
+  # → {"txHash":"...","amount":"1000","recipient":"mn_addr_...","network":"undeployed"}
+
+  # 4. Transfer tokens
+  midnight transfer mn_addr_... 100 --json
+  # → {"txHash":"...","amount":"100","recipient":"mn_addr_...","network":"undeployed"}
+`;
+
+  process.stdout.write(manual);
+}
+
 export default async function helpCommand(args: ParsedArgs): Promise<void> {
+  // Agent manual: comprehensive reference for AI agents
+  if (hasFlag(args, 'agent')) {
+    printAgentManual();
+    return;
+  }
+
   // JSON mode: output capability manifest
   if (hasFlag(args, 'json')) {
     outputJsonManifest();
