@@ -6,7 +6,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![CI](https://github.com/nel349/midnight-wallet-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/nel349/midnight-wallet-cli/actions/workflows/ci.yml)
 
-A standalone CLI wallet for the Midnight blockchain. Manage wallets, check balances, transfer NIGHT tokens, and run a local devnet — all from the terminal.
+A standalone CLI wallet for the Midnight blockchain. Manage wallets, check balances, transfer NIGHT tokens, and run a local network — all from the terminal.
 
 ## Install
 
@@ -14,7 +14,7 @@ A standalone CLI wallet for the Midnight blockchain. Manage wallets, check balan
 npm install -g midnight-wallet-cli
 ```
 
-This installs three commands: `midnight` (or `mn` for short) and `midnight-wallet-mcp`.
+This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-mcp`.
 
 ## Commands
 
@@ -24,7 +24,7 @@ This installs three commands: `midnight` (or `mn` for short) and `midnight-walle
 | `midnight info` | Display wallet address, network, creation date |
 | `midnight balance [address]` | Check unshielded NIGHT balance |
 | `midnight transfer <to> <amount>` | Send NIGHT tokens to another address |
-| `midnight airdrop <amount>` | Fund wallet from genesis (local devnet only) |
+| `midnight airdrop <amount>` | Fund wallet from genesis (undeployed network only) |
 | `midnight dust register` | Register NIGHT UTXOs for dust (fee token) generation |
 | `midnight dust status` | Check dust registration status and balance |
 | `midnight address --seed <hex>` | Derive an address from a seed |
@@ -37,29 +37,28 @@ This installs three commands: `midnight` (or `mn` for short) and `midnight-walle
 ## Quick Start
 
 ```bash
+# Start local network
+midnight localnet up
+
 # Generate a wallet
-midnight generate --network preprod
+midnight generate --network undeployed
+
+# Airdrop tokens and register dust
+midnight airdrop 1000
+midnight dust register
 
 # Check balance
 midnight balance
 
 # Transfer NIGHT
-midnight transfer mn_addr_preprod1... 100
-
-# Local devnet: start network, airdrop, register dust
-midnight localnet up
-midnight generate --network undeployed
-midnight airdrop 1000
-midnight dust register
+midnight transfer mn_addr_undeployed1... 100
 ```
 
 ## Supported Networks
 
 | Network | Description |
 |---------|-------------|
-| `preprod` | Midnight pre-production testnet |
-| `preview` | Midnight preview testnet |
-| `undeployed` | Local devnet via Docker (`midnight localnet up`) |
+| `undeployed` | Local network via Docker (`midnight localnet up`) |
 
 ## JSON Output for Automation
 
@@ -190,4 +189,4 @@ Once connected, your AI agent gets access to 17 tools:
 
 - Node.js >= 20
 - Docker (for `midnight localnet` commands)
-- A running proof server on `localhost:6300` (for transactions on local devnet)
+- A running proof server on `localhost:6300` (for transactions on undeployed network)
