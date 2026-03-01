@@ -1,6 +1,6 @@
 {
   "name": "midnight-wallet-cli",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "description": "Git-style CLI wallet for the Midnight blockchain",
   "license": "Apache-2.0",

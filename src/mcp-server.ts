@@ -5,13 +5,10 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { createRequire } from 'node:module';
 import { captureCommand } from './lib/run-command.ts';
 import { classifyError, ERROR_CODES } from './lib/exit-codes.ts';
 import type { ParsedArgs } from './lib/argv.ts';
-
-const require = createRequire(import.meta.url);
-const pkg = require('../package.json');
+import { PKG_VERSION } from './lib/pkg.ts';
 
 // ── Tool definitions ────────────────────────────────────────
 
@@ -394,7 +391,7 @@ const TOOLS: ToolDef[] = [
 // ── Server setup ────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'midnight-wallet-cli', version: pkg.version },
+  { name: 'midnight-wallet-cli', version: PKG_VERSION },
   { capabilities: { tools: {} } },
 );
 

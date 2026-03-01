@@ -3,13 +3,13 @@
 // Agent-friendly: plain text when piped (non-TTY)
 // JSON mode: outputs capability manifest for agent self-discovery
 
-import { createRequire } from 'node:module';
 import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
 import { bold, teal, gray, dim } from '../ui/colors.ts';
 import { header } from '../ui/format.ts';
 import { animateMaterialize } from '../ui/animate.ts';
 import { COMMAND_BRIEFS, WORDMARK_BIG } from '../ui/art.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
+import { PKG_NAME, PKG_VERSION, PKG_DESCRIPTION } from '../lib/pkg.ts';
 
 interface CommandSpec {
   name: string;
@@ -317,14 +317,11 @@ function printCommandHelp(spec: CommandSpec): void {
 }
 
 function outputJsonManifest(): void {
-  const require = createRequire(import.meta.url);
-  const pkg = require('../../package.json');
-
   const manifest = {
     cli: {
-      name: pkg.name,
-      version: pkg.version,
-      description: pkg.description,
+      name: PKG_NAME,
+      version: PKG_VERSION,
+      description: PKG_DESCRIPTION,
       bin: ['midnight', 'mn'],
     },
     globalFlags: [
@@ -348,14 +345,11 @@ function outputJsonManifest(): void {
 }
 
 function printAgentManual(): void {
-  const require = createRequire(import.meta.url);
-  const pkg = require('../../package.json');
-
   const manual = `
 MIDNIGHT CLI — AI Agent & MCP Reference
 ========================================
 
-Version: ${pkg.version}
+Version: ${PKG_VERSION}
 
 STRUCTURED JSON OUTPUT
 ──────────────────────

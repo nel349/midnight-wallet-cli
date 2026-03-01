@@ -3,11 +3,11 @@
 // Dispatches to command handlers via dynamic import
 // Also supports: midnight --mcp (starts MCP server for AI agent integration)
 
-import { createRequire } from 'node:module';
 import { parseArgs, hasFlag } from './lib/argv.ts';
 import { errorBox } from './ui/format.ts';
 import { classifyError } from './lib/exit-codes.ts';
 import { suppressStderr, writeJsonError } from './lib/json-output.ts';
+import { PKG_VERSION } from './lib/pkg.ts';
 
 // --mcp: start MCP server instead of CLI (for: npx midnight-wallet-cli --mcp)
 if (process.argv.includes('--mcp')) {
@@ -19,9 +19,7 @@ const jsonMode = hasFlag(args, 'json');
 
 // Global --version / -v handling
 if (hasFlag(args, 'version') || hasFlag(args, 'v')) {
-  const require = createRequire(import.meta.url);
-  const { version } = require('../package.json');
-  process.stdout.write(version + '\n');
+  process.stdout.write(PKG_VERSION + '\n');
   process.exit(0);
 }
 
