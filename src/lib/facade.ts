@@ -148,15 +148,16 @@ export async function stopFacade(bundle: FacadeBundle): Promise<void> {
 
 /**
  * Suppress known transient SDK errors (e.g. Wallet.Sync: Internal Server Error)
- * that leak as unhandled promise rejections during facade operations.
- * The SDK retries internally — these are safe to suppress.
+ * that leak as unhandled promise rejections and console.error calls during
+ * facade operations. The SDK retries internally — these are safe to suppress.
  *
- * Returns a cleanup function to remove the handler.
+ * Returns a cleanup function to restore original behavior.
  */
 export function suppressSdkTransientErrors(
   onWarning?: (tag: string, message: string) => void,
 ): () => void {
-  const handler = (reason: unknown) => {
+  // Intercept unhandled rejections
+  const rejectionHandler = (reason: unknown) => {
     const tag = (reason as any)?._tag;
     if (typeof tag === 'string' && tag.startsWith('Wallet.')) {
       const msg = (reason as any)?.message ?? 'transient error';
@@ -164,12 +165,30 @@ export function suppressSdkTransientErrors(
       return;
     }
     // Not a known SDK error — mimic Node's default unhandled rejection behavior
-    console.error('Unhandled rejection:', reason);
+    originalConsoleError('Unhandled rejection:', reason);
     process.exit(1);
   };
 
-  process.on('unhandledRejection', handler);
+  // Intercept console.error to filter out SDK noise
+  const originalConsoleError = console.error;
+  console.error = (...args: any[]) => {
+    const firstArg = args[0];
+    // Suppress SDK Wallet.Sync stack traces printed directly by the SDK
+    if (typeof firstArg === 'object' && firstArg?._tag?.startsWith('Wallet.')) {
+      onWarning?.(firstArg._tag, firstArg?.message ?? 'transient error');
+      return;
+    }
+    // Suppress the string form: "Wallet.Sync: Internal Server Error\n    at ..."
+    if (typeof firstArg === 'string' && firstArg.startsWith('Wallet.')) {
+      onWarning?.('Wallet.Sync', 'transient error');
+      return;
+    }
+    originalConsoleError(...args);
+  };
+
+  process.on('unhandledRejection', rejectionHandler);
   return () => {
-    process.removeListener('unhandledRejection', handler);
+    process.removeListener('unhandledRejection', rejectionHandler);
+    console.error = originalConsoleError;
   };
 }

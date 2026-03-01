@@ -4,6 +4,7 @@
 import * as ledger from '@midnight-ntwrk/ledger-v7';
 import { MidnightBech32m, UnshieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
+import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
 import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
@@ -101,6 +102,11 @@ export function validateRecipientAddress(address: string, networkConfig: Network
 /**
  * Wait for dust to become available.
  * If no dust and unregistered UTXOs exist, registers them first.
+ *
+ * Uses the lower-level DustWallet API (createDustGenerationTransaction)
+ * instead of facade.registerNightUtxosForDustGeneration, because the
+ * facade method tries to balance dust fees — which fails for fresh wallets
+ * that have zero dust (chicken-and-egg problem).
  */
 async function ensureDust(
   bundle: FacadeBundle,
@@ -110,13 +116,8 @@ async function ensureDust(
     bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
   );
 
-  // Check if dust is already available
-  if (state.dust.availableCoins.length > 0) {
-    onDust?.('Dust available');
-    return;
-  }
-
-  // Check for unregistered NIGHT UTXOs
+  // Check for unregistered NIGHT UTXOs — always register new ones,
+  // even if some dust already exists, to maximize dust generation rate.
   const nightUtxos = state.unshielded.availableCoins.filter(
     (coin: any) => coin.meta?.registeredForDustGeneration !== true
   );
@@ -124,13 +125,38 @@ async function ensureDust(
   if (nightUtxos.length > 0) {
     onDust?.(`Registering ${nightUtxos.length} UTXO(s) for dust generation...`);
 
-    const recipe = await bundle.facade.registerNightUtxosForDustGeneration(
-      nightUtxos,
+    const ttl = new Date(Date.now() + TX_TTL_MINUTES * 60 * 1000);
+    const dustReceiverAddress = state.dust.dustAddress;
+
+    // Map unshielded UTXOs to the dust wallet's UtxoWithMeta format
+    const dustUtxos: DustUtxoWithMeta[] = nightUtxos.map((coin: any) => ({
+      ...coin.utxo,
+      ctime: new Date(coin.meta.ctime),
+    }));
+
+    await bundle.facade.dust.waitForSyncedState();
+
+    const unprovenTx = await bundle.facade.dust.createDustGenerationTransaction(
+      new Date(),
+      ttl,
+      dustUtxos,
       bundle.keystore.getPublicKey(),
-      (payload) => bundle.keystore.signData(payload)
+      dustReceiverAddress,
     );
-    const finalized = await bundle.facade.finalizeRecipe(recipe);
+
+    // Sign the dust registration intent
+    const intent = unprovenTx.intents?.get(1);
+    if (!intent) {
+      throw new Error('Dust generation intent not found on transaction');
+    }
+    const signature = bundle.keystore.signData(intent.signatureData(1));
+    const signedTx = await bundle.facade.dust.addDustGenerationSignature(unprovenTx, signature);
+
+    const finalized = await bundle.facade.finalizeTransaction(signedTx);
     await bundle.facade.submitTransaction(finalized);
+  } else if (state.dust.availableCoins.length > 0) {
+    onDust?.('Dust available');
+    return;
   } else {
     onDust?.('UTXOs already registered, waiting for dust generation...');
   }
