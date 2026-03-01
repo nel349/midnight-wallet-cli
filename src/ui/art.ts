@@ -27,12 +27,29 @@ export const WORDMARK_BIG = [
 ];
 
 // Generate big wordmark typing frame: reveals columns left-to-right
-export function getWordmarkBigFrame(progress: number): string[] {
+export function getWordmarkTypingFrame(progress: number): string[] {
   const clamped = Math.max(0, Math.min(1, progress));
   const width = WORDMARK_BIG[0]!.length;
   const visibleCols = Math.floor(clamped * width);
   return WORDMARK_BIG.map(line =>
     line.slice(0, visibleCols).padEnd(width),
+  );
+}
+
+// Generate big wordmark materialize frame: noise → resolved (for the flash at the end)
+export function getWordmarkMaterializeFrame(progress: number): string[] {
+  const clamped = Math.max(0, Math.min(1, progress));
+  const seed = Math.floor(progress * 100);
+
+  if (clamped >= 1) return WORDMARK_BIG;
+
+  return WORDMARK_BIG.map((line, row) =>
+    Array.from(line).map((ch, col) => {
+      if (ch === ' ') return ' ';
+      if (clamped <= 0) return noiseChar(row + 20, col, 0);
+      const threshold = (((row + 20) * 131 + col * 997) % 100) / 100;
+      return clamped >= threshold ? ch : noiseChar(row + 20, col, seed);
+    }).join('')
   );
 }
 

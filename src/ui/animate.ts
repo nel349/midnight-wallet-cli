@@ -3,7 +3,7 @@
 // All respect NO_COLOR and accept AbortSignal for cancellation
 
 import { teal, white, purple, green, red, bold, dim, isColorEnabled } from './colors.ts';
-import { getMaterializeFrame, getWordmarkBigFrame, WORDMARK_BIG, MIDNIGHT_LOGO } from './art.ts';
+import { getMaterializeFrame, getWordmarkTypingFrame, getWordmarkMaterializeFrame, WORDMARK_BIG, MIDNIGHT_LOGO } from './art.ts';
 
 const FRAME_MS = 80;
 
@@ -75,11 +75,11 @@ export async function animateMaterialize(signal?: AbortSignal, sideContent?: str
   }
 
   // Phase 2: Type out big wordmark on right (columns reveal left-to-right)
-  const wordmarkFrames = 20;
-  for (let i = 0; i <= wordmarkFrames; i++) {
+  const typingFrames = 20;
+  for (let i = 0; i <= typingFrames; i++) {
     if (signal?.aborted) break;
-    const progress = i / wordmarkFrames;
-    const typedLines = getWordmarkBigFrame(progress);
+    const progress = i / typingFrames;
+    const typedLines = getWordmarkTypingFrame(progress);
 
     moveUp();
     const rightLines: (string | null)[] = new Array(totalHeight).fill(null);
@@ -91,7 +91,24 @@ export async function animateMaterialize(signal?: AbortSignal, sideContent?: str
     await sleep(FRAME_MS, signal);
   }
 
-  // Phase 3: Show commands (everything on right)
+  // Phase 3: Materialize flash on the wordmark (noise → resolved)
+  const flashFrames = 12;
+  for (let i = 0; i <= flashFrames; i++) {
+    if (signal?.aborted) break;
+    const progress = i / flashFrames;
+    const flashedLines = getWordmarkMaterializeFrame(progress);
+
+    moveUp();
+    const rightLines: (string | null)[] = new Array(totalHeight).fill(null);
+    for (let j = 0; j < flashedLines.length; j++) {
+      rightLines[j] = bold(white(flashedLines[j]!));
+    }
+    renderFrame(logoLines, rightLines);
+
+    await sleep(FRAME_MS, signal);
+  }
+
+  // Phase 4: Show commands (everything on right)
   moveUp();
   const fullRight: (string | null)[] = new Array(totalHeight).fill(null);
   if (sideContent) {
