@@ -1,13 +1,14 @@
 // info command — display wallet metadata (no secrets)
 // Shows address, network, creation date, file path
 
-import { type ParsedArgs, getFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { header, keyValue, divider } from '../ui/format.ts';
 import { formatAddress } from '../ui/format.ts';
 import * as path from 'path';
 import { homedir } from 'os';
 import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME } from '../lib/constants.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function infoCommand(args: ParsedArgs): Promise<void> {
   const walletPath = getFlag(args, 'wallet');
@@ -16,6 +17,17 @@ export default async function infoCommand(args: ParsedArgs): Promise<void> {
   const resolvedPath = walletPath
     ? path.resolve(walletPath)
     : path.join(homedir(), MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME);
+
+  // JSON mode
+  if (hasFlag(args, 'json')) {
+    writeJsonResult({
+      address: config.address,
+      network: config.network,
+      createdAt: config.createdAt,
+      file: resolvedPath,
+    });
+    return;
+  }
 
   // Bare address to stdout (pipeable)
   process.stdout.write(config.address + '\n');

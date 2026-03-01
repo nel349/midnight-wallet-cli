@@ -1,13 +1,14 @@
 // transfer command — send NIGHT from my wallet to another address
 // Usage: midnight transfer <to> <amount>
 
-import { type ParsedArgs, getFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { parseAmount, executeTransfer } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function transferCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   // Recipient is subcommand, amount is first positional
@@ -82,6 +83,17 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
     });
 
     spinner.stop('Transaction submitted');
+
+    // JSON mode
+    if (hasFlag(args, 'json')) {
+      writeJsonResult({
+        txHash: result.txHash,
+        amount: amountNight,
+        recipient: recipientAddress,
+        network: networkName,
+      });
+      return;
+    }
 
     // Tx hash to stdout (pipeable)
     process.stdout.write(result.txHash + '\n');

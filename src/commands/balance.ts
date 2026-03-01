@@ -1,13 +1,14 @@
 // balance command — check unshielded balance via GraphQL subscription
 // Reads address from positional arg or wallet file
 
-import { type ParsedArgs, getFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { checkBalance, isNativeToken } from '../lib/balance-subscription.ts';
 import { header, keyValue, divider, formatNight, formatAddress } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function balanceCommand(args: ParsedArgs): Promise<void> {
   let address: string | undefined;
@@ -51,6 +52,23 @@ export default async function balanceCommand(args: ParsedArgs): Promise<void> {
     });
 
     spinner.stop(`Synced ${result.txCount} transactions`);
+
+    // JSON mode
+    if (hasFlag(args, 'json')) {
+      const balances: Record<string, string> = {};
+      for (const [tokenType, amount] of result.balances) {
+        const key = isNativeToken(tokenType) ? 'NIGHT' : tokenType;
+        balances[key] = amount.toString();
+      }
+      writeJsonResult({
+        address,
+        network: networkName,
+        balances,
+        utxoCount: result.utxoCount,
+        txCount: result.txCount,
+      });
+      return;
+    }
 
     // Bare data to stdout (pipeable)
     if (result.balances.size === 0) {

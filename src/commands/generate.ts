@@ -14,6 +14,7 @@ import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
 import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, yellow, dim, green } from '../ui/colors.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function generateCommand(args: ParsedArgs): Promise<void> {
   const networkName = resolveNetworkName({ args });
@@ -76,6 +77,20 @@ export default async function generateCommand(args: ParsedArgs): Promise<void> {
   }
 
   const savedPath = saveWalletConfig(config, outputPath);
+
+  // JSON mode
+  if (hasFlag(args, 'json')) {
+    const result: Record<string, unknown> = {
+      address,
+      network: networkName,
+      seed: seedBuffer.toString('hex'),
+      file: savedPath,
+      createdAt: config.createdAt,
+    };
+    if (mnemonic) result.mnemonic = mnemonic;
+    writeJsonResult(result);
+    return;
+  }
 
   // Address to stdout (pipeable)
   process.stdout.write(address + '\n');

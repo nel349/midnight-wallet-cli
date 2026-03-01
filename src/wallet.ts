@@ -5,8 +5,11 @@
 import { createRequire } from 'node:module';
 import { parseArgs, hasFlag } from './lib/argv.ts';
 import { errorBox } from './ui/format.ts';
+import { classifyError } from './lib/exit-codes.ts';
+import { suppressStderr, writeJsonError } from './lib/json-output.ts';
 
 const args = parseArgs();
+const jsonMode = hasFlag(args, 'json');
 
 // Global --version / -v handling
 if (hasFlag(args, 'version') || hasFlag(args, 'v')) {
@@ -23,6 +26,12 @@ if (hasFlag(args, 'help') || hasFlag(args, 'h')) {
 
 // Default to help when no command given
 const command = args.command ?? 'help';
+
+// Suppress stderr in JSON mode (spinners, headers, animations)
+let restoreStderr: (() => void) | undefined;
+if (jsonMode) {
+  restoreStderr = suppressStderr();
+}
 
 // Global AbortController for clean shutdown on SIGINT/SIGTERM
 const abortController = new AbortController();
@@ -104,6 +113,15 @@ run().then(() => {
     process.exit(0);
   }
 }).catch((err: Error) => {
-  process.stderr.write('\n' + errorBox(err.message, 'Run "midnight help" for usage information.') + '\n\n');
-  process.exit(1);
+  if (jsonMode) {
+    // Restore stderr so writeJsonError can work if needed
+    restoreStderr?.();
+    const { exitCode, errorCode } = classifyError(err);
+    writeJsonError(err, errorCode, exitCode);
+    process.exit(exitCode);
+  } else {
+    process.stderr.write('\n' + errorBox(err.message, 'Run "midnight help" for usage information.') + '\n\n');
+    const { exitCode } = classifyError(err);
+    process.exit(exitCode);
+  }
 });

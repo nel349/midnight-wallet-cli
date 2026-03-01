@@ -1,12 +1,15 @@
 // help command — show usage for all commands or a specific command
 // Horizontal layout: logo on left, commands on right (all on stderr)
 // Agent-friendly: plain text when piped (non-TTY)
+// JSON mode: outputs capability manifest for agent self-discovery
 
-import { type ParsedArgs } from '../lib/argv.ts';
+import { createRequire } from 'node:module';
+import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
 import { bold, teal, gray, dim } from '../ui/colors.ts';
 import { header } from '../ui/format.ts';
 import { animateMaterialize } from '../ui/animate.ts';
 import { COMMAND_BRIEFS } from '../ui/art.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 interface CommandSpec {
   name: string;
@@ -14,6 +17,7 @@ interface CommandSpec {
   usage: string;
   flags?: string[];
   examples?: string[];
+  jsonFields?: Record<string, string>;
 }
 
 const COMMAND_SPECS: CommandSpec[] = [
@@ -33,6 +37,14 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight generate --network preprod --output my-wallet.json',
       'midnight generate --seed 0123456789abcdef...',
     ],
+    jsonFields: {
+      address: 'Generated wallet address (bech32m)',
+      network: 'Network name',
+      seed: 'Hex-encoded 32-byte seed',
+      mnemonic: 'BIP-39 mnemonic (24 words, only if generated or provided)',
+      file: 'Path where wallet file was saved',
+      createdAt: 'ISO 8601 creation timestamp',
+    },
   },
   {
     name: 'info',
@@ -45,6 +57,12 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight info',
       'midnight info --wallet my-wallet.json',
     ],
+    jsonFields: {
+      address: 'Wallet address (bech32m)',
+      network: 'Network name',
+      createdAt: 'ISO 8601 creation timestamp',
+      file: 'Wallet file path',
+    },
   },
   {
     name: 'balance',
@@ -60,6 +78,13 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight balance mn_addr_preprod1...',
       'midnight balance --network preprod',
     ],
+    jsonFields: {
+      address: 'Checked address (bech32m)',
+      network: 'Network name',
+      balances: 'Object mapping token type to balance string',
+      utxoCount: 'Number of UTXOs',
+      txCount: 'Number of transactions synced',
+    },
   },
   {
     name: 'address',
@@ -74,6 +99,12 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight address --seed 0123456789abcdef... --network preprod',
       'midnight address --seed 0123456789abcdef... --index 1',
     ],
+    jsonFields: {
+      address: 'Derived address (bech32m)',
+      network: 'Network name',
+      index: 'Key derivation index',
+      path: 'BIP-44 derivation path',
+    },
   },
   {
     name: 'genesis-address',
@@ -86,6 +117,10 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight genesis-address --network undeployed',
       'midnight genesis-address --network preprod',
     ],
+    jsonFields: {
+      address: 'Genesis wallet address (bech32m)',
+      network: 'Network name',
+    },
   },
   {
     name: 'inspect-cost',
@@ -94,6 +129,13 @@ const COMMAND_SPECS: CommandSpec[] = [
     examples: [
       'midnight inspect-cost',
     ],
+    jsonFields: {
+      readTime: 'Read time limit (picoseconds)',
+      computeTime: 'Compute time limit (picoseconds)',
+      blockUsage: 'Block usage limit (bytes)',
+      bytesWritten: 'Bytes written limit (bytes)',
+      bytesChurned: 'Bytes churned limit (bytes)',
+    },
   },
   {
     name: 'airdrop',
@@ -107,6 +149,12 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight airdrop 1000',
       'midnight airdrop 0.5 --wallet my-wallet.json',
     ],
+    jsonFields: {
+      txHash: 'Transaction hash',
+      amount: 'Amount airdropped (NIGHT string)',
+      recipient: 'Recipient address (bech32m)',
+      network: 'Network name',
+    },
   },
   {
     name: 'transfer',
@@ -121,6 +169,12 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight transfer mn_addr_undeployed1... 100',
       'midnight transfer mn_addr_preprod1... 50 --wallet my-wallet.json',
     ],
+    jsonFields: {
+      txHash: 'Transaction hash',
+      amount: 'Amount transferred (NIGHT string)',
+      recipient: 'Recipient address (bech32m)',
+      network: 'Network name',
+    },
   },
   {
     name: 'dust',
@@ -135,6 +189,15 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight dust register',
       'midnight dust status',
     ],
+    jsonFields: {
+      subcommand: 'register or status',
+      dustBalance: 'Dust balance (raw bigint string)',
+      registered: 'Number of registered UTXOs (status only)',
+      unregistered: 'Number of unregistered UTXOs (status only)',
+      nightBalance: 'NIGHT balance (raw bigint string, status only)',
+      dustAvailable: 'Whether dust tokens are available (status only)',
+      txHash: 'Registration transaction hash (register only, if submitted)',
+    },
   },
   {
     name: 'config',
@@ -148,6 +211,11 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight config get network',
       'midnight config set network preprod',
     ],
+    jsonFields: {
+      action: 'get or set',
+      key: 'Config key name',
+      value: 'Config value',
+    },
   },
   {
     name: 'localnet',
@@ -168,6 +236,12 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight localnet down',
       'midnight localnet clean',
     ],
+    jsonFields: {
+      subcommand: 'up, stop, down, status, or clean',
+      services: 'Array of { name, state, port, health? } (up/status only)',
+      status: 'Operation result message (stop/down/clean)',
+      removed: 'Array of removed container names (clean only)',
+    },
   },
   {
     name: 'help',
@@ -177,6 +251,11 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight help',
       'midnight help balance',
     ],
+    jsonFields: {
+      cli: 'CLI metadata (name, version, description)',
+      globalFlags: 'Array of global flag descriptions',
+      commands: 'Array of command specs with jsonFields',
+    },
   },
 ];
 
@@ -228,7 +307,44 @@ function printCommandHelp(spec: CommandSpec): void {
   }
 }
 
+function outputJsonManifest(): void {
+  const require = createRequire(import.meta.url);
+  const pkg = require('../../package.json');
+
+  const manifest = {
+    cli: {
+      name: pkg.name,
+      version: pkg.version,
+      description: pkg.description,
+      bin: ['midnight', 'mn'],
+    },
+    globalFlags: [
+      { name: '--json', description: 'Output structured JSON to stdout (suppresses all stderr)' },
+      { name: '--wallet <file>', description: 'Custom wallet file path' },
+      { name: '--network <name>', description: 'Override network (preprod, preview, undeployed)' },
+      { name: '--version, -v', description: 'Print CLI version' },
+      { name: '--help, -h', description: 'Show help' },
+    ],
+    commands: COMMAND_SPECS.map(spec => ({
+      name: spec.name,
+      description: spec.description,
+      usage: spec.usage,
+      flags: spec.flags,
+      examples: spec.examples,
+      jsonFields: spec.jsonFields,
+    })),
+  };
+
+  writeJsonResult(manifest);
+}
+
 export default async function helpCommand(args: ParsedArgs): Promise<void> {
+  // JSON mode: output capability manifest
+  if (hasFlag(args, 'json')) {
+    outputJsonManifest();
+    return;
+  }
+
   // Specific command help: wallet help <command>
   const targetCommand = args.subcommand;
 
@@ -255,3 +371,4 @@ export default async function helpCommand(args: ParsedArgs): Promise<void> {
 }
 
 export { COMMAND_SPECS };
+export type { CommandSpec };

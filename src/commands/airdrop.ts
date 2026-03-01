@@ -1,7 +1,7 @@
 // airdrop command — fund wallet from genesis wallet (seed 0x01)
 // Only works on undeployed network (local devnet)
 
-import { type ParsedArgs, getFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
@@ -9,6 +9,7 @@ import { parseAmount, executeTransfer } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatNight, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function airdropCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   // Amount is the subcommand (first positional after 'airdrop')
@@ -83,6 +84,17 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
     });
 
     spinner.stop('Transaction submitted');
+
+    // JSON mode
+    if (hasFlag(args, 'json')) {
+      writeJsonResult({
+        txHash: result.txHash,
+        amount: amountNight,
+        recipient: recipientAddress,
+        network: networkName,
+      });
+      return;
+    }
 
     // Tx hash to stdout (pipeable)
     process.stdout.write(result.txHash + '\n');

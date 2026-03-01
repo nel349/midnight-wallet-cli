@@ -5,7 +5,7 @@ import * as ledger from '@midnight-ntwrk/ledger-v7';
 import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
 import * as rx from 'rxjs';
 
-import { type ParsedArgs, getFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
@@ -13,6 +13,7 @@ import { DUST_TIMEOUT_MS, TX_TTL_MINUTES } from '../lib/constants.ts';
 import { header, keyValue, divider, formatNight, formatDust, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   const subcommand = args.subcommand;
@@ -54,11 +55,13 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     warningRef.current?.(tag, msg);
   });
 
+  const isJson = hasFlag(args, 'json');
+
   try {
     if (subcommand === 'register') {
-      await dustRegister(bundle, networkName, signal, warningRef);
+      await dustRegister(bundle, networkName, isJson, signal, warningRef);
     } else {
-      await dustStatus(bundle, networkName, signal, warningRef);
+      await dustStatus(bundle, networkName, isJson, signal, warningRef);
     }
   } finally {
     signal?.removeEventListener('abort', onAbort);
@@ -72,6 +75,7 @@ type WarningRef = { current?: (tag: string, msg: string) => void };
 async function dustRegister(
   bundle: FacadeBundle,
   networkName: string,
+  jsonMode: boolean,
   signal?: AbortSignal,
   warningRef?: WarningRef,
 ): Promise<void> {
@@ -103,6 +107,10 @@ async function dustRegister(
     if (state.dust.availableCoins.length > 0) {
       const dustBal = state.dust.walletBalance(new Date());
       spinner.stop('Dust already available');
+      if (jsonMode) {
+        writeJsonResult({ subcommand: 'register', dustBalance: dustBal.toString() });
+        return;
+      }
       process.stdout.write(dustBal.toString() + '\n');
       process.stderr.write('\n' + successMessage(
         `Dust tokens already available: ${formatDust(dustBal)}`,
@@ -167,6 +175,11 @@ async function dustRegister(
     const dustBal = dustState.dust.walletBalance(new Date());
     spinner.stop('Dust registration complete');
 
+    if (jsonMode) {
+      writeJsonResult({ subcommand: 'register', dustBalance: dustBal.toString() });
+      return;
+    }
+
     process.stdout.write(dustBal.toString() + '\n');
     process.stderr.write('\n' + successMessage(
       `Dust tokens available: ${formatDust(dustBal)}`,
@@ -180,6 +193,7 @@ async function dustRegister(
 async function dustStatus(
   bundle: FacadeBundle,
   networkName: string,
+  jsonMode: boolean,
   signal?: AbortSignal,
   warningRef?: WarningRef,
 ): Promise<void> {
@@ -217,6 +231,19 @@ async function dustStatus(
     const unshieldedBalance = state.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
 
     spinner.stop('Done');
+
+    // JSON mode
+    if (jsonMode) {
+      writeJsonResult({
+        subcommand: 'status',
+        dustBalance: dustBalance.toString(),
+        registered: registeredCount,
+        unregistered: unregisteredUtxos.length,
+        nightBalance: unshieldedBalance.toString(),
+        dustAvailable: hasAvailableDust,
+      });
+      return;
+    }
 
     // Machine-readable to stdout
     process.stdout.write(`dust=${dustBalance}\n`);

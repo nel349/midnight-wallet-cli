@@ -2,7 +2,7 @@
 // Subcommands: up, down, status, logs
 
 import { spawn } from 'child_process';
-import { type ParsedArgs } from '../lib/argv.ts';
+import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
 import {
   checkDockerAvailable,
   ensureComposeFile,
@@ -15,6 +15,7 @@ import {
 import { header, divider } from '../ui/format.ts';
 import { bold, green, red, dim, yellow } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 const VALID_SUBCOMMANDS = ['up', 'stop', 'down', 'status', 'logs', 'clean'] as const;
 type Subcommand = typeof VALID_SUBCOMMANDS[number];
@@ -34,7 +35,7 @@ function formatServiceTable(services: ReturnType<typeof getServiceStatus>): stri
   return lines.join('\n');
 }
 
-async function handleUp(): Promise<void> {
+async function handleUp(jsonMode: boolean): Promise<void> {
   const wrote = ensureComposeFile();
   if (wrote) {
     process.stderr.write(dim(`  Wrote compose.yml to ${getComposePath()}`) + '\n');
@@ -76,6 +77,15 @@ async function handleUp(): Promise<void> {
 
   // Show status table
   const services = getServiceStatus();
+
+  if (jsonMode) {
+    writeJsonResult({
+      subcommand: 'up',
+      services: services.map(s => ({ name: s.name, state: s.state, port: s.port })),
+    });
+    return;
+  }
+
   if (services.length > 0) {
     process.stderr.write('\n' + formatServiceTable(services) + '\n');
   }
@@ -88,32 +98,46 @@ async function handleUp(): Promise<void> {
   process.stderr.write('\n' + dim('  Next: ') + bold('midnight generate --network undeployed') + '\n');
 }
 
-async function handleStop(): Promise<void> {
+async function handleStop(jsonMode: boolean): Promise<void> {
   const spinner = startSpinner('Stopping local network...');
 
   try {
     dockerCompose('stop');
     spinner.stop('Local network stopped (containers preserved)');
+    if (jsonMode) {
+      writeJsonResult({ subcommand: 'stop', status: 'stopped' });
+    }
   } catch (err) {
     spinner.stop(red('Failed to stop local network'));
     throw err;
   }
 }
 
-async function handleDown(): Promise<void> {
+async function handleDown(jsonMode: boolean): Promise<void> {
   const spinner = startSpinner('Tearing down local network...');
 
   try {
     dockerCompose('down --volumes');
     spinner.stop('Local network removed (containers, networks, volumes)');
+    if (jsonMode) {
+      writeJsonResult({ subcommand: 'down', status: 'removed' });
+    }
   } catch (err) {
     spinner.stop(red('Failed to tear down local network'));
     throw err;
   }
 }
 
-async function handleStatus(): Promise<void> {
+async function handleStatus(jsonMode: boolean): Promise<void> {
   const services = getServiceStatus();
+
+  if (jsonMode) {
+    writeJsonResult({
+      subcommand: 'status',
+      services: services.map(s => ({ name: s.name, state: s.state, port: s.port, health: s.health })),
+    });
+    return;
+  }
 
   if (services.length === 0) {
     process.stderr.write('\n' + header('Localnet Status') + '\n\n');
@@ -132,7 +156,7 @@ async function handleStatus(): Promise<void> {
   }
 }
 
-async function handleClean(): Promise<void> {
+async function handleClean(jsonMode: boolean): Promise<void> {
   const spinner = startSpinner('Removing conflicting containers...');
 
   try {
@@ -146,6 +170,10 @@ async function handleClean(): Promise<void> {
       spinner.stop(`Removed ${removed.length} container${removed.length > 1 ? 's' : ''}: ${removed.join(', ')}`);
     } else {
       spinner.stop('No conflicting containers found');
+    }
+
+    if (jsonMode) {
+      writeJsonResult({ subcommand: 'clean', status: 'cleaned', removed });
     }
   } catch (err) {
     spinner.stop(red('Failed to clean up'));
@@ -195,20 +223,22 @@ export default async function localnetCommand(args: ParsedArgs): Promise<void> {
   // Check Docker is available before any operation
   checkDockerAvailable();
 
+  const jsonMode = hasFlag(args, 'json');
+
   process.stderr.write('\n' + header('Localnet') + '\n\n');
 
   switch (subcommand) {
     case 'up':
-      return handleUp();
+      return handleUp(jsonMode);
     case 'stop':
-      return handleStop();
+      return handleStop(jsonMode);
     case 'down':
-      return handleDown();
+      return handleDown(jsonMode);
     case 'status':
-      return handleStatus();
+      return handleStatus(jsonMode);
     case 'logs':
       return handleLogs();
     case 'clean':
-      return handleClean();
+      return handleClean(jsonMode);
   }
 }

@@ -2,9 +2,10 @@
 // config get <key> → stdout
 // config set <key> <value> → success message on stderr
 
-import { type ParsedArgs } from '../lib/argv.ts';
+import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
 import { getConfigValue, setConfigValue, getValidConfigKeys } from '../lib/cli-config.ts';
 import { green } from '../ui/colors.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function configCommand(args: ParsedArgs): Promise<void> {
   const action = args.subcommand;
@@ -26,6 +27,10 @@ export default async function configCommand(args: ParsedArgs): Promise<void> {
 
   if (action === 'get') {
     const value = getConfigValue(key);
+    if (hasFlag(args, 'json')) {
+      writeJsonResult({ action: 'get', key, value });
+      return;
+    }
     process.stdout.write(value + '\n');
   } else {
     const value = args.positionals[1];
@@ -33,6 +38,10 @@ export default async function configCommand(args: ParsedArgs): Promise<void> {
       throw new Error(`Missing value for config set.\nUsage: midnight config set ${key} <value>`);
     }
     setConfigValue(key, value);
+    if (hasFlag(args, 'json')) {
+      writeJsonResult({ action: 'set', key, value });
+      return;
+    }
     process.stderr.write(green('✓') + ` ${key} = ${value}\n`);
   }
 }

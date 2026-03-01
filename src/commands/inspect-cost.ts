@@ -1,10 +1,11 @@
 // inspect-cost command — display current block limits from LedgerParameters
 // Uses the probeDimension technique from reference implementation
 
-import { type ParsedArgs } from '../lib/argv.ts';
+import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
 import * as ledger from '@midnight-ntwrk/ledger-v7';
 import { header, keyValue, divider } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
+import { writeJsonResult } from '../lib/json-output.ts';
 
 interface SyntheticCost {
   readTime: bigint;
@@ -56,9 +57,15 @@ const UNITS: Record<string, string> = {
   bytesChurned: 'bytes',
 };
 
-export default async function inspectCostCommand(_args: ParsedArgs): Promise<void> {
+export default async function inspectCostCommand(args: ParsedArgs): Promise<void> {
   const params = ledger.LedgerParameters.initialParameters();
   const limits = deriveBlockLimits(params);
+
+  // JSON mode
+  if (hasFlag(args, 'json')) {
+    writeJsonResult(limits);
+    return;
+  }
 
   // Bare data to stdout (pipeable)
   for (const [dimension, value] of Object.entries(limits)) {
