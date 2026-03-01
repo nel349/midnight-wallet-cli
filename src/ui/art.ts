@@ -2,19 +2,39 @@
 // Static data module — no timers, no side effects
 
 export const MIDNIGHT_LOGO = [
-  '        ██████████████        ',
-  '      ██              ██      ',
-  '    ██      ██████      ██    ',
-  '   ██       ██████       ██   ',
-  '   ██                    ██   ',
-  '   ██       ██████       ██   ',
-  '   ██       ██████       ██   ',
-  '    ██                  ██    ',
-  '      ██              ██      ',
-  '        ██████████████        ',
+  '          ████████████          ',
+  '       ███            ███       ',
+  '     ███       ██       ███     ',
+  '    ██                    ██    ',
+  '   ██          ██          ██   ',
+  '   ██                      ██   ',
+  '   ██          ██          ██   ',
+  '   ██                      ██   ',
+  '   ██                      ██   ',
+  '   ██                      ██   ',
+  '    ██                    ██    ',
+  '     ███                ███     ',
+  '       ███            ███       ',
+  '          ████████████          ',
 ].join('\n');
 
 export const WORDMARK = 'm i d n i g h t';
+
+export const WORDMARK_BIG = [
+  '█▄ ▄█ █ █▀▄ █▄ █ █ █▀▀ █ █ ▀█▀',
+  '█ █ █ █ █ █ █ ██ █ █ █ █▀█  █ ',
+  '▀   ▀ ▀ ▀▀  ▀  ▀ ▀ ▀▀▀ ▀ ▀  ▀ ',
+];
+
+// Generate big wordmark typing frame: reveals columns left-to-right
+export function getWordmarkBigFrame(progress: number): string[] {
+  const clamped = Math.max(0, Math.min(1, progress));
+  const width = WORDMARK_BIG[0]!.length;
+  const visibleCols = Math.floor(clamped * width);
+  return WORDMARK_BIG.map(line =>
+    line.slice(0, visibleCols).padEnd(width),
+  );
+}
 
 // Short descriptions for the compact horizontal help layout (≤30 chars each)
 export const COMMAND_BRIEFS: [name: string, brief: string][] = [

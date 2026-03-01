@@ -8,7 +8,7 @@ import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
 import { bold, teal, gray, dim } from '../ui/colors.ts';
 import { header } from '../ui/format.ts';
 import { animateMaterialize } from '../ui/animate.ts';
-import { COMMAND_BRIEFS } from '../ui/art.ts';
+import { COMMAND_BRIEFS, WORDMARK_BIG } from '../ui/art.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 interface CommandSpec {
@@ -259,18 +259,23 @@ const COMMAND_SPECS: CommandSpec[] = [
   },
 ];
 
-// Build the right-side lines for the horizontal layout
-function buildSideContent(): string[] {
+// Build the right column: wordmark (lines 0-2), blank, then commands
+function buildRightColumn(): string[] {
   const lines: string[] = [];
-  // Line 0: header
+  // Lines 0-2: big wordmark (animated by animateMaterialize)
+  for (const wl of WORDMARK_BIG) {
+    lines.push(wl);
+  }
+  // Line 3: blank
+  lines.push('');
+  // Line 4: header
   lines.push(bold('Commands'));
-  // Lines 1-12: command briefs
+  // Lines 5+: command briefs
   for (const [name, brief] of COMMAND_BRIEFS) {
     lines.push(`${teal(name.padEnd(18))}${brief}`);
   }
-  // Blank
-  lines.push('');
   // Footer
+  lines.push('');
   lines.push(dim(`midnight (or mn) help <command>`));
   lines.push(dim(`--json flag available on all commands`));
   lines.push(dim(`midnight help --agent`) + dim(`  AI & MCP reference`));
@@ -494,8 +499,8 @@ export default async function helpCommand(args: ParsedArgs): Promise<void> {
     printPlainHelp();
     return;
   }
-  const sideContent = buildSideContent();
-  await animateMaterialize(undefined, sideContent);
+  const rightColumn = buildRightColumn();
+  await animateMaterialize(undefined, rightColumn);
 }
 
 export { COMMAND_SPECS };

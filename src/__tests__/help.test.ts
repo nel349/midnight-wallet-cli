@@ -21,22 +21,19 @@ afterEach(() => {
 });
 
 describe('help command — general help', () => {
-  it('displays the logo and commands on stderr (horizontal layout)', async () => {
+  it('displays the logo, wordmark, and commands on stderr', async () => {
     const args = parseArgs(['help']);
     await helpCommand(args);
     const err = io.stderr();
-    expect(err).toContain('██████████████');
-    expect(err).toContain('m i d n i g h t');
+    expect(err).toContain('████████████');
+    expect(err).toContain('█▄ ▄█');
     expect(err).toContain('Commands');
   });
 
-  it('lists commands on stderr (limited by logo height)', async () => {
+  it('lists all commands on stderr', async () => {
     const args = parseArgs(['help']);
     await helpCommand(args);
     const err = io.stderr();
-    // The horizontal layout can show at most ~10 side-content lines
-    // (10 logo lines + 1 wordmark line). With 11+ commands,
-    // the last briefs may be pushed beyond the visible area.
     expect(err).toContain('generate');
     expect(err).toContain('info');
     expect(err).toContain('balance');

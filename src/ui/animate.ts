@@ -2,8 +2,8 @@
 // Each animation is a standalone async function writing to stderr
 // All respect NO_COLOR and accept AbortSignal for cancellation
 
-import { teal, purple, green, red, bold, dim, isColorEnabled } from './colors.ts';
-import { getMaterializeFrame, getWordmarkFrame, WORDMARK, MIDNIGHT_LOGO } from './art.ts';
+import { teal, white, purple, green, red, bold, dim, isColorEnabled } from './colors.ts';
+import { getMaterializeFrame, getWordmarkBigFrame, WORDMARK_BIG, MIDNIGHT_LOGO } from './art.ts';
 
 const FRAME_MS = 80;
 
@@ -23,80 +23,87 @@ function writeLine(text: string): void {
   process.stderr.write(`\r${text}\x1b[K`);
 }
 
-// Logo materialize: noise → resolved logo + wordmark type-out
-// sideContent: optional static lines rendered to the right of the logo (indices 0-9 alongside logo, 10 alongside wordmark)
+// Logo materialize: noise → resolved logo on left
+// Right side: big wordmark types in (rows 0-2), then commands appear below
+// sideContent[0..2] = wordmark lines, sideContent[3+] = commands
 export async function animateMaterialize(signal?: AbortSignal, sideContent?: string[]): Promise<void> {
   const totalFrames = 20;
   const logoLines = MIDNIGHT_LOGO.split('\n');
-  const logoLineCount = logoLines.length; // 10
+  const logoLineCount = logoLines.length;
+  const rightCol = 36; // column where right side starts
+  const totalHeight = Math.max(logoLineCount, sideContent?.length ?? 0);
+  const wordmarkLineCount = 3; // first 3 lines of sideContent are the wordmark
 
   if (!isColorEnabled()) {
-    // Static render: logo + side content, no animation
-    for (let j = 0; j < logoLineCount; j++) {
-      const left = logoLines[j]!.padEnd(30);
+    // Static render: side by side
+    for (let j = 0; j < totalHeight; j++) {
+      const left = (j < logoLineCount ? logoLines[j]! : '').padEnd(rightCol - 1);
       const right = sideContent?.[j] ?? '';
-      process.stderr.write((sideContent ? left + '    ' + right : left) + '\n');
-    }
-    const wordmarkLine = `       ${WORDMARK}`;
-    const footerSide = sideContent?.[logoLineCount] ?? '';
-    process.stderr.write((footerSide ? wordmarkLine.padEnd(34) + footerSide : wordmarkLine) + '\n');
-    // Render any remaining side content below the logo
-    if (sideContent) {
-      for (let j = logoLineCount + 1; j < sideContent.length; j++) {
-        if (sideContent[j]) {
-          process.stderr.write(' '.repeat(34) + sideContent[j] + '\n');
-        }
-      }
+      process.stderr.write(left + right + '\n');
     }
     return;
   }
 
-  // Animated: materialize logo with static side content
+  // Render a full frame (totalHeight lines) — helper
+  function renderFrame(frameLogoLines: string[], rightLines: (string | null)[]) {
+    for (let j = 0; j < totalHeight; j++) {
+      const left = j < frameLogoLines.length ? white(frameLogoLines[j]!) : '';
+      const right = rightLines[j] ?? '';
+      if (right) {
+        process.stderr.write(left + `\x1b[${rightCol}G` + right + '\x1b[K\n');
+      } else {
+        process.stderr.write(left + '\x1b[K\n');
+      }
+    }
+  }
+
+  function moveUp() {
+    process.stderr.write(`\x1b[${totalHeight}A`);
+  }
+
+  // Phase 1: Materialize logo (right side blank)
   for (let i = 0; i <= totalFrames; i++) {
     if (signal?.aborted) break;
     const progress = i / totalFrames;
     const frame = getMaterializeFrame(progress);
     const frameLines = frame.split('\n');
 
-    if (i > 0) {
-      process.stderr.write(`\x1b[${logoLineCount}A`);
-    }
-
-    for (let j = 0; j < logoLineCount; j++) {
-      const left = teal(frameLines[j]!);
-      const right = sideContent?.[j] ?? '';
-      // Pad logo to 30 visible chars using absolute column positioning
-      const line = sideContent ? left + `\x1b[35G` + right : left;
-      process.stderr.write(line + '\x1b[K\n');
-    }
+    if (i > 0) moveUp();
+    renderFrame(frameLines, []);
 
     await sleep(FRAME_MS, signal);
   }
 
-  // Type out the wordmark below the logo
-  const wordmarkFrames = 15;
-  const footerSide = sideContent?.[logoLineCount] ?? '';
+  // Phase 2: Type out big wordmark on right (columns reveal left-to-right)
+  const wordmarkFrames = 20;
   for (let i = 0; i <= wordmarkFrames; i++) {
     if (signal?.aborted) break;
     const progress = i / wordmarkFrames;
-    const partial = getWordmarkFrame(progress);
-    if (footerSide) {
-      writeLine(`       ${bold(teal(partial))}\x1b[35G${footerSide}`);
-    } else {
-      writeLine(`       ${bold(teal(partial))}`);
+    const typedLines = getWordmarkBigFrame(progress);
+
+    moveUp();
+    const rightLines: (string | null)[] = new Array(totalHeight).fill(null);
+    for (let j = 0; j < typedLines.length; j++) {
+      rightLines[j] = bold(white(typedLines[j]!));
     }
+    renderFrame(logoLines, rightLines);
+
     await sleep(FRAME_MS, signal);
   }
-  process.stderr.write('\n');
 
-  // Render any remaining side content below the logo/wordmark
+  // Phase 3: Show commands (everything on right)
+  moveUp();
+  const fullRight: (string | null)[] = new Array(totalHeight).fill(null);
   if (sideContent) {
-    for (let j = logoLineCount + 1; j < sideContent.length; j++) {
-      if (sideContent[j]) {
-        process.stderr.write(`\x1b[35G${sideContent[j]}\x1b[K\n`);
+    for (let j = 0; j < sideContent.length; j++) {
+      if (j < wordmarkLineCount) {
+        fullRight[j] = bold(white(sideContent[j]!));
+      } else {
+        fullRight[j] = sideContent[j]!;
       }
     }
   }
+  renderFrame(logoLines, fullRight);
 }
 
 // Sync animation: starfield dots with progress counter
