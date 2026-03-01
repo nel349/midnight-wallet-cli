@@ -1,11 +1,12 @@
 {
   "name": "midnight-wallet-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Git-style CLI wallet for the Midnight blockchain",
   "bin": {
     "midnight": "./dist/wallet.js",
     "mn": "./dist/wallet.js",
+    "midnight-wallet-cli": "./dist/wallet.js",
     "midnight-wallet-mcp": "./dist/mcp-server.js"
   },
   "files": [

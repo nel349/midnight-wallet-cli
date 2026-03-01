@@ -1,12 +1,18 @@
 // midnight-wallet-cli entry point
 // Usage: midnight <command> [args]  (or: mn <command> [args])
 // Dispatches to command handlers via dynamic import
+// Also supports: midnight --mcp (starts MCP server for AI agent integration)
 
 import { createRequire } from 'node:module';
 import { parseArgs, hasFlag } from './lib/argv.ts';
 import { errorBox } from './ui/format.ts';
 import { classifyError } from './lib/exit-codes.ts';
 import { suppressStderr, writeJsonError } from './lib/json-output.ts';
+
+// --mcp: start MCP server instead of CLI (for: npx midnight-wallet-cli --mcp)
+if (process.argv.includes('--mcp')) {
+  await import('./mcp-server.ts');
+} else {
 
 const args = parseArgs();
 const jsonMode = hasFlag(args, 'json');
@@ -125,3 +131,5 @@ run().then(() => {
     process.exit(exitCode);
   }
 });
+
+}

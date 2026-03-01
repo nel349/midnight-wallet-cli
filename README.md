@@ -1,5 +1,7 @@
 # midnight-wallet-cli
 
+[![CI](https://github.com/nel349/midnight-wallet-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/nel349/midnight-wallet-cli/actions/workflows/ci.yml)
+
 A standalone CLI wallet for the Midnight blockchain. Manage wallets, check balances, transfer NIGHT tokens, and run a local devnet — all from the terminal.
 
 ## Install
@@ -86,7 +88,8 @@ Create `.mcp.json` in your project root:
 {
   "mcpServers": {
     "midnight-wallet": {
-      "command": "midnight-wallet-mcp"
+      "command": "npx",
+      "args": ["-y", "midnight-wallet-cli@latest", "--mcp"]
     }
   }
 }
@@ -100,7 +103,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 {
   "mcpServers": {
     "midnight-wallet": {
-      "command": "midnight-wallet-mcp"
+      "command": "npx",
+      "args": ["-y", "midnight-wallet-cli@latest", "--mcp"]
     }
   }
 }
@@ -114,7 +118,8 @@ Create `.cursor/mcp.json` in your project root:
 {
   "mcpServers": {
     "midnight-wallet": {
-      "command": "midnight-wallet-mcp"
+      "command": "npx",
+      "args": ["-y", "midnight-wallet-cli@latest", "--mcp"]
     }
   }
 }
@@ -129,7 +134,8 @@ Create `.vscode/mcp.json` in your project root:
   "servers": {
     "midnight-wallet": {
       "type": "stdio",
-      "command": "midnight-wallet-mcp"
+      "command": "npx",
+      "args": ["-y", "midnight-wallet-cli@latest", "--mcp"]
     }
   }
 }
@@ -143,11 +149,14 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 {
   "mcpServers": {
     "midnight-wallet": {
-      "command": "midnight-wallet-mcp"
+      "command": "npx",
+      "args": ["-y", "midnight-wallet-cli@latest", "--mcp"]
     }
   }
 }
 ```
+
+> **Tip:** If you installed globally (`npm install -g midnight-wallet-cli`), you can use `"command": "midnight-wallet-mcp"` instead of the `npx` form.
 
 ### Available MCP Tools
 
