@@ -421,30 +421,19 @@ The CLI includes an MCP (Model Context Protocol) server for native
 AI agent integration. Instead of parsing CLI output, agents call
 typed tools directly via JSON-RPC over stdio.
 
-Setup for Claude Desktop (~/.config/Claude/claude_desktop_config.json):
+Add to your MCP config (.mcp.json, claude_desktop_config.json, etc.):
 
   {
     "mcpServers": {
-      "midnight": {
-        "command": "npx",
-        "args": ["midnight-wallet-cli", "--mcp"]
-      }
-    }
-  }
-
-Or with a local install:
-
-  {
-    "mcpServers": {
-      "midnight": {
-        "command": "midnight-mcp"
+      "midnight-wallet": {
+        "command": "midnight-wallet-mcp"
       }
     }
   }
 
 The MCP server exposes 17 tools covering all CLI commands
 (excluding help and localnet logs which are not suitable for MCP).
-Run midnight-mcp to start the server (stdio transport).
+Run midnight-wallet-mcp to start the server (stdio transport).
 
 EXAMPLE WORKFLOW
 ────────────────

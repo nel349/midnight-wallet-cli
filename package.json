@@ -6,7 +6,7 @@
   "bin": {
     "midnight": "./dist/wallet.js",
     "mn": "./dist/wallet.js",
-    "midnight-mcp": "./dist/mcp-server.js"
+    "midnight-wallet-mcp": "./dist/mcp-server.js"
   },
   "files": [
     "dist"

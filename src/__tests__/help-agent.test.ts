@@ -78,7 +78,7 @@ describe('help --agent', () => {
     const out = io.stdout();
 
     expect(out).toContain('MCP SERVER');
-    expect(out).toContain('midnight-mcp');
+    expect(out).toContain('midnight-wallet-mcp');
     expect(out).toContain('mcpServers');
   });
 

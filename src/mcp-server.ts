@@ -1,6 +1,6 @@
 // Midnight Wallet CLI — MCP Server
 // Exposes all CLI commands as MCP tools via stdio transport
-// Launch: midnight-mcp (or: node dist/mcp-server.js)
+// Launch: midnight-wallet-mcp (or: node dist/mcp-server.js)
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
