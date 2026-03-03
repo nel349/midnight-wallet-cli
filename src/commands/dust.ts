@@ -2,14 +2,14 @@
 // Usage: midnight dust register | midnight dust status
 
 import * as ledger from '@midnight-ntwrk/ledger-v7';
-import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
 import * as rx from 'rxjs';
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
-import { DUST_TIMEOUT_MS, TX_TTL_MINUTES } from '../lib/constants.ts';
+import { registerNightUtxos } from '../lib/transfer.ts';
+import { DUST_TIMEOUT_MS } from '../lib/constants.ts';
 import { header, keyValue, divider, formatNight, formatDust, successMessage, toNight, toDust } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
@@ -130,35 +130,12 @@ async function dustRegister(
     } else {
       spinner.update(`Registering ${nightUtxos.length} UTXO(s) for dust generation...`);
 
-      const ttl = new Date(Date.now() + TX_TTL_MINUTES * 60 * 1000);
-      const dustReceiverAddress = state.dust.address;
-
-      // Map unshielded UTXOs to the dust wallet's UtxoWithMeta format
-      const dustUtxos: DustUtxoWithMeta[] = nightUtxos.map((coin: any) => ({
-        ...coin.utxo,
-        ctime: new Date(coin.meta.ctime),
-      }));
-
-      await bundle.facade.dust.waitForSyncedState();
-
-      const unprovenTx = await bundle.facade.dust.createDustGenerationTransaction(
-        new Date(),
-        ttl,
-        dustUtxos,
-        bundle.keystore.getPublicKey(),
-        dustReceiverAddress,
-      );
-
-      // Sign the dust registration intent
-      const intent = unprovenTx.intents?.get(1);
-      if (!intent) {
-        throw new Error('Dust generation intent not found on transaction');
-      }
-      const signature = bundle.keystore.signData(intent.signatureData(1));
-      const signedTx = await bundle.facade.dust.addDustGenerationSignature(unprovenTx, signature);
-
-      const finalized = await bundle.facade.finalizeTransaction(signedTx);
-      txHash = await bundle.facade.submitTransaction(finalized);
+      // Retries on error 138 (BalanceCheckOverspend) — on fresh localnets,
+      // the estimated dust capacity (allow_fee_payment) starts near zero and
+      // takes several minutes to exceed the registration fee.
+      txHash = await registerNightUtxos(bundle, nightUtxos, (status) => {
+        spinner.update(status);
+      });
       spinner.update(`Registration submitted (${txHash.slice(0, 12)}...), waiting for dust...`);
     }
 

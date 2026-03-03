@@ -105,7 +105,10 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
       result.txHash,
     ) + '\n');
     process.stderr.write('\n' + divider() + '\n');
-    process.stderr.write(dim('  Verify: midnight balance') + '\n\n');
+    process.stderr.write(dim('  Verify:         midnight balance') + '\n');
+    process.stderr.write(dim('  Register dust:  midnight dust register') + '\n');
+    process.stderr.write(dim('  Note: Dust generation takes a few minutes on a fresh wallet.') + '\n');
+    process.stderr.write(dim('        It will happen automatically on your first transfer.') + '\n\n');
   } catch (err) {
     spinner.stop('Failed');
     if (err instanceof Error && err.message.toLowerCase().includes('dust')) {
