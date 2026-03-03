@@ -93,15 +93,16 @@ export function parseAmount(amountStr: string): number {
 
 /**
  * Validate recipient address format (bech32m, matching network).
+ * Returns the decoded UnshieldedAddress for use with the facade.
  */
-export function validateRecipientAddress(address: string, networkConfig: NetworkConfig): void {
+export function validateRecipientAddress(address: string, networkConfig: NetworkConfig): UnshieldedAddress {
   const networkId = NETWORK_ID_MAP[networkConfig.networkId];
   if (networkId === undefined) {
     throw new Error(`Unknown networkId: ${networkConfig.networkId}`);
   }
 
   try {
-    MidnightBech32m.parse(address).decode(UnshieldedAddress, networkId);
+    return MidnightBech32m.parse(address).decode(UnshieldedAddress, networkId);
   } catch (err: any) {
     throw new Error(
       `Invalid recipient address: ${err.message}\n` +
@@ -292,7 +293,7 @@ export async function registerNightUtxos(
  *
  * 1. If dust coins already exist → return immediately (skip registration)
  * 2. If unregistered NIGHT UTXOs exist → register them (retries up to 10 min)
- * 3. Wait for walletBalance to become positive
+ * 3. Wait for balance to become positive
  *
  * Registration is skipped when dust is already available to avoid burning
  * dust on unnecessary registration transactions. New UTXOs (e.g. change
@@ -315,7 +316,7 @@ export async function ensureDust(
   // If dust coins are already available, proceed immediately.
   // Skip registration even if unregistered UTXOs exist — registration costs
   // dust, and we don't want to burn fees when dust is already sufficient.
-  if (state.dust.availableCoins.length > 0 || state.dust.walletBalance(new Date()) > 0n) {
+  if (state.dust.availableCoins.length > 0 || state.dust.balance(new Date()) > 0n) {
     onStatus?.('Dust available');
     return { alreadyAvailable: true };
   }
@@ -335,12 +336,12 @@ export async function ensureDust(
       ctime: new Date(coin.meta.ctime),
     }));
 
-    txHash = await registerNightUtxos(bundle, dustUtxos, state.dust.dustAddress, onStatus);
+    txHash = await registerNightUtxos(bundle, dustUtxos, state.dust.address, onStatus);
   } else {
     onStatus?.('UTXOs already registered, waiting for dust generation...');
   }
 
-  // Poll for walletBalance using waitForSyncedState() to avoid shareReplay
+  // Poll for balance using waitForSyncedState() to avoid shareReplay
   // buffer clearing between subscriptions (same issue as the initial check).
   // Each call is timeout-protected so a hung waitForSyncedState() can't block
   // the deadline check indefinitely.
@@ -353,7 +354,7 @@ export async function ensureDust(
         new Promise<never>((_, reject) => setTimeout(() =>
           reject(new Error('Poll sync timed out')), SYNC_ATTEMPT_TIMEOUT_MS)),
       ]);
-      if (pollState.dust.walletBalance(new Date()) > 0n) {
+      if (pollState.dust.balance(new Date()) > 0n) {
         onStatus?.('Dust available');
         return { alreadyAvailable: false, txHash };
       }
@@ -379,7 +380,7 @@ export async function ensureDust(
  */
 async function buildAndSubmitTransfer(
   bundle: FacadeBundle,
-  recipientAddress: string,
+  recipientAddress: UnshieldedAddress,
   amount: bigint,
   onProving?: () => void,
   onSubmitting?: () => void,
@@ -452,7 +453,7 @@ async function buildAndSubmitTransfer(
         try {
           const freshState = await quickSync(bundle);
           // Fail fast if dust is below fee threshold — retrying won't help
-          const dustBal = freshState.dust.walletBalance(new Date());
+          const dustBal = freshState.dust.balance(new Date());
           if (dustBal > 0n && dustBal < MIN_DUST_FOR_TRANSFER) {
             throw new Error(
               `Insufficient dust for transaction fees.\n` +
@@ -504,8 +505,8 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
 
   const amount = nightToMicro(amountNight);
 
-  // Validate recipient address
-  validateRecipientAddress(recipientAddress, networkConfig);
+  // Validate and decode recipient address
+  const decodedAddress = validateRecipientAddress(recipientAddress, networkConfig);
 
   // Suppress known transient SDK errors (Wallet.Sync: Internal Server Error, etc.)
   const unsuppress = suppressSdkTransientErrors(onSyncWarning);
@@ -515,7 +516,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
   const restoreRpc = suppressRpcNoise();
 
   // Build facade — may be rebuilt on sync retry
-  let bundle = buildFacade(seedBuffer, networkConfig);
+  let bundle = await buildFacade(seedBuffer, networkConfig);
   let shutdownComplete = false;
 
   // Signal handling — clean shutdown on abort
@@ -579,7 +580,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     // Without this check, the transfer would fail inside the SDK and enter a 2-minute
     // retry loop that can never succeed (ensureDust keeps returning alreadyAvailable
     // because dust > 0, but the SDK can't build transactions with insufficient dust).
-    const dustBalance = syncedState.dust.walletBalance(new Date());
+    const dustBalance = syncedState.dust.balance(new Date());
     if (dustBalance > 0n && dustBalance < MIN_DUST_FOR_TRANSFER) {
       throw new Error(
         `Insufficient dust for transaction fees.\n` +
@@ -594,7 +595,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     // Build, sign, prove, submit (re-ensures dust on retry)
     const txHash = await buildAndSubmitTransfer(
       bundle,
-      recipientAddress,
+      decodedAddress,
       amount,
       onProving,
       onSubmitting,

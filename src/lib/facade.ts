@@ -39,7 +39,7 @@ export interface FacadeBundle {
  * Build a complete WalletFacade from a seed and network config.
  * Returns the facade plus all keys needed for signing and proving.
  */
-export function buildFacade(seedBuffer: Buffer, networkConfig: NetworkConfig): FacadeBundle {
+export async function buildFacade(seedBuffer: Buffer, networkConfig: NetworkConfig): Promise<FacadeBundle> {
   const networkId = NETWORK_ID_MAP[networkConfig.networkId];
   if (networkId === undefined) {
     throw new Error(`Unknown networkId: ${networkConfig.networkId}`);
@@ -53,49 +53,32 @@ export function buildFacade(seedBuffer: Buffer, networkConfig: NetworkConfig): F
   const dustSecretKey = ledger.DustSecretKey.fromSeed(dustSeed);
   const keystore = createKeystore(unshieldedSeed, networkId);
 
-  const shieldedConfig = {
+  // Merged configuration for WalletFacade.init() — all wallet types
+  // and services draw from this single config object.
+  const configuration = {
     networkId,
     indexerClientConnection: {
       indexerHttpUrl: networkConfig.indexer,
       indexerWsUrl: networkConfig.indexerWS,
     },
-    provingServerUrl: new URL(networkConfig.proofServer),
-    relayURL: new URL(networkConfig.node),
-  };
-
-  const unshieldedConfig = {
-    networkId,
-    indexerClientConnection: {
-      indexerHttpUrl: networkConfig.indexer,
-      indexerWsUrl: networkConfig.indexerWS,
-    },
-    txHistoryStorage: new InMemoryTransactionHistoryStorage(),
-  };
-
-  const dustConfig = {
-    networkId,
     costParameters: {
       additionalFeeOverhead: DUST_COST_OVERHEAD,
       feeBlocksMargin: DUST_FEE_BLOCKS_MARGIN,
     },
-    indexerClientConnection: {
-      indexerHttpUrl: networkConfig.indexer,
-      indexerWsUrl: networkConfig.indexerWS,
-    },
+    txHistoryStorage: new InMemoryTransactionHistoryStorage(),
     provingServerUrl: new URL(networkConfig.proofServer),
     relayURL: new URL(networkConfig.node),
   };
 
-  const shieldedWallet = ShieldedWallet(shieldedConfig).startWithSecretKeys(zswapSecretKeys);
-  const unshieldedWallet = UnshieldedWallet(unshieldedConfig).startWithPublicKey(
-    PublicKey.fromKeyStore(keystore)
-  );
-  const dustWallet = DustWallet(dustConfig).startWithSecretKey(
-    dustSecretKey,
-    ledger.LedgerParameters.initialParameters().dust
-  );
-
-  const facade = new WalletFacade(shieldedWallet, unshieldedWallet, dustWallet);
+  const facade = await WalletFacade.init({
+    configuration,
+    shielded: (cfg) => ShieldedWallet(cfg).startWithSecretKeys(zswapSecretKeys),
+    unshielded: (cfg) => UnshieldedWallet(cfg).startWithPublicKey(PublicKey.fromKeyStore(keystore)),
+    dust: (cfg) => DustWallet(cfg).startWithSecretKey(
+      dustSecretKey,
+      ledger.LedgerParameters.initialParameters().dust,
+    ),
+  });
 
   return { facade, keystore, zswapSecretKeys, dustSecretKey };
 }

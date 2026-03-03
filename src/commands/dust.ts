@@ -38,7 +38,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     address: config.address,
   });
 
-  const bundle = buildFacade(seedBuffer, networkConfig);
+  const bundle = await buildFacade(seedBuffer, networkConfig);
 
   const cleanup = async () => {
     try { await stopFacade(bundle); } catch { /* best-effort */ }
@@ -116,7 +116,7 @@ async function dustRegister(
     const state = await rx.firstValueFrom(
       bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
     );
-    const dustBal = state.dust.walletBalance(new Date());
+    const dustBal = state.dust.balance(new Date());
 
     if (result.alreadyAvailable) {
       spinner.stop('Dust already available');
@@ -180,7 +180,7 @@ async function dustStatus(
       bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
     );
 
-    const dustBalance = state.dust.walletBalance(new Date());
+    const dustBalance = state.dust.balance(new Date());
     const hasAvailableDust = state.dust.availableCoins.length > 0;
     const allUtxos = state.unshielded.availableCoins;
     const unregisteredUtxos = allUtxos.filter(
