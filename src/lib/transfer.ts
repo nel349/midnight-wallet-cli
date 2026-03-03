@@ -20,6 +20,8 @@ import {
   DUST_REGISTRATION_TIMEOUT_MS,
   DUST_REGISTRATION_RETRY_DELAY_MS,
   SYNC_ATTEMPT_TIMEOUT_MS,
+  DUST_COST_OVERHEAD,
+  MIN_DUST_FOR_TRANSFER,
 } from './constants.ts';
 
 const NETWORK_ID_MAP: Record<string, NetworkId.NetworkId> = {
@@ -150,6 +152,15 @@ export function isDustRelatedError(err: any): boolean {
     isTransactionRejectedError(err);
 }
 
+/** Format dust specks to human-readable DUST string (e.g. "0.300000"). Lib-layer safe (no UI import). */
+function dustToString(specks: bigint): string {
+  const abs = specks < 0n ? -specks : specks;
+  const whole = abs / 1_000_000_000_000_000n;
+  const frac = abs % 1_000_000_000_000_000n;
+  const sign = specks < 0n ? '-' : '';
+  return `${sign}${whole}.${frac.toString().padStart(15, '0').slice(0, 6)}`;
+}
+
 /** Format milliseconds as "Xs" or "Xm Ys" for human-friendly elapsed display. */
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.round(ms / 1000);
@@ -193,7 +204,14 @@ async function submitDustRegistration(
 ): Promise<string> {
   const ttl = new Date(Date.now() + TX_TTL_MINUTES * 60 * 1000);
 
-  await bundle.facade.dust.waitForSyncedState();
+  // Timeout-protected: waitForSyncedState() can hang if the dust wallet's
+  // shareReplay buffer cleared or the indexer is slow. Throw a retryable error
+  // so registerNightUtxos' retry loop catches it.
+  await Promise.race([
+    bundle.facade.dust.waitForSyncedState(),
+    new Promise<never>((_, reject) => setTimeout(() =>
+      reject(new Error('Insufficient funds: dust wallet sync timed out')), SYNC_ATTEMPT_TIMEOUT_MS)),
+  ]);
 
   const unprovenTx = await bundle.facade.dust.createDustGenerationTransaction(
     new Date(),
@@ -324,13 +342,23 @@ export async function ensureDust(
 
   // Poll for walletBalance using waitForSyncedState() to avoid shareReplay
   // buffer clearing between subscriptions (same issue as the initial check).
+  // Each call is timeout-protected so a hung waitForSyncedState() can't block
+  // the deadline check indefinitely.
   onStatus?.('Waiting for dust tokens...');
   const pollStart = Date.now();
   while (Date.now() - pollStart < DUST_TIMEOUT_MS) {
-    const pollState = await bundle.facade.waitForSyncedState();
-    if (pollState.dust.walletBalance(new Date()) > 0n) {
-      onStatus?.('Dust available');
-      return { alreadyAvailable: false, txHash };
+    try {
+      const pollState = await Promise.race([
+        bundle.facade.waitForSyncedState(),
+        new Promise<never>((_, reject) => setTimeout(() =>
+          reject(new Error('Poll sync timed out')), SYNC_ATTEMPT_TIMEOUT_MS)),
+      ]);
+      if (pollState.dust.walletBalance(new Date()) > 0n) {
+        onStatus?.('Dust available');
+        return { alreadyAvailable: false, txHash };
+      }
+    } catch {
+      // Timeout or sync error — continue polling until deadline
     }
     await new Promise(resolve => setTimeout(resolve, 5_000));
   }
@@ -417,14 +445,26 @@ async function buildAndSubmitTransfer(
         continue;
       }
 
-      // Dust-related: re-ensure dust is available, then retry
+      // Dust-related: check sufficiency, re-ensure dust, then retry
       if (isDustRelatedError(err) && Date.now() < dustDeadline) {
         const elapsed = formatElapsed(Date.now() - startTime);
         onDust?.(`Dust insufficient, re-ensuring (${elapsed} elapsed)...`);
         try {
           const freshState = await quickSync(bundle);
+          // Fail fast if dust is below fee threshold — retrying won't help
+          const dustBal = freshState.dust.walletBalance(new Date());
+          if (dustBal > 0n && dustBal < MIN_DUST_FOR_TRANSFER) {
+            throw new Error(
+              `Insufficient dust for transaction fees.\n` +
+              `Available: ${dustToString(dustBal)} DUST, need ≥${dustToString(MIN_DUST_FOR_TRANSFER)} DUST.\n` +
+              `Dust regenerates over time from registered NIGHT UTXOs.\n` +
+              `Check status: midnight dust status`
+            );
+          }
           await ensureDust(bundle, onDust, freshState);
-        } catch {
+        } catch (retryErr: any) {
+          // Re-throw "Insufficient dust" immediately — not retryable
+          if (String(retryErr?.message).startsWith('Insufficient dust')) throw retryErr;
           // quickSync or ensureDust may fail (shareReplay stale-read) — wait and retry anyway
           await new Promise(resolve => setTimeout(resolve, 5_000));
         }
@@ -533,6 +573,21 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
 
     // Ensure dust — pass syncedState to avoid shareReplay stale-read
     await ensureDust(bundle, onDust, syncedState);
+
+    // Pre-flight: fail fast if dust exists but is below the minimum for a transfer.
+    // The actual fee = feesWithMargin(tx, params, 5) + DUST_COST_OVERHEAD (~0.5 DUST total).
+    // Without this check, the transfer would fail inside the SDK and enter a 2-minute
+    // retry loop that can never succeed (ensureDust keeps returning alreadyAvailable
+    // because dust > 0, but the SDK can't build transactions with insufficient dust).
+    const dustBalance = syncedState.dust.walletBalance(new Date());
+    if (dustBalance > 0n && dustBalance < MIN_DUST_FOR_TRANSFER) {
+      throw new Error(
+        `Insufficient dust for transaction fees.\n` +
+        `Available: ${dustToString(dustBalance)} DUST, need ≥${dustToString(MIN_DUST_FOR_TRANSFER)} DUST.\n` +
+        `Dust regenerates over time from registered NIGHT UTXOs.\n` +
+        `Check status: midnight dust status`
+      );
+    }
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 

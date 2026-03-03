@@ -14,6 +14,14 @@ export const TOKEN_MULTIPLIER = 1_000_000;
 export const DUST_COST_OVERHEAD = 300_000_000_000_000n;
 export const DUST_FEE_BLOCKS_MARGIN = 5;
 
+// Minimum dust balance for a transfer transaction.
+// The actual fee = feesWithMargin(tx, ledgerParams, feeBlocksMargin) + DUST_COST_OVERHEAD.
+// We can't compute the exact feesWithMargin without building the transaction, but
+// observed costs are ~0.5 DUST per unshielded transfer. 0.6 DUST gives headroom.
+// Used as a pre-flight check to fail fast instead of entering the SDK's internal
+// balancing which hangs or retries uselessly when dust is too low.
+export const MIN_DUST_FOR_TRANSFER = 800_000_000_000_000n;
+
 // Timeouts (milliseconds)
 export const SYNC_TIMEOUT_MS = 300_000;       // 5 minutes — full wallet sync (used by dust/balance commands)
 export const SYNC_ATTEMPT_TIMEOUT_MS = 30_000; // 30 seconds — per sync attempt (transfer retries on timeout)

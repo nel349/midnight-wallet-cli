@@ -101,12 +101,55 @@ export function buildFacade(seedBuffer: Buffer, networkConfig: NetworkConfig): F
 }
 
 /**
+ * SDK bug workaround: the dust wallet's `isStrictlyComplete()` requires
+ * `isConnected === true`, but `isConnected` only becomes true when a non-empty
+ * batch of DustLedgerEvents arrives from the indexer. On an idle chain (no new
+ * dust transactions), empty batches don't set `isConnected`, so
+ * `isStrictlyComplete()` stays false forever and `isSynced` never becomes true.
+ *
+ * This predicate bypasses the `isConnected` check for dust by verifying the
+ * actual sync index values directly: if `appliedIndex >= highestRelevantWalletIndex`,
+ * the dust wallet is caught up regardless of `isConnected`.
+ *
+ * Shielded and unshielded wallets don't have this issue because the indexer
+ * sends progress messages (unshielded) or zswap events (shielded) on every block.
+ */
+function isFacadeSynced(state: FacadeState): boolean {
+  const shieldedOk = state.shielded?.state?.progress?.isStrictlyComplete() ?? false;
+  const unshieldedOk = state.unshielded?.progress?.isStrictlyComplete() ?? false;
+
+  // For dust: try isStrictlyComplete first; if it fails due to isConnected bug,
+  // fall back to checking index values directly.
+  let dustOk = state.dust?.state?.progress?.isStrictlyComplete() ?? false;
+  if (!dustOk) {
+    try {
+      const p = state.dust?.state?.progress as any;
+      if (p && p.appliedIndex >= p.highestRelevantWalletIndex) {
+        dustOk = true;
+      }
+    } catch { /* best-effort */ }
+  }
+
+  return shieldedOk && unshieldedOk && dustOk;
+}
+
+/** Check if dust wallet sync is pending (for diagnostics). */
+function isDustSyncPending(state: FacadeState): boolean {
+  if (state.dust?.state?.progress?.isStrictlyComplete()) return false;
+  try {
+    const p = state.dust?.state?.progress as any;
+    if (p && p.appliedIndex >= p.highestRelevantWalletIndex) return false;
+  } catch { /* best-effort */ }
+  return true;
+}
+
+/**
  * Start the facade and wait for initial sync.
  * Calls onProgress with sync progress updates.
  *
  * Uses a single persistent subscription to facade.state() that serves three purposes:
  * 1. Reports unshielded progress (and which wallets are still syncing)
- * 2. Detects isSynced to resolve the sync promise
+ * 2. Detects sync completion to resolve the sync promise
  * 3. Keeps shareReplay({ refCount: true }) buffers alive for the command lifetime
  */
 export async function startAndSyncFacade(
@@ -145,14 +188,15 @@ export async function startAndSyncFacade(
           try {
             const pending: string[] = [];
             if (!state.shielded?.state?.progress?.isStrictlyComplete()) pending.push('shielded');
-            if (!state.dust?.state?.progress?.isStrictlyComplete()) pending.push('dust');
+            if (isDustSyncPending(state)) pending.push('dust');
             if (!state.unshielded?.progress?.isStrictlyComplete()) pending.push('unshielded');
             if (pending.length > 0) onSyncDetail(pending.join(', '));
           } catch { /* best-effort diagnostic */ }
         }
 
-        // Resolve when fully synced
-        if (state.isSynced) {
+        // Resolve when fully synced (uses custom predicate to work around
+        // dust wallet isConnected bug — see isFacadeSynced above)
+        if (isFacadeSynced(state)) {
           resolved = true;
           clearTimeout(timeout);
           resolve(state);
@@ -175,7 +219,7 @@ export async function startAndSyncFacade(
 export async function quickSync(bundle: FacadeBundle): Promise<FacadeState> {
   return rx.firstValueFrom(
     bundle.facade.state().pipe(
-      rx.filter((state) => state.isSynced),
+      rx.filter((state) => isFacadeSynced(state)),
       rx.timeout(PRE_SEND_SYNC_TIMEOUT_MS),
     )
   );
