@@ -26,8 +26,16 @@ export const TX_TTL_MINUTES = 10;
 export const MAX_RETRY_ATTEMPTS = 3;
 export const RETRY_BASE_DELAY_MS = 1_000; // 1s, 2s, 4s (exponential)
 
-// Stale UTXO error code from the node
+// Dust registration retry — on a fresh localnet, the estimated dust generation
+// may be less than the registration fee until enough time has passed since UTXO
+// creation. The SDK computes allow_fee_payment = (currentTime - utxo.ctime) * rate,
+// which starts near zero and grows over time. Observed ~5 minutes on fresh localnets.
+export const DUST_REGISTRATION_TIMEOUT_MS = 600_000; // 10 minutes max for registration retries
+export const DUST_REGISTRATION_RETRY_DELAY_MS = 15_000; // 15 seconds between retries
+
+// Error codes from the node
 export const STALE_UTXO_ERROR_CODE = 115;
+export const BALANCE_OVERSPEND_ERROR_CODE = 138;
 
 // Default storage directory
 export const MIDNIGHT_DIR = '.midnight';

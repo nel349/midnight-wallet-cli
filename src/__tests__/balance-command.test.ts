@@ -5,13 +5,14 @@ import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
 import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
+import { detectTestcontainerPorts } from '../lib/network.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
 // Tests that connect to the local indexer require Docker (midnight localnet up).
-// GitHub Actions sets CI=true — skip integration tests there.
-const HAS_INDEXER = !process.env.CI;
+// Check for an actual running indexer instead of just CI env var.
+const HAS_INDEXER = detectTestcontainerPorts().indexerPort !== undefined;
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-balance-cmd-test-${process.pid}`);
 
