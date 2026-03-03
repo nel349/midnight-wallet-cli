@@ -14,11 +14,19 @@ Feed each scene's narration text to ElevenLabs separately, then sync with the sc
 
 > First, install the package globally with npm. This gives you two commands: midnight, or mn for short, and midnight wallet MCP for AI agent integration.
 
+npm install -g midnight-wallet-cli
+midnight --version
+mn --version
+midnight
+
 ---
 
 ## Scene 3: Start local network (show localnet up + status)
 
 > Let's start by spinning up a local Midnight network using Docker. We run midnight localnet up, which launches a node, an indexer, and a proof server. Once the services are running, we can check their status with midnight localnet status.
+
+midnight localnet up
+midnight localnet status
 
 ---
 
@@ -26,35 +34,53 @@ Feed each scene's narration text to ElevenLabs separately, then sync with the sc
 
 > Now we generate a new wallet on the undeployed network. The CLI creates a BIP-39 mnemonic, derives a seed, and saves everything to a wallet file. We can view the wallet details with midnight info — this shows the address and network without exposing any secrets.
 
+midnight generate --network undeployed
+midnight info
+
 ---
 
 ## Scene 5: Airdrop (show airdrop + balance)
 
-> On the local network, we can fund our wallet using the airdrop command. Let's airdrop 1000 NIGHT tokens. The transaction is submitted to the local node and confirmed within seconds. Checking the balance confirms the tokens arrived.
+> On the local network, we can fund our wallet using the airdrop command. Let's airdrop 1000 NIGHT tokens. The transaction is submitted to the local node and confirmed within seconds. Checking the balance confirms the tokens arrived. We already had 1000 NIGHT in this wallet so the balance is now 2000 NIGHT.
+
+midnight airdrop 1000
+midnight balance
 
 ---
 
-## Scene 6: Transfer (show transfer + balance)
+## Scene 6: Dust (show dust register + status)
+
+> Midnight uses dust tokens for transaction fees. We register our NIGHT tokens for dust generation with midnight dust register, then check the status. This is required before making transfers, deploying or interacting with smart contracts.
+
+midnight dust register
+midnight dust status
+
+---
+
+## Scene 7: Transfer (show transfer + balance)
 
 > Let's transfer 100 NIGHT to another wallet. We generate a second wallet, then run midnight transfer with the recipient address and amount. After the transaction confirms, our balance reflects the transfer.
 
+midnight generate --output recipient_wallet.json
+midnight transfer recipient_wallet_address 100
+midnight balance
+midnight balance recipient_wallet_address
+
 ---
 
-## Scene 7: Dust (show dust register + status)
 
-> Midnight uses dust tokens for transaction fees. We register our NIGHT tokens for dust generation with midnight dust register, then check the status. This is required before deploying or interacting with smart contracts.
-
----
 
 ## Scene 8: JSON output (show --json flag)
 
 > Every command supports a json flag for structured output. This makes it easy to integrate with scripts and automation. Agents can also use midnight help json to discover all available commands and their output schemas programmatically.
 
+midnight balance --json
+
 ---
 
 ## Scene 9: MCP Server intro (show .mcp.json config)
 
-> The CLI includes a built-in MCP server for AI agent integration. To set it up, just add a simple config file to your project. For Claude Code, create a dot MCP dot json file with the npx command pointing to midnight wallet CLI with the MCP flag. The same pattern works in Cursor, VS Code, and other editors.
+> The CLI includes a built-in MCP server for AI agent integration. To set it up, just add a simple config file to your project. For Claude Code, create a dot MCP dot json file with the npx command pointing to midnight wallet CLI with the MCP flag. The same pattern works in Cursor, VS Code, and other editors. Instructions included in the package README.
 
 ---
 
@@ -66,4 +92,4 @@ Feed each scene's narration text to ElevenLabs separately, then sync with the sc
 
 ## Scene 11: Outro
 
-> That's midnight wallet CLI — a complete wallet toolkit for the Midnight blockchain, with first-class support for AI agents. Install it with npm install minus g midnight wallet CLI, and check out the README for full documentation. Happy building.
+> That's midnight wallet CLI — a complete wallet toolkit for the Midnight blockchain, with first-class support for AI agents. Install it with npm install, and check out the README for full documentation. Happy building.

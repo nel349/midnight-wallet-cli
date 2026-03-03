@@ -5,3 +5,5 @@ dist/
 wallet.json
 .DS_Store
 *.tgz
+demo/videos/
+recipient_wallet.json
