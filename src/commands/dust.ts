@@ -2,15 +2,13 @@
 // Usage: midnight dust register | midnight dust status
 
 import * as ledger from '@midnight-ntwrk/ledger-v7';
-import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
 import * as rx from 'rxjs';
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
-import { registerNightUtxos } from '../lib/transfer.ts';
-import { DUST_TIMEOUT_MS } from '../lib/constants.ts';
+import { ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatNight, formatDust, successMessage, toNight, toDust } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
@@ -50,11 +48,13 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   signal?.addEventListener('abort', onAbort, { once: true });
 
   // Suppress known transient SDK errors (Wallet.Sync: Internal Server Error, etc.)
-  // The onWarning ref is updated by inner functions so warnings route to the active spinner
   const warningRef: { current?: (tag: string, msg: string) => void } = {};
   const unsuppress = suppressSdkTransientErrors((tag, msg) => {
     warningRef.current?.(tag, msg);
   });
+
+  // Suppress polkadot-js RPC-CORE noise (single point for entire command)
+  const restoreRpc = suppressRpcNoise();
 
   const isJson = hasFlag(args, 'json');
 
@@ -66,6 +66,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     }
   } finally {
     signal?.removeEventListener('abort', onAbort);
+    restoreRpc();
     unsuppress();
     await cleanup();
   }
@@ -89,88 +90,57 @@ async function dustRegister(
   }
 
   try {
-    await startAndSyncFacade(bundle, (applied, highest) => {
+    const syncedState = await startAndSyncFacade(bundle, (applied, highest) => {
       if (highest > 0) {
-        const pct = Math.round((applied / highest) * 100);
-        spinner.update(`Syncing wallet... ${pct}%`);
+        const pct = Math.min(Math.round((applied / highest) * 100), 100);
+        spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
       }
+    }, (pending) => {
+      spinner.update(`Syncing wallet... (waiting: ${pending})`);
     });
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
     spinner.update('Checking dust status...');
 
-    const state = await rx.firstValueFrom(
-      bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
-    );
-
-    // Already have dust?
-    if (state.dust.availableCoins.length > 0) {
-      const dustBal = state.dust.walletBalance(new Date());
-      spinner.stop('Dust already available');
-      if (jsonMode) {
-        writeJsonResult({ subcommand: 'register', dustBalance: toDust(dustBal) });
-        return;
-      }
-      process.stdout.write(dustBal.toString() + '\n');
-      process.stderr.write('\n' + successMessage(
-        `Dust tokens already available: ${formatDust(dustBal)}`,
-      ) + '\n\n');
-      return;
-    }
-
-    // Find unregistered UTXOs
-    const nightUtxos = state.unshielded.availableCoins.filter(
-      (coin: any) => coin.meta?.registeredForDustGeneration !== true
-    );
-
-    let txHash: string | undefined;
-
-    if (nightUtxos.length === 0) {
-      spinner.update('All UTXOs already registered, waiting for dust generation...');
-    } else {
-      spinner.update(`Registering ${nightUtxos.length} UTXO(s) for dust generation...`);
-
-      const dustUtxos: DustUtxoWithMeta[] = nightUtxos.map((coin: any) => ({
-        ...coin.utxo,
-        ctime: new Date(coin.meta.ctime),
-      }));
-
-      // Retries on error 138 (BalanceCheckOverspend) — on fresh localnets,
-      // the estimated dust capacity (allow_fee_payment) starts near zero and
-      // takes several minutes to exceed the registration fee.
-      txHash = await registerNightUtxos(bundle, dustUtxos, state.dust.dustAddress, (status) => {
-        spinner.update(status);
-      });
-      spinner.update(`Registration submitted (${txHash.slice(0, 12)}...), waiting for dust...`);
-    }
+    // Use shared ensureDust — handles: early return if dust exists,
+    // registration of unregistered UTXOs, waiting for dust coins.
+    // Pass syncedState to avoid shareReplay stale-read issue.
+    const result = await ensureDust(bundle, (status) => {
+      spinner.update(status);
+    }, syncedState);
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
-    // Wait for dust to generate
-    const dustState = await rx.firstValueFrom(
-      bundle.facade.state().pipe(
-        rx.throttleTime(5_000),
-        rx.filter((s) => s.isSynced),
-        rx.filter((s) => s.dust.walletBalance(new Date()) > 0n),
-        rx.timeout(DUST_TIMEOUT_MS),
-      )
+    // Get final dust balance for output
+    const state = await rx.firstValueFrom(
+      bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
     );
+    const dustBal = state.dust.walletBalance(new Date());
 
-    const dustBal = dustState.dust.walletBalance(new Date());
-    spinner.stop('Dust registration complete');
+    if (result.alreadyAvailable) {
+      spinner.stop('Dust already available');
+    } else {
+      spinner.stop('Dust registration complete');
+    }
 
     if (jsonMode) {
-      const result: Record<string, unknown> = { subcommand: 'register', dustBalance: toDust(dustBal) };
-      if (txHash) result.txHash = txHash;
-      writeJsonResult(result);
+      const json: Record<string, unknown> = { subcommand: 'register', dustBalance: toDust(dustBal) };
+      if (result.txHash) json.txHash = result.txHash;
+      writeJsonResult(json);
       return;
     }
 
     process.stdout.write(dustBal.toString() + '\n');
-    process.stderr.write('\n' + successMessage(
-      `Dust tokens available: ${formatDust(dustBal)}`,
-    ) + '\n\n');
+    if (result.alreadyAvailable) {
+      process.stderr.write('\n' + successMessage(
+        `Dust tokens already available: ${formatDust(dustBal)}`,
+      ) + '\n\n');
+    } else {
+      process.stderr.write('\n' + successMessage(
+        `Dust tokens available: ${formatDust(dustBal)}`,
+      ) + '\n\n');
+    }
   } catch (err) {
     spinner.stop('Failed');
     throw err;
@@ -195,9 +165,11 @@ async function dustStatus(
   try {
     await startAndSyncFacade(bundle, (applied, highest) => {
       if (highest > 0) {
-        const pct = Math.round((applied / highest) * 100);
-        spinner.update(`Syncing wallet... ${pct}%`);
+        const pct = Math.min(Math.round((applied / highest) * 100), 100);
+        spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
       }
+    }, (pending) => {
+      spinner.update(`Syncing wallet... (waiting: ${pending})`);
     });
 
     if (signal?.aborted) throw new Error('Operation cancelled');

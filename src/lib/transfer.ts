@@ -19,6 +19,7 @@ import {
   STALE_UTXO_ERROR_CODE,
   DUST_REGISTRATION_TIMEOUT_MS,
   DUST_REGISTRATION_RETRY_DELAY_MS,
+  SYNC_ATTEMPT_TIMEOUT_MS,
 } from './constants.ts';
 
 const NETWORK_ID_MAP: Record<string, NetworkId.NetworkId> = {
@@ -34,6 +35,7 @@ export interface TransferParams {
   amountNight: number;
   signal?: AbortSignal;
   onSync?: (applied: number, highest: number) => void;
+  onSyncDetail?: (walletsStillSyncing: string) => void;
   onDust?: (status: string) => void;
   onProving?: () => void;
   onSubmitting?: () => void;
@@ -43,6 +45,11 @@ export interface TransferParams {
 export interface TransferResult {
   txHash: string;
   amountMicroNight: bigint;
+}
+
+export interface EnsureDustResult {
+  alreadyAvailable: boolean;
+  txHash?: string;
 }
 
 /**
@@ -101,6 +108,8 @@ export function validateRecipientAddress(address: string, networkConfig: Network
   }
 }
 
+// ── Error detection ──────────────────────────────────────────────────
+
 /**
  * Check if an error is a transaction submission rejection from the node.
  *
@@ -127,6 +136,20 @@ function isTransactionRejectedError(err: any): boolean {
   return false;
 }
 
+/**
+ * Check if an error is dust-related — the SDK throws various messages when
+ * dust capacity is too low to pay fees. All of these are retryable by
+ * waiting for dust generation capacity to grow.
+ */
+export function isDustRelatedError(err: any): boolean {
+  const msg = err?.message?.toLowerCase() ?? '';
+  return msg.includes('not enough dust') ||
+    msg.includes('dust generated') ||
+    msg.includes('insufficient funds') ||
+    msg.includes('no dust tokens') ||
+    isTransactionRejectedError(err);
+}
+
 /** Format milliseconds as "Xs" or "Xm Ys" for human-friendly elapsed display. */
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.round(ms / 1000);
@@ -135,6 +158,29 @@ function formatElapsed(ms: number): string {
   const seconds = totalSeconds % 60;
   return `${minutes}m ${seconds}s`;
 }
+
+// ── RPC noise suppression ────────────────────────────────────────────
+
+/**
+ * Suppress polkadot-js RPC-CORE noise (logs "Custom error: 138" to
+ * console.warn/error on each failed submit). Returns a restore function.
+ *
+ * Called once at the outer level (executeTransfer, dustRegister) —
+ * inner functions like registerNightUtxos do NOT suppress separately.
+ */
+export function suppressRpcNoise(): () => void {
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const hasNoise = (args: any[]) => args.some(a => String(a).includes('RPC-CORE'));
+  console.warn = (...args: any[]) => { if (!hasNoise(args)) originalWarn(...args); };
+  console.error = (...args: any[]) => { if (!hasNoise(args)) originalError(...args); };
+  return () => {
+    console.warn = originalWarn;
+    console.error = originalError;
+  };
+}
+
+// ── Dust registration ────────────────────────────────────────────────
 
 /**
  * Build and submit a dust registration transaction using the v1 DustWallet API.
@@ -176,7 +222,7 @@ async function submitDustRegistration(
  * Each retry rebuilds the transaction with a newer timestamp, giving a
  * larger time delta and thus a larger allow_fee_payment.
  *
- * Exported so dust.ts command can reuse the same retry logic.
+ * Caller is responsible for RPC noise suppression.
  */
 export async function registerNightUtxos(
   bundle: FacadeBundle,
@@ -187,28 +233,16 @@ export async function registerNightUtxos(
   const startTime = Date.now();
   const deadline = startTime + DUST_REGISTRATION_TIMEOUT_MS;
   let lastError: Error | undefined;
+  let retrying = false;
 
-  // Suppress polkadot-js RPC-CORE noise during retries (it logs
-  // "Custom error: 138" to console.warn/error on each failed submit).
-  const originalWarn = console.warn;
-  const originalError = console.error;
-  const hasRpcNoise = (args: any[]) => args.some(a => String(a).includes('RPC-CORE'));
-  const suppressRpcNoise = () => {
-    console.warn = (...args: any[]) => {
-      if (hasRpcNoise(args)) return;
-      originalWarn(...args);
-    };
-    console.error = (...args: any[]) => {
-      if (hasRpcNoise(args)) return;
-      originalError(...args);
-    };
-  };
-  const restoreConsole = () => {
-    console.warn = originalWarn;
-    console.error = originalError;
-  };
-
-  suppressRpcNoise();
+  // Once in retry mode, tick the elapsed timer every second so the spinner
+  // updates continuously — during the sleep AND during submission attempts.
+  const elapsedInterval = setInterval(() => {
+    if (retrying && onStatus) {
+      const elapsed = formatElapsed(Date.now() - startTime);
+      onStatus(`Waiting for dust generation capacity (${elapsed} elapsed, ~5 min on fresh wallets)...`);
+    }
+  }, 1_000);
 
   try {
     while (Date.now() < deadline) {
@@ -216,7 +250,8 @@ export async function registerNightUtxos(
         return await submitDustRegistration(bundle, dustUtxos, dustReceiverAddress);
       } catch (err: any) {
         lastError = err;
-        if (isTransactionRejectedError(err) && Date.now() + DUST_REGISTRATION_RETRY_DELAY_MS < deadline) {
+        if (isDustRelatedError(err) && Date.now() + DUST_REGISTRATION_RETRY_DELAY_MS < deadline) {
+          retrying = true;
           const elapsed = formatElapsed(Date.now() - startTime);
           onStatus?.(`Waiting for dust generation capacity (${elapsed} elapsed, ~5 min on fresh wallets)...`);
           await new Promise(resolve => setTimeout(resolve, DUST_REGISTRATION_RETRY_DELAY_MS));
@@ -228,65 +263,91 @@ export async function registerNightUtxos(
 
     throw lastError ?? new Error('Dust registration timed out');
   } finally {
-    restoreConsole();
+    clearInterval(elapsedInterval);
   }
 }
 
-/**
- * Wait for dust to become available.
- * If no dust and unregistered UTXOs exist, registers them first.
- *
- * Uses the DustWallet API (createDustGenerationTransaction) with
- * retry on error 138 (BalanceCheckOverspend) — on fresh localnets,
- * the estimated dust capacity takes several minutes to exceed the fee.
- */
-async function ensureDust(
-  bundle: FacadeBundle,
-  onDust?: (status: string) => void,
-): Promise<void> {
-  const state = await rx.firstValueFrom(
-    bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
-  );
+// ── Ensure dust (shared by transfer, airdrop, and dust register) ─────
 
-  // Check for unregistered NIGHT UTXOs — always register new ones,
-  // even if some dust already exists, to maximize dust generation rate.
+/**
+ * Ensure dust tokens are available for paying transaction fees.
+ *
+ * 1. If dust coins already exist → return immediately (skip registration)
+ * 2. If unregistered NIGHT UTXOs exist → register them (retries up to 10 min)
+ * 3. Wait for walletBalance to become positive
+ *
+ * Registration is skipped when dust is already available to avoid burning
+ * dust on unnecessary registration transactions. New UTXOs (e.g. change
+ * outputs) can be registered later via `midnight dust register`.
+ *
+ * Used by: executeTransfer (transfer/airdrop commands), dustRegister command.
+ * Caller is responsible for RPC noise suppression.
+ */
+export async function ensureDust(
+  bundle: FacadeBundle,
+  onStatus?: (status: string) => void,
+  /** Pre-fetched synced state from the caller. Avoids re-fetching through
+   *  facade.state() / waitForSyncedState() which are unreliable due to
+   *  shareReplay({ refCount: true }) clearing its buffer between subscriptions. */
+  syncedState?: any,
+): Promise<EnsureDustResult> {
+  // Prefer caller-provided state; fall back to waitForSyncedState (best-effort).
+  const state = syncedState ?? await bundle.facade.waitForSyncedState();
+
+  // If dust coins are already available, proceed immediately.
+  // Skip registration even if unregistered UTXOs exist — registration costs
+  // dust, and we don't want to burn fees when dust is already sufficient.
+  if (state.dust.availableCoins.length > 0 || state.dust.walletBalance(new Date()) > 0n) {
+    onStatus?.('Dust available');
+    return { alreadyAvailable: true };
+  }
+
+  // No dust — check for unregistered NIGHT UTXOs and register them.
   const nightUtxos = state.unshielded.availableCoins.filter(
     (coin: any) => coin.meta?.registeredForDustGeneration !== true
   );
 
+  let txHash: string | undefined;
+
   if (nightUtxos.length > 0) {
-    onDust?.(`Registering ${nightUtxos.length} UTXO(s) for dust generation...`);
+    onStatus?.(`Registering ${nightUtxos.length} UTXO(s) for dust generation...`);
 
     const dustUtxos: DustUtxoWithMeta[] = nightUtxos.map((coin: any) => ({
       ...coin.utxo,
       ctime: new Date(coin.meta.ctime),
     }));
 
-    await registerNightUtxos(bundle, dustUtxos, state.dust.dustAddress, onDust);
-  } else if (state.dust.availableCoins.length > 0) {
-    onDust?.('Dust available');
-    return;
+    txHash = await registerNightUtxos(bundle, dustUtxos, state.dust.dustAddress, onStatus);
   } else {
-    onDust?.('UTXOs already registered, waiting for dust generation...');
+    onStatus?.('UTXOs already registered, waiting for dust generation...');
   }
 
-  // Wait for dust to generate
-  onDust?.('Waiting for dust tokens...');
-  await rx.firstValueFrom(
-    bundle.facade.state().pipe(
-      rx.throttleTime(5_000),
-      rx.filter((s) => s.isSynced),
-      rx.filter((s) => s.dust.walletBalance(new Date()) > 0n),
-      rx.timeout(DUST_TIMEOUT_MS),
-    )
+  // Poll for walletBalance using waitForSyncedState() to avoid shareReplay
+  // buffer clearing between subscriptions (same issue as the initial check).
+  onStatus?.('Waiting for dust tokens...');
+  const pollStart = Date.now();
+  while (Date.now() - pollStart < DUST_TIMEOUT_MS) {
+    const pollState = await bundle.facade.waitForSyncedState();
+    if (pollState.dust.walletBalance(new Date()) > 0n) {
+      onStatus?.('Dust available');
+      return { alreadyAvailable: false, txHash };
+    }
+    await new Promise(resolve => setTimeout(resolve, 5_000));
+  }
+  throw new Error(
+    'Timed out waiting for dust tokens. ' +
+    'Try running: midnight dust register'
   );
-  onDust?.('Dust available');
 }
+
+// ── Transfer build/submit ────────────────────────────────────────────
 
 /**
  * Build, sign, prove, and submit a transfer transaction.
- * Retries on stale UTXO errors (error code 115), insufficient dust,
- * and transaction rejection (error 138 — dust capacity not yet sufficient).
+ *
+ * Retries on:
+ * - Stale UTXO (error 115): quick-sync and retry immediately (up to 3 attempts)
+ * - Dust-related errors: re-ensure dust is available, then retry (up to 10 min)
  */
 async function buildAndSubmitTransfer(
   bundle: FacadeBundle,
@@ -296,11 +357,17 @@ async function buildAndSubmitTransfer(
   onSubmitting?: () => void,
   onDust?: (status: string) => void,
 ): Promise<string> {
+  const startTime = Date.now();
+  // Use DUST_TIMEOUT_MS (2 min) not DUST_REGISTRATION_TIMEOUT_MS (10 min) —
+  // ensureDust already ran before us, so this is only for edge cases where
+  // dust became insufficient between ensureDust and transferTransaction.
+  const dustDeadline = startTime + DUST_TIMEOUT_MS;
   let lastError: Error | undefined;
+  let staleAttempts = 0;
 
-  for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+  while (true) {
     try {
-      if (attempt > 1) {
+      if (lastError) {
         await quickSync(bundle);
       }
 
@@ -341,33 +408,35 @@ async function buildAndSubmitTransfer(
     } catch (err: any) {
       lastError = err;
 
-      // Stale UTXO: quick-sync and retry immediately
+      // Stale UTXO: quick-sync and retry immediately (limited attempts)
       const isStaleUtxo = err?.code === STALE_UTXO_ERROR_CODE ||
         err?.message?.includes('115') ||
         err?.message?.toLowerCase().includes('stale');
 
-      if (isStaleUtxo && attempt < MAX_RETRY_ATTEMPTS) {
+      if (isStaleUtxo && ++staleAttempts < MAX_RETRY_ATTEMPTS) {
         continue;
       }
 
-      // Insufficient dust or transaction rejected (error 138): wait for more
-      // dust capacity to accumulate, then retry
-      const isDustInsufficient = err?.message?.toLowerCase().includes('not enough dust') ||
-        err?.message?.toLowerCase().includes('dust generated');
-      const isRejected = isTransactionRejectedError(err);
-
-      if ((isDustInsufficient || isRejected) && attempt < MAX_RETRY_ATTEMPTS) {
-        onDust?.('Waiting for more dust capacity to accumulate...');
-        await new Promise(resolve => setTimeout(resolve, DUST_REGISTRATION_RETRY_DELAY_MS));
+      // Dust-related: re-ensure dust is available, then retry
+      if (isDustRelatedError(err) && Date.now() < dustDeadline) {
+        const elapsed = formatElapsed(Date.now() - startTime);
+        onDust?.(`Dust insufficient, re-ensuring (${elapsed} elapsed)...`);
+        try {
+          const freshState = await quickSync(bundle);
+          await ensureDust(bundle, onDust, freshState);
+        } catch {
+          // quickSync or ensureDust may fail (shareReplay stale-read) — wait and retry anyway
+          await new Promise(resolve => setTimeout(resolve, 5_000));
+        }
         continue;
       }
 
       throw err;
     }
   }
-
-  throw lastError ?? new Error('Transfer failed after retries');
 }
+
+// ── Main transfer flow ───────────────────────────────────────────────
 
 /**
  * Execute a full transfer flow:
@@ -375,7 +444,7 @@ async function buildAndSubmitTransfer(
  * 2. Start & sync facade
  * 3. Check balance
  * 4. Ensure dust is available
- * 5. Build/sign/prove/submit transaction
+ * 5. Build/sign/prove/submit transaction (re-ensures dust on retry)
  * 6. Clean shutdown
  */
 export async function executeTransfer(params: TransferParams): Promise<TransferResult> {
@@ -386,6 +455,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     amountNight,
     signal,
     onSync,
+    onSyncDetail,
     onDust,
     onProving,
     onSubmitting,
@@ -400,17 +470,12 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
   // Suppress known transient SDK errors (Wallet.Sync: Internal Server Error, etc.)
   const unsuppress = suppressSdkTransientErrors(onSyncWarning);
 
-  // Suppress polkadot-js RPC-CORE noise (logs "Custom error: 138" to console
-  // on transaction rejection). Covers both dust registration and transfer submission.
-  const originalWarn = console.warn;
-  const originalError = console.error;
-  const hasRpcNoise = (args: any[]) => args.some(a => String(a).includes('RPC-CORE'));
-  console.warn = (...args: any[]) => { if (!hasRpcNoise(args)) originalWarn(...args); };
-  console.error = (...args: any[]) => { if (!hasRpcNoise(args)) originalError(...args); };
-  const restoreConsole = () => { console.warn = originalWarn; console.error = originalError; };
+  // Suppress polkadot-js RPC-CORE noise — single suppression point for the
+  // entire transfer flow (covers dust registration and transfer submission).
+  const restoreRpc = suppressRpcNoise();
 
-  // Build facade
-  const bundle = buildFacade(seedBuffer, networkConfig);
+  // Build facade — may be rebuilt on sync retry
+  let bundle = buildFacade(seedBuffer, networkConfig);
   let shutdownComplete = false;
 
   // Signal handling — clean shutdown on abort
@@ -429,8 +494,28 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
   signal?.addEventListener('abort', onAbort, { once: true });
 
   try {
-    // Start & sync
-    const syncedState = await startAndSyncFacade(bundle, onSync);
+    // Start & sync with retry — dust wallet can hang intermittently.
+    // On timeout, tear down and rebuild the facade (same as user Ctrl+C + retry).
+    const MAX_SYNC_ATTEMPTS = 3;
+    let syncedState!: any;
+
+    for (let attempt = 1; attempt <= MAX_SYNC_ATTEMPTS; attempt++) {
+      try {
+        syncedState = await startAndSyncFacade(
+          bundle, onSync, onSyncDetail, SYNC_ATTEMPT_TIMEOUT_MS,
+        );
+        break;
+      } catch (err: any) {
+        if (signal?.aborted) throw new Error('Operation cancelled');
+        if (attempt < MAX_SYNC_ATTEMPTS && String(err?.message).includes('timed out')) {
+          onDust?.(`Sync timed out, retrying (attempt ${attempt + 1}/${MAX_SYNC_ATTEMPTS})...`);
+          await stopFacade(bundle).catch(() => {});
+          bundle = buildFacade(seedBuffer, networkConfig);
+          continue;
+        }
+        throw err;
+      }
+    }
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
@@ -446,12 +531,12 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
-    // Ensure dust
-    await ensureDust(bundle, onDust);
+    // Ensure dust — pass syncedState to avoid shareReplay stale-read
+    await ensureDust(bundle, onDust, syncedState);
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
-    // Build, sign, prove, submit
+    // Build, sign, prove, submit (re-ensures dust on retry)
     const txHash = await buildAndSubmitTransfer(
       bundle,
       recipientAddress,
@@ -464,7 +549,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     return { txHash, amountMicroNight: amount };
   } finally {
     signal?.removeEventListener('abort', onAbort);
-    restoreConsole();
+    restoreRpc();
     unsuppress();
     await cleanup();
   }

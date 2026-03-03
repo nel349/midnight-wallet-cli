@@ -64,9 +64,12 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
       signal,
       onSync(applied, highest) {
         if (highest > 0) {
-          const pct = Math.round((applied / highest) * 100);
-          spinner.update(`Syncing wallet... ${pct}%`);
+          const pct = Math.min(Math.round((applied / highest) * 100), 100);
+          spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
         }
+      },
+      onSyncDetail(pending) {
+        spinner.update(`Syncing wallet... (waiting: ${pending})`);
       },
       onDust(status) {
         spinner.update(`Dust: ${status}`);

@@ -31,6 +31,8 @@ export interface FacadeBundle {
   keystore: ReturnType<typeof createKeystore>;
   zswapSecretKeys: ReturnType<typeof ledger.ZswapSecretKeys.fromSeed>;
   dustSecretKey: ReturnType<typeof ledger.DustSecretKey.fromSeed>;
+  /** Active subscription that keeps shareReplay buffers alive. Cleaned up by stopFacade. */
+  keepAlive?: rx.Subscription;
 }
 
 /**
@@ -101,29 +103,69 @@ export function buildFacade(seedBuffer: Buffer, networkConfig: NetworkConfig): F
 /**
  * Start the facade and wait for initial sync.
  * Calls onProgress with sync progress updates.
+ *
+ * Uses a single persistent subscription to facade.state() that serves three purposes:
+ * 1. Reports unshielded progress (and which wallets are still syncing)
+ * 2. Detects isSynced to resolve the sync promise
+ * 3. Keeps shareReplay({ refCount: true }) buffers alive for the command lifetime
  */
 export async function startAndSyncFacade(
   bundle: FacadeBundle,
   onProgress?: (applied: number, highest: number) => void,
+  onSyncDetail?: (detail: string) => void,
+  timeoutMs?: number,
 ): Promise<FacadeState> {
   const { facade, zswapSecretKeys, dustSecretKey } = bundle;
 
   await facade.start(zswapSecretKeys, dustSecretKey);
 
-  return rx.firstValueFrom(
-    facade.state().pipe(
-      rx.tap((state) => {
+  return new Promise<FacadeState>((resolve, reject) => {
+    let resolved = false;
+
+    const timeout = setTimeout(() => {
+      if (!resolved) reject(new Error('Wallet sync timed out'));
+    }, timeoutMs ?? SYNC_TIMEOUT_MS);
+
+    bundle.keepAlive = facade.state().subscribe({
+      next: (state) => {
+        if (resolved) return;
+
+        // Report unshielded progress
         if (onProgress) {
           const progress = state.unshielded.progress;
           if (progress) {
-            onProgress(Number(progress.appliedId), Number(progress.highestTransactionId));
+            const applied = Number(progress.appliedId);
+            const highest = Number(progress.highestTransactionId);
+            onProgress(Math.min(applied, highest), highest);
           }
         }
-      }),
-      rx.filter((state) => state.isSynced),
-      rx.timeout(SYNC_TIMEOUT_MS),
-    )
-  );
+
+        // Report which wallets are still syncing (diagnostic)
+        if (onSyncDetail) {
+          try {
+            const pending: string[] = [];
+            if (!state.shielded?.state?.progress?.isStrictlyComplete()) pending.push('shielded');
+            if (!state.dust?.state?.progress?.isStrictlyComplete()) pending.push('dust');
+            if (!state.unshielded?.progress?.isStrictlyComplete()) pending.push('unshielded');
+            if (pending.length > 0) onSyncDetail(pending.join(', '));
+          } catch { /* best-effort diagnostic */ }
+        }
+
+        // Resolve when fully synced
+        if (state.isSynced) {
+          resolved = true;
+          clearTimeout(timeout);
+          resolve(state);
+        }
+      },
+      error: (err) => {
+        if (!resolved) {
+          clearTimeout(timeout);
+          reject(err);
+        }
+      },
+    });
+  });
 }
 
 /**
@@ -143,7 +185,13 @@ export async function quickSync(bundle: FacadeBundle): Promise<FacadeState> {
  * Clean shutdown of the wallet facade.
  */
 export async function stopFacade(bundle: FacadeBundle): Promise<void> {
-  await bundle.facade.stop();
+  bundle.keepAlive?.unsubscribe();
+  // Timeout facade.stop() — wallets may hang if in a bad state (e.g. dust wallet stuck).
+  // Don't block the caller forever; let the old facade be GC'd.
+  await Promise.race([
+    bundle.facade.stop(),
+    new Promise<void>(resolve => setTimeout(resolve, 5_000)),
+  ]);
 }
 
 /**

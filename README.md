@@ -185,6 +185,12 @@ Once connected, your AI agent gets access to 17 tools:
 | `midnight_localnet_status` | Show service status |
 | `midnight_localnet_clean` | Remove conflicting containers |
 
+## Issues & Feedback
+
+Found a bug or have a feature request? [Open an issue](https://github.com/nel349/midnight-wallet-cli-hub/issues) on the public hub repo.
+
+For documentation, guides, and more: [midnight-wallet-cli-hub](https://github.com/nel349/midnight-wallet-cli-hub)
+
 ## Requirements
 
 - Node.js >= 20

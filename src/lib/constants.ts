@@ -8,12 +8,15 @@ export const NATIVE_TOKEN_TYPE = '0000000000000000000000000000000000000000000000
 export const TOKEN_DECIMALS = 6;
 export const TOKEN_MULTIPLIER = 1_000_000;
 
-// Dust wallet cost parameters
-export const DUST_COST_OVERHEAD = 1_000_000_000_000n;
+// Dust wallet cost parameters — matches the reference implementation.
+// The SDK uses: feesWithMargin(ledgerParams, feeBlocksMargin) + additionalFeeOverhead
+// Reference (kuira-verification-test): 300T overhead, 5 blocks margin.
+export const DUST_COST_OVERHEAD = 300_000_000_000_000n;
 export const DUST_FEE_BLOCKS_MARGIN = 5;
 
 // Timeouts (milliseconds)
-export const SYNC_TIMEOUT_MS = 300_000;       // 5 minutes — full wallet sync
+export const SYNC_TIMEOUT_MS = 300_000;       // 5 minutes — full wallet sync (used by dust/balance commands)
+export const SYNC_ATTEMPT_TIMEOUT_MS = 30_000; // 30 seconds — per sync attempt (transfer retries on timeout)
 export const PRE_SEND_SYNC_TIMEOUT_MS = 10_000; // 10 seconds — quick sync before tx
 export const DUST_TIMEOUT_MS = 120_000;        // 2 minutes — wait for dust generation
 export const PROOF_TIMEOUT_MS = 300_000;       // 5 minutes — ZK proof generation
