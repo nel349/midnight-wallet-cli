@@ -8,22 +8,22 @@ import { join } from 'path';
 import { MIDNIGHT_DIR, LOCALNET_DIR_NAME, DIR_MODE } from './constants.ts';
 
 // Version tag — bump when compose content changes so stale files get overwritten
-export const COMPOSE_VERSION = '1.4.0';
+export const COMPOSE_VERSION = '2.0.0';
 
 export const LOCALNET_DIR = join(homedir(), MIDNIGHT_DIR, LOCALNET_DIR_NAME);
 const COMPOSE_PATH = join(LOCALNET_DIR, 'compose.yml');
 const VERSION_PATH = join(LOCALNET_DIR, '.version');
 
-// Full compose.yml from midnight-local-network v3.0.0 / ledger-v7
+// Full compose.yml for midnight-local-network v8 RC / wallet-sdk 2.0.0-rc
 export const COMPOSE_YAML = `services:
   proof-server:
-    image: 'nel349/proof-server:7.0.0'
+    image: 'midnightntwrk/proof-server:8.0.0-rc.5'
     container_name: "proof-server"
     ports:
       - "6300:6300"
 
   indexer:
-    image: 'midnightntwrk/indexer-standalone:3.0.0'
+    image: 'midnightntwrk/indexer-standalone:4.0.0-rc.3'
     container_name: "indexer"
     ports:
       - '8088:8088'
@@ -45,7 +45,7 @@ export const COMPOSE_YAML = `services:
         condition: service_started
 
   node:
-    image: 'midnightntwrk/midnight-node:0.20.1'
+    image: 'midnightntwrk/midnight-node:0.22.0-rc.4'
     container_name: "node"
     ports:
       - "9944:9944"

@@ -82,15 +82,16 @@ export function parseAmount(amountStr: string): number {
 
 /**
  * Validate recipient address format (bech32m, matching network).
+ * Returns the decoded UnshieldedAddress for use with the facade.
  */
-export function validateRecipientAddress(address: string, networkConfig: NetworkConfig): void {
+export function validateRecipientAddress(address: string, networkConfig: NetworkConfig): UnshieldedAddress {
   const networkId = NETWORK_ID_MAP[networkConfig.networkId];
   if (networkId === undefined) {
     throw new Error(`Unknown networkId: ${networkConfig.networkId}`);
   }
 
   try {
-    MidnightBech32m.parse(address).decode(UnshieldedAddress, networkId);
+    return MidnightBech32m.parse(address).decode(UnshieldedAddress, networkId);
   } catch (err: any) {
     throw new Error(
       `Invalid recipient address: ${err.message}\n` +
@@ -126,7 +127,7 @@ async function ensureDust(
     onDust?.(`Registering ${nightUtxos.length} UTXO(s) for dust generation...`);
 
     const ttl = new Date(Date.now() + TX_TTL_MINUTES * 60 * 1000);
-    const dustReceiverAddress = state.dust.dustAddress;
+    const dustReceiverAddress = state.dust.address;
 
     // Map unshielded UTXOs to the dust wallet's UtxoWithMeta format
     const dustUtxos: DustUtxoWithMeta[] = nightUtxos.map((coin: any) => ({
@@ -167,7 +168,7 @@ async function ensureDust(
     bundle.facade.state().pipe(
       rx.throttleTime(5_000),
       rx.filter((s) => s.isSynced),
-      rx.filter((s) => s.dust.walletBalance(new Date()) > 0n),
+      rx.filter((s) => s.dust.balance(new Date()) > 0n),
       rx.timeout(DUST_TIMEOUT_MS),
     )
   );
@@ -180,7 +181,7 @@ async function ensureDust(
  */
 async function buildAndSubmitTransfer(
   bundle: FacadeBundle,
-  recipientAddress: string,
+  recipientAddress: UnshieldedAddress,
   amount: bigint,
   onProving?: () => void,
   onSubmitting?: () => void,
@@ -269,14 +270,14 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
 
   const amount = nightToMicro(amountNight);
 
-  // Validate recipient address
-  validateRecipientAddress(recipientAddress, networkConfig);
+  // Validate and decode recipient address
+  const decodedAddress = validateRecipientAddress(recipientAddress, networkConfig);
 
   // Suppress known transient SDK errors (Wallet.Sync: Internal Server Error, etc.)
   const unsuppress = suppressSdkTransientErrors(onSyncWarning);
 
   // Build facade
-  const bundle = buildFacade(seedBuffer, networkConfig);
+  const bundle = await buildFacade(seedBuffer, networkConfig);
   let shutdownComplete = false;
 
   // Signal handling — clean shutdown on abort
@@ -320,7 +321,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     // Build, sign, prove, submit
     const txHash = await buildAndSubmitTransfer(
       bundle,
-      recipientAddress,
+      decodedAddress,
       amount,
       onProving,
       onSubmitting,

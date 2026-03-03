@@ -39,7 +39,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     address: config.address,
   });
 
-  const bundle = buildFacade(seedBuffer, networkConfig);
+  const bundle = await buildFacade(seedBuffer, networkConfig);
 
   const cleanup = async () => {
     try { await stopFacade(bundle); } catch { /* best-effort */ }
@@ -105,7 +105,7 @@ async function dustRegister(
 
     // Already have dust?
     if (state.dust.availableCoins.length > 0) {
-      const dustBal = state.dust.walletBalance(new Date());
+      const dustBal = state.dust.balance(new Date());
       spinner.stop('Dust already available');
       if (jsonMode) {
         writeJsonResult({ subcommand: 'register', dustBalance: toDust(dustBal) });
@@ -131,7 +131,7 @@ async function dustRegister(
       spinner.update(`Registering ${nightUtxos.length} UTXO(s) for dust generation...`);
 
       const ttl = new Date(Date.now() + TX_TTL_MINUTES * 60 * 1000);
-      const dustReceiverAddress = state.dust.dustAddress;
+      const dustReceiverAddress = state.dust.address;
 
       // Map unshielded UTXOs to the dust wallet's UtxoWithMeta format
       const dustUtxos: DustUtxoWithMeta[] = nightUtxos.map((coin: any) => ({
@@ -169,12 +169,12 @@ async function dustRegister(
       bundle.facade.state().pipe(
         rx.throttleTime(5_000),
         rx.filter((s) => s.isSynced),
-        rx.filter((s) => s.dust.walletBalance(new Date()) > 0n),
+        rx.filter((s) => s.dust.balance(new Date()) > 0n),
         rx.timeout(DUST_TIMEOUT_MS),
       )
     );
 
-    const dustBal = dustState.dust.walletBalance(new Date());
+    const dustBal = dustState.dust.balance(new Date());
     spinner.stop('Dust registration complete');
 
     if (jsonMode) {
@@ -225,7 +225,7 @@ async function dustStatus(
       bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
     );
 
-    const dustBalance = state.dust.walletBalance(new Date());
+    const dustBalance = state.dust.balance(new Date());
     const hasAvailableDust = state.dust.availableCoins.length > 0;
     const allUtxos = state.unshielded.availableCoins;
     const unregisteredUtxos = allUtxos.filter(
