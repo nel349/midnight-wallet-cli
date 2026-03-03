@@ -285,7 +285,8 @@ async function ensureDust(
 
 /**
  * Build, sign, prove, and submit a transfer transaction.
- * Retries on stale UTXO errors (error code 115) and insufficient dust.
+ * Retries on stale UTXO errors (error code 115), insufficient dust,
+ * and transaction rejection (error 138 — dust capacity not yet sufficient).
  */
 async function buildAndSubmitTransfer(
   bundle: FacadeBundle,
@@ -349,12 +350,14 @@ async function buildAndSubmitTransfer(
         continue;
       }
 
-      // Insufficient dust: wait for more dust to accumulate, then retry
+      // Insufficient dust or transaction rejected (error 138): wait for more
+      // dust capacity to accumulate, then retry
       const isDustInsufficient = err?.message?.toLowerCase().includes('not enough dust') ||
         err?.message?.toLowerCase().includes('dust generated');
+      const isRejected = isTransactionRejectedError(err);
 
-      if (isDustInsufficient && attempt < MAX_RETRY_ATTEMPTS) {
-        onDust?.('Waiting for more dust to accumulate...');
+      if ((isDustInsufficient || isRejected) && attempt < MAX_RETRY_ATTEMPTS) {
+        onDust?.('Waiting for more dust capacity to accumulate...');
         await new Promise(resolve => setTimeout(resolve, DUST_REGISTRATION_RETRY_DELAY_MS));
         continue;
       }
@@ -396,6 +399,15 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
 
   // Suppress known transient SDK errors (Wallet.Sync: Internal Server Error, etc.)
   const unsuppress = suppressSdkTransientErrors(onSyncWarning);
+
+  // Suppress polkadot-js RPC-CORE noise (logs "Custom error: 138" to console
+  // on transaction rejection). Covers both dust registration and transfer submission.
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const hasRpcNoise = (args: any[]) => args.some(a => String(a).includes('RPC-CORE'));
+  console.warn = (...args: any[]) => { if (!hasRpcNoise(args)) originalWarn(...args); };
+  console.error = (...args: any[]) => { if (!hasRpcNoise(args)) originalError(...args); };
+  const restoreConsole = () => { console.warn = originalWarn; console.error = originalError; };
 
   // Build facade
   const bundle = buildFacade(seedBuffer, networkConfig);
@@ -452,6 +464,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     return { txHash, amountMicroNight: amount };
   } finally {
     signal?.removeEventListener('abort', onAbort);
+    restoreConsole();
     unsuppress();
     await cleanup();
   }
