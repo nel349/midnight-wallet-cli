@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__midnight-wallet__midnight_localnet_status",
+      "mcp__midnight-wallet__midnight_generate",
+      "mcp__midnight-wallet__midnight_airdrop",
+      "mcp__midnight-wallet__midnight_info",
+      "mcp__midnight-wallet__midnight_balance",
+      "mcp__midnight-wallet__midnight_dust_status",
+      "mcp__midnight-wallet__midnight_transfer"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "midnight-wallet"
+  ]
+}
