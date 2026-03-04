@@ -192,6 +192,47 @@ describe('ws-rpc', () => {
       expect(server.connections.size).toBe(1);
     });
 
+    it('returns internal error for non-APIError exceptions', async () => {
+      const port = nextPort();
+      server = createRpcServer({
+        port,
+        handlers: {
+          broken: async () => { throw new TypeError('Cannot read property of undefined'); },
+        },
+      });
+
+      const ws = await connectClient(port);
+      clients.push(ws);
+
+      const responsePromise = waitForMessage(ws);
+      sendRpc(ws, 1, 'broken');
+      const response = await responsePromise;
+
+      expect(response.error.code).toBe(-32603); // Internal error
+      expect(response.error.message).toContain('Cannot read property of undefined');
+      expect(response.error.data).toBeUndefined(); // No APIError data
+    });
+
+    it('calls onDisconnect only once when error fires before close', async () => {
+      const disconnections: string[] = [];
+      const port = nextPort();
+      server = createRpcServer({
+        port,
+        handlers: {},
+        onDisconnect: (conn) => disconnections.push(conn.id),
+      });
+
+      const ws = await connectClient(port);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // terminate() causes both error and close events
+      ws.terminate();
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Should be exactly 1 despite both error + close firing
+      expect(disconnections.length).toBe(1);
+    });
+
     it('calls onConnect and onDisconnect callbacks', async () => {
       const port = nextPort();
       const events: string[] = [];
@@ -250,6 +291,26 @@ describe('ws-rpc', () => {
       await server.close();
       await closePromise;
       server = undefined; // Already closed
+    });
+
+    it('calls onDisconnect when WebSocket errors', async () => {
+      const disconnections: string[] = [];
+      const p = nextPort();
+      server = createRpcServer({
+        port: p,
+        handlers: {},
+        onDisconnect: (conn) => disconnections.push(conn.id),
+      });
+
+      const ws = await connectClient(p);
+
+      // Force an error by terminating the socket abruptly
+      ws.terminate();
+
+      // Wait for disconnect handler
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(disconnections.length).toBeGreaterThanOrEqual(1);
     });
   });
 });

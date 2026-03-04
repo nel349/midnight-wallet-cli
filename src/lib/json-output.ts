@@ -47,10 +47,15 @@ export function writeJsonResult(data: Record<string, unknown>): void {
  * Format: { "error": true, "code": "ERROR_CODE", "message": "..." }
  */
 export function writeJsonError(err: Error, errorCode: ErrorCode, exitCode: number): void {
-  process.stdout.write(JSON.stringify({
+  const json = JSON.stringify({
     error: true,
     code: errorCode,
     message: err.message,
     exitCode,
-  }) + '\n');
+  }) + '\n';
+  if (captureTarget) {
+    captureTarget(json);
+  } else {
+    process.stdout.write(json);
+  }
 }

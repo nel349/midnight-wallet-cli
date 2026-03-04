@@ -50,6 +50,10 @@ export function isReadOnlyMethod(method: string): boolean {
   return READ_ONLY_METHODS.has(method);
 }
 
+// ── Concurrent prompt guard ──
+
+let promptActive = false;
+
 // ── Rendering ──
 
 export function renderApprovalBox(request: ApprovalRequest): string {
@@ -88,6 +92,9 @@ export function renderApprovalBox(request: ApprovalRequest): string {
  *
  * If options.approveAll is true, auto-approves without prompting.
  * If options.autoApproveReads is true and the method is read-only, auto-approves.
+ *
+ * Rejects if stdin is not a TTY (non-interactive environment).
+ * Only one prompt can be active at a time — concurrent calls are rejected.
  */
 export async function promptApproval(
   request: ApprovalRequest,
@@ -100,27 +107,62 @@ export async function promptApproval(
   }
 
   if (options.autoApproveReads && isReadOnlyMethod(request.method)) {
+    process.stderr.write(dim(`  Auto-approved (read-only): ${request.method}`) + '\n');
     return 'approve';
+  }
+
+  // Non-interactive environment — reject by default
+  if (!process.stdin.isTTY) {
+    process.stderr.write(red('  Cannot prompt for approval: stdin is not a TTY') + '\n');
+    process.stderr.write(dim('  Use --approve-all for non-interactive environments') + '\n');
+    return 'reject';
+  }
+
+  // Prevent concurrent prompts from overlapping on stdin
+  if (promptActive) {
+    process.stderr.write(red('  Rejected: another approval prompt is active') + '\n');
+    return 'reject';
   }
 
   // Render the approval box to stderr
   process.stderr.write('\n' + renderApprovalBox(request) + '\n\n');
 
   // Prompt for user input
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
+  promptActive = true;
+
+  let rl: readline.Interface;
+  try {
+    rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stderr,
+    });
+  } catch {
+    promptActive = false;
+    process.stderr.write(red('  Cannot create readline interface') + '\n');
+    return 'reject';
+  }
 
   return new Promise<ApprovalResult>((resolve) => {
-    rl.question(yellow('  Approve? [A/r] '), (answer) => {
+    const cleanup = (result: ApprovalResult) => {
+      promptActive = false;
       rl.close();
+      resolve(result);
+    };
+
+    // Handle stdin closing before user answers (e.g. piped input ends)
+    rl.on('close', () => {
+      if (promptActive) {
+        cleanup('reject');
+      }
+    });
+
+    rl.question(yellow('  Approve? [A/r] '), (answer) => {
       const normalized = answer.trim().toLowerCase();
       if (normalized === 'r' || normalized === 'reject') {
-        resolve('reject');
+        cleanup('reject');
       } else {
         // Default to approve (empty input, 'a', 'approve', 'y', 'yes')
-        resolve('approve');
+        cleanup('approve');
       }
     });
   });

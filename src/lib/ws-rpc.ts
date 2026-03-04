@@ -147,6 +147,13 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
 
   const wss = new WebSocketServer({ port });
 
+  // Prevent unhandled server-level errors (e.g. port conflict) from crashing
+  wss.on('error', (err: Error) => {
+    // Callers handle this via the close() method or process-level error handling
+    // We just need to prevent the uncaught exception
+    process.stderr.write(`WebSocket server error: ${err.message}\n`);
+  });
+
   wss.on('connection', (ws: WebSocket) => {
     const id = `conn_${++connectionCounter}`;
     const connection: RpcConnection = {
@@ -157,6 +164,15 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
     };
     connections.set(id, connection);
     onConnect?.(connection);
+
+    // Guard against double-disconnect (error fires before close)
+    let disconnected = false;
+    const handleDisconnect = () => {
+      if (disconnected) return;
+      disconnected = true;
+      connections.delete(id);
+      onDisconnect?.(connection);
+    };
 
     ws.on('message', async (raw: Buffer) => {
       let requestId: number | string | null = null;
@@ -210,13 +226,11 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
       }
     });
 
-    ws.on('close', () => {
-      connections.delete(id);
-      onDisconnect?.(connection);
-    });
+    ws.on('close', handleDisconnect);
 
     ws.on('error', () => {
-      connections.delete(id);
+      handleDisconnect();
+      try { ws.close(); } catch { /* already closing */ }
     });
   });
 

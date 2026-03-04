@@ -95,8 +95,6 @@ async function dustRegister(
         const pct = Math.min(Math.round((applied / highest) * 100), 100);
         spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
       }
-    }, (pending) => {
-      spinner.update(`Syncing wallet... (waiting: ${pending})`);
     });
 
     if (signal?.aborted) throw new Error('Operation cancelled');
@@ -106,7 +104,7 @@ async function dustRegister(
     // Use shared ensureDust — handles: early return if dust exists,
     // registration of unregistered UTXOs, waiting for dust coins.
     // Pass syncedState to avoid shareReplay stale-read issue.
-    const result = await ensureDust(bundle, (status) => {
+    const result = await ensureDust(bundle, (status: string) => {
       spinner.update(status);
     }, syncedState);
 
@@ -168,8 +166,6 @@ async function dustStatus(
         const pct = Math.min(Math.round((applied / highest) * 100), 100);
         spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
       }
-    }, (pending) => {
-      spinner.update(`Syncing wallet... (waiting: ${pending})`);
     });
 
     if (signal?.aborted) throw new Error('Operation cancelled');
