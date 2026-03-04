@@ -420,21 +420,68 @@ The CLI includes an MCP (Model Context Protocol) server for native
 AI agent integration. Instead of parsing CLI output, agents call
 typed tools directly via JSON-RPC over stdio.
 
-Add to your MCP config (.mcp.json, .cursor/mcp.json, etc.):
+Setup — add to your MCP config:
 
+  Claude Code (.mcp.json in project root):
   {
     "mcpServers": {
       "midnight-wallet": {
-        "command": "npx",
-        "args": ["-y", "midnight-wallet-cli@latest", "--mcp"]
+        "type": "stdio",
+        "command": "midnight-wallet-mcp"
       }
     }
   }
 
-Or if installed globally: "command": "midnight-wallet-mcp"
+  Or via CLI: claude mcp add --transport stdio midnight-wallet -- midnight-wallet-mcp
 
-The MCP server exposes 17 tools covering all CLI commands
-(excluding help and localnet logs which are not suitable for MCP).
+  Cursor (.cursor/mcp.json):
+  {
+    "mcpServers": {
+      "midnight-wallet": {
+        "command": "midnight-wallet-mcp"
+      }
+    }
+  }
+
+If not installed globally, use "command": "npx" with
+"args": ["-y", "midnight-wallet-cli@latest", "--mcp"] instead.
+
+AVAILABLE MCP TOOLS (17)
+────────────────────────
+
+  Tool Name                    Description                                          Required Params
+  midnight_generate            Generate or restore a wallet                         —
+  midnight_info                Display wallet metadata                              —
+  midnight_balance             Check unshielded balance                             —
+  midnight_address             Derive address from seed                             seed
+  midnight_genesis_address     Genesis wallet address                               —
+  midnight_airdrop             Fund wallet from genesis (undeployed only)           amount
+  midnight_transfer            Send NIGHT tokens                                    to, amount
+  midnight_dust_register       Register UTXOs for dust generation                   —
+  midnight_dust_status         Check dust balance and registration                  —
+  midnight_config_get          Read a config value                                  key
+  midnight_config_set          Write a config value                                 key, value
+  midnight_localnet_up         Start local network (Docker)                         —
+  midnight_localnet_stop       Stop local network (preserves state)                 —
+  midnight_localnet_down       Full teardown (removes volumes)                      —
+  midnight_localnet_status     Show service status and ports                        —
+  midnight_localnet_clean      Remove conflicting containers                        —
+
+Optional params shared by wallet tools: wallet (custom wallet path),
+network (preprod, preview, undeployed).
+
+All tools return JSON. Errors return: {error, code, message}.
+
+TYPICAL AGENT WORKFLOW
+──────────────────────
+
+  1. midnight_localnet_up          → Start local network
+  2. midnight_generate             → Create wallet (network: "undeployed")
+  3. midnight_airdrop              → Fund wallet (amount: "1000")
+  4. midnight_dust_register        → Register UTXOs for fee tokens
+  5. midnight_balance              → Verify balance
+  6. midnight_transfer             → Send tokens (to: "mn_addr_...", amount: "100")
+  7. midnight_dust_status          → Check remaining dust for fees
 
 EXAMPLE WORKFLOW
 ────────────────

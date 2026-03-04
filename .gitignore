@@ -7,3 +7,5 @@ wallet.json
 *.tgz
 demo/videos/
 recipient_wallet.json
+.mcp.json
+demo/audio/

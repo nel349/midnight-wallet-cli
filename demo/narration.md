@@ -12,7 +12,7 @@ Feed each scene's narration text to ElevenLabs separately, then sync with the sc
 
 ## Scene 2: Install (show npm install command)
 
-> First, install the package globally with npm. This gives you two commands: midnight, or mn for short, and midnight wallet MCP for AI agent integration.
+> First, install the package globally with npm. This gives you two commands: midnight, or MN for short. You can check the version to confirm the installation, then just run midnight to see the help menu with all available commands.
 
 npm install -g midnight-wallet-cli
 midnight --version
@@ -80,7 +80,7 @@ midnight balance --json
 
 ## Scene 9: MCP Server intro (show .mcp.json config)
 
-> The CLI includes a built-in MCP server for AI agent integration. To set it up, just add a simple config file to your project. For Claude Code, create a dot MCP dot json file with the npx command pointing to midnight wallet CLI with the MCP flag. The same pattern works in Cursor, VS Code, and other editors. Instructions included in the package README.
+> The CLI includes a built-in MCP server for AI agent integration. To set it up, just add a simple config file to your project. For Claude Code, create a dot MCP dot json file with the command set to midnight-wallet-mcp. That's it. The same pattern works in Cursor, VS Code, and other editors — full instructions are in the package README.
 
 ---
 
