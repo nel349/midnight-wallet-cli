@@ -33,7 +33,7 @@ import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
 
 /** Mock handler context with no-op notify */
-const ctx = (): RpcHandlerContext => ({ notify: vi.fn() });
+const ctx = (connectionId = 'conn_test'): RpcHandlerContext => ({ notify: vi.fn(), connectionId });
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

@@ -46,8 +46,18 @@ const READ_ONLY_METHODS = new Set([
   'getConnectionStatus',
 ]);
 
+/** Prep-step methods that have no on-chain effect — safe to auto-approve when submit will prompt */
+const PREP_METHODS = new Set([
+  'balanceUnsealedTransaction',
+  'balanceSealedTransaction',
+]);
+
 export function isReadOnlyMethod(method: string): boolean {
   return READ_ONLY_METHODS.has(method);
+}
+
+export function isPrepMethod(method: string): boolean {
+  return PREP_METHODS.has(method);
 }
 
 // ── Concurrent prompt guard ──
@@ -108,6 +118,11 @@ export async function promptApproval(
 
   if (options.autoApproveReads && isReadOnlyMethod(request.method)) {
     process.stderr.write(dim(`  Auto-approved (read-only): ${request.method}`) + '\n');
+    return 'approve';
+  }
+
+  if (options.autoApproveReads && isPrepMethod(request.method)) {
+    process.stderr.write(dim(`  Auto-approved (prep): ${request.method}`) + '\n');
     return 'approve';
   }
 

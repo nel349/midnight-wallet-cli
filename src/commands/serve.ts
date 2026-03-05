@@ -105,7 +105,20 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
         process.stderr.write(dim(`  [${timestamp()}] `) + red('disconnected') + dim(` ${conn.id}`) + '\n');
       },
       onRequest: (conn, req) => {
-        process.stderr.write(dim(`  [${timestamp()}] ${conn.id} → ${req.method}`) + '\n');
+        process.stderr.write(dim(`  [${timestamp()}] ${conn.id} #${conn.requestCount} → ${req.method}`) + '\n');
+      },
+      onResponse: (conn, req, durationMs, result, error) => {
+        const duration = formatDuration(durationMs);
+        if (error) {
+          process.stderr.write(`  ${red('✗')} ${dim(`${conn.id} ← ${req.method} (${duration})`)} ${red(error)}` + '\n');
+        } else {
+          process.stderr.write(`  ${green('✓')} ${dim(`${conn.id} ← ${req.method} (${duration})`)}` + '\n');
+          // Log tx hash after successful submit
+          const txHash = (result as any)?.txHash;
+          if (req.method === 'submitTransaction' && txHash) {
+            process.stderr.write(`  ${dim('  tx:')} ${teal(String(txHash))}` + '\n');
+          }
+        }
       },
     });
 
@@ -168,4 +181,9 @@ function timestamp(): string {
 
 function pad2(n: number): string {
   return n < 10 ? '0' + n : String(n);
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }

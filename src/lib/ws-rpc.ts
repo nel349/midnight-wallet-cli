@@ -45,6 +45,8 @@ export interface JsonRpcNotification {
 export interface RpcHandlerContext {
   /** Send a JSON-RPC notification to the calling client */
   notify: (method: string, params?: Record<string, unknown>) => void;
+  /** ID of the connection that sent this request (e.g. "conn_1") */
+  connectionId: string;
 }
 
 export type RpcHandler = (params: Record<string, unknown>, context: RpcHandlerContext) => Promise<unknown>;
@@ -100,6 +102,8 @@ export interface RpcConnection {
   authenticated: boolean;
   /** Network ID after connect */
   networkId?: string;
+  /** Number of requests received on this connection */
+  requestCount: number;
   /** Send a JSON-RPC notification to this client (no-op if socket is closed) */
   notify(method: string, params?: Record<string, unknown>): void;
 }
@@ -115,6 +119,8 @@ export interface RpcServerOptions {
   onDisconnect?: (connection: RpcConnection) => void;
   /** Called on every incoming request for logging */
   onRequest?: (connection: RpcConnection, request: JsonRpcRequest) => void;
+  /** Called after each request completes (success or failure) */
+  onResponse?: (connection: RpcConnection, request: JsonRpcRequest, durationMs: number, result?: unknown, error?: string) => void;
 }
 
 export interface RpcServer {
@@ -158,7 +164,7 @@ function parseRequest(data: string): JsonRpcRequest {
 let connectionCounter = 0;
 
 export function createRpcServer(options: RpcServerOptions): RpcServer {
-  const { port, handlers, onConnect, onDisconnect, onRequest } = options;
+  const { port, handlers, onConnect, onDisconnect, onRequest, onResponse } = options;
   const connections = new Map<string, RpcConnection>();
 
   const wss = new WebSocketServer({ port });
@@ -177,6 +183,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
       id,
       connectedAt: new Date(),
       authenticated: false,
+      requestCount: 0,
       notify(method: string, params?: Record<string, unknown>): void {
         if (ws.readyState !== ws.OPEN) return;
         const notification: JsonRpcNotification = { jsonrpc: '2.0', method, ...(params && { params }) };
@@ -197,10 +204,13 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
 
     ws.on('message', async (raw: Buffer) => {
       let requestId: number | string | null = null;
+      let request: JsonRpcRequest | undefined;
+      const startTime = Date.now();
 
       try {
-        const request = parseRequest(raw.toString('utf-8'));
+        request = parseRequest(raw.toString('utf-8'));
         requestId = request.id;
+        connection.requestCount++;
         onRequest?.(connection, request);
 
         const handler = handlers[request.method];
@@ -217,8 +227,9 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
           return;
         }
 
-        const context: RpcHandlerContext = { notify: connection.notify.bind(connection) };
+        const context: RpcHandlerContext = { notify: connection.notify.bind(connection), connectionId: id };
         const result = await handler(request.params ?? {}, context);
+        const durationMs = Date.now() - startTime;
 
         // Mark as authenticated after successful connect
         if (request.method === 'connect' && result && typeof result === 'object') {
@@ -232,7 +243,9 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
           result,
         };
         ws.send(JSON.stringify(response, jsonReplacer));
+        onResponse?.(connection, request, durationMs, result);
       } catch (err: unknown) {
+        const durationMs = Date.now() - startTime;
         const rpcCode = (err as any)?.rpcCode ?? mapErrorToRpcCode(err);
         const message = err instanceof Error ? err.message : 'Internal error';
         const data = isApiError(err)
@@ -245,6 +258,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
           error: { code: rpcCode, message, data },
         };
         ws.send(JSON.stringify(response, jsonReplacer));
+        if (request) onResponse?.(connection, request, durationMs, undefined, message);
       }
     });
 

@@ -16,6 +16,17 @@ import { serializeTx, deserializeUnsealed, deserializeSealed, fromHex } from './
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
 
+// ── Helpers ──
+
+/** Format a byte count as a human-readable string (e.g. "1.2 KB") */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(1)} MB`;
+}
+
 // ── Network ID mapping ──
 
 const NETWORK_ID_MAP: Record<string, NetworkId.NetworkId> = {
@@ -92,15 +103,15 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
   async function requireApproval(
     method: string,
     details: Array<{ label: string; value: string }> = [],
-    notify?: RpcHandlerContext['notify'],
+    context?: RpcHandlerContext,
   ): Promise<void> {
-    notify?.('approval:pending', { method });
+    context?.notify('approval:pending', { method });
     const result = await promptApproval(
-      { method, network: networkConfig.networkId, details },
+      { method, network: networkConfig.networkId, details, dappName: context?.connectionId },
       approvalOptions,
     );
     const outcome = result === 'reject' ? 'rejected' : 'approved';
-    notify?.('approval:resolved', { method, result: outcome });
+    context?.notify('approval:resolved', { method, result: outcome });
     if (result === 'reject') {
       throw createApiError('Rejected', 'User rejected the request');
     }
@@ -262,7 +273,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         label: `Output ${i + 1}`,
         value: `${o.value} → ${String(o.recipient).slice(0, 20)}... (${o.kind})`,
       }));
-      await requireApproval('makeTransfer', details, context.notify);
+      await requireApproval('makeTransfer', details, context);
 
       const combinedTransfers = parseDesiredOutputs(outputs);
       const payFees = (params.options as any)?.payFees ?? true;
@@ -280,11 +291,15 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         throw createApiError('InvalidRequest', 'tx is required');
       }
 
-      await requireApproval('submitTransaction', [], context.notify);
+      // Submit is the irreversible action — always prompt
+      await requireApproval('submitTransaction', [
+        { label: 'Tx size', value: formatBytes(txHex.length / 2) },
+      ], context);
 
       const sealedTx = deserializeSealed(txHex);
-      await facade.submitTransaction(sealedTx);
-      // DApp Connector spec: Promise<void> — discard txHash
+      const txHash = await facade.submitTransaction(sealedTx);
+      // Return txHash for server logging (onResponse can read it from result)
+      return { txHash };
     },
 
     balanceUnsealedTransaction: async (params, context) => {
@@ -293,7 +308,9 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         throw createApiError('InvalidRequest', 'tx is required');
       }
 
-      await requireApproval('balanceUnsealedTransaction', [], context.notify);
+      await requireApproval('balanceUnsealedTransaction', [
+        { label: 'Tx size', value: formatBytes(txHex.length / 2) },
+      ], context);
 
       const unsealedTx = deserializeUnsealed(txHex);
       const recipe = await facade.balanceUnboundTransaction(unsealedTx, secrets, {
@@ -309,7 +326,9 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         throw createApiError('InvalidRequest', 'tx is required');
       }
 
-      await requireApproval('balanceSealedTransaction', [], context.notify);
+      await requireApproval('balanceSealedTransaction', [
+        { label: 'Tx size', value: formatBytes(txHex.length / 2) },
+      ], context);
 
       const sealedTx = deserializeSealed(txHex);
       const recipe = await facade.balanceFinalizedTransaction(sealedTx, secrets, {
@@ -328,7 +347,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         throw createApiError('InvalidRequest', 'options is required for makeIntent');
       }
 
-      await requireApproval('makeIntent', [], context.notify);
+      await requireApproval('makeIntent', [], context);
 
       // Convert DesiredInput[] → CombinedSwapInputs { shielded?: Record, unshielded?: Record }
       const swapInputs: Record<string, Record<string, bigint>> = {};
@@ -364,7 +383,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       await requireApproval('signData', [
         { label: 'Encoding', value: signOptions.encoding },
         { label: 'Data', value: data.length > 64 ? data.slice(0, 64) + '...' : data },
-      ], context.notify);
+      ], context);
 
       // Decode data based on encoding
       let payload: Uint8Array;
