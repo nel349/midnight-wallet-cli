@@ -9,7 +9,8 @@
       "mcp__midnight-wallet__midnight_dust_status",
       "mcp__midnight-wallet__midnight_transfer",
       "Bash(grep:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm test:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

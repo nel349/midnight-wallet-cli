@@ -77,12 +77,14 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     const signed = await facade.signRecipe(recipe, (payload) =>
       keystore.signData(payload),
     );
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const finalized = await Promise.race([
       facade.finalizeRecipe(signed),
       new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('ZK proof generation timed out')), PROOF_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error('ZK proof generation timed out')), PROOF_TIMEOUT_MS);
       }),
     ]);
+    clearTimeout(timer);
     return serializeTx(finalized);
   }
 
