@@ -7,7 +7,8 @@
       "mcp__midnight-wallet__midnight_info",
       "mcp__midnight-wallet__midnight_balance",
       "mcp__midnight-wallet__midnight_dust_status",
-      "mcp__midnight-wallet__midnight_transfer"
+      "mcp__midnight-wallet__midnight_transfer",
+      "Bash(grep:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
