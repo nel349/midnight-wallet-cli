@@ -1,0 +1,196 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import { WebSocketServer } from 'ws';
+import { createTransport } from '../transport.ts';
+
+// ── Test helpers ──
+
+function createTestServer(handler: (method: string, params: any, id: number) => any): {
+  wss: WebSocketServer;
+  port: number;
+  url: string;
+  close: () => Promise<void>;
+} {
+  const wss = new WebSocketServer({ port: 0 });
+  const port = (wss.address() as any).port as number;
+
+  wss.on('connection', (ws) => {
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      try {
+        const result = handler(msg.method, msg.params, msg.id);
+        if (result instanceof Promise) {
+          result.then((r) => {
+            ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: r }));
+          }).catch((err) => {
+            ws.send(JSON.stringify({
+              jsonrpc: '2.0', id: msg.id,
+              error: { code: err.code ?? -32603, message: err.message, data: err.data },
+            }));
+          });
+        } else {
+          ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
+        }
+      } catch (err: any) {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0', id: msg.id,
+          error: { code: err.code ?? -32603, message: err.message, data: err.data },
+        }));
+      }
+    });
+  });
+
+  return {
+    wss,
+    port,
+    url: `ws://127.0.0.1:${port}`,
+    close: () => {
+      // Terminate all connected clients first — wss.close() only stops accepting
+      for (const client of wss.clients) {
+        client.terminate();
+      }
+      return new Promise<void>((resolve) => wss.close(() => resolve()));
+    },
+  };
+}
+
+// ── Tests ──
+
+let server: ReturnType<typeof createTestServer> | null = null;
+
+afterEach(async () => {
+  if (server) {
+    await server.close();
+    server = null;
+  }
+});
+
+describe('createTransport', () => {
+  it('sends JSON-RPC request and receives response', async () => {
+    server = createTestServer((method) => {
+      if (method === 'ping') return 'pong';
+      return null;
+    });
+
+    const transport = await createTransport({ url: server.url });
+    const result = await transport.call('ping');
+    expect(result).toBe('pong');
+    transport.close();
+  });
+
+  it('passes params in the request', async () => {
+    server = createTestServer((_method, params) => {
+      return { echo: params };
+    });
+
+    const transport = await createTransport({ url: server.url });
+    const result = await transport.call('test', { foo: 'bar', num: 42 }) as any;
+    expect(result.echo.foo).toBe('bar');
+    expect(result.echo.num).toBe(42);
+    transport.close();
+  });
+
+  it('serializes bigint params as strings', async () => {
+    server = createTestServer((_method, params) => {
+      return { received: params.amount };
+    });
+
+    const transport = await createTransport({ url: server.url });
+    const result = await transport.call('test', { amount: 5000000n } as any) as any;
+    // Server receives the stringified bigint
+    expect(result.received).toBe('5000000');
+    transport.close();
+  });
+
+  it('reconstructs APIError from JSON-RPC error response', async () => {
+    server = createTestServer(() => {
+      const err = { code: -32000, message: 'User rejected', data: { type: 'DAppConnectorAPIError', code: 'Rejected' } };
+      throw err;
+    });
+
+    const transport = await createTransport({ url: server.url });
+    try {
+      await transport.call('forbidden');
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err.type).toBe('DAppConnectorAPIError');
+      expect(err.code).toBe('Rejected');
+      expect(err.message).toBe('User rejected');
+    }
+    transport.close();
+  });
+
+  it('times out after configured duration', async () => {
+    server = createTestServer(() => {
+      // Never respond
+      return new Promise(() => {});
+    });
+
+    const transport = await createTransport({ url: server.url, timeout: 100 });
+    try {
+      await transport.call('slow');
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err.message).toContain('timed out');
+    }
+    transport.close();
+  });
+
+  it('rejects calls after close', async () => {
+    server = createTestServer(() => 'ok');
+
+    const transport = await createTransport({ url: server.url });
+    transport.close();
+
+    try {
+      await transport.call('test');
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err.message).toContain('not connected');
+    }
+  });
+
+  it('calls onDisconnect when server closes', async () => {
+    server = createTestServer(() => 'ok');
+
+    let disconnected = false;
+    const transport = await createTransport({
+      url: server.url,
+      onDisconnect: () => { disconnected = true; },
+    });
+
+    // Close the server — should trigger onDisconnect
+    await server.close();
+    server = null;
+
+    // Give the event loop a tick
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(disconnected).toBe(true);
+    transport.close();
+  });
+
+  it('rejects with error when connection fails', async () => {
+    try {
+      await createTransport({ url: 'ws://127.0.0.1:1' });
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(Error);
+    }
+  });
+
+  it('uses auto-incrementing request IDs', async () => {
+    const ids: number[] = [];
+    server = createTestServer((_method, _params, id) => {
+      ids.push(id);
+      return 'ok';
+    });
+
+    const transport = await createTransport({ url: server.url });
+    await transport.call('a');
+    await transport.call('b');
+    await transport.call('c');
+
+    expect(ids[1]).toBe(ids[0] + 1);
+    expect(ids[2]).toBe(ids[1] + 1);
+    transport.close();
+  });
+});

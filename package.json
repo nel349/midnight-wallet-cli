@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Git-style CLI wallet for the Midnight blockchain",
   "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
     "midnight": "dist/wallet.js",
     "mn": "dist/wallet.js",
