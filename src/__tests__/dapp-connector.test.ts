@@ -30,6 +30,10 @@ vi.mock('../lib/tx-serde.ts', () => ({
 import { createDAppConnector, type DAppConnector } from '../lib/dapp-connector.ts';
 import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
+import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
+
+/** Mock handler context with no-op notify */
+const ctx = (): RpcHandlerContext => ({ notify: vi.fn() });
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -187,25 +191,25 @@ describe('dapp-connector', () => {
   describe('connect', () => {
     it('returns networkId on match', async () => {
       connector = createConnector();
-      const result = await connector.handlers.connect({ networkId: 'Undeployed' });
+      const result = await connector.handlers.connect({ networkId: 'Undeployed' }, ctx());
       expect(result).toEqual({ networkId: 'Undeployed' });
     });
 
     it('matches case-insensitively', async () => {
       connector = createConnector();
-      const result = await connector.handlers.connect({ networkId: 'undeployed' });
+      const result = await connector.handlers.connect({ networkId: 'undeployed' }, ctx());
       expect(result).toEqual({ networkId: 'Undeployed' });
     });
 
     it('throws InvalidRequest on network mismatch', async () => {
       connector = createConnector();
-      await expect(connector.handlers.connect({ networkId: 'PreProd' }))
+      await expect(connector.handlers.connect({ networkId: 'PreProd' }, ctx()))
         .rejects.toThrow('Network mismatch');
     });
 
     it('throws InvalidRequest when networkId is missing', async () => {
       connector = createConnector();
-      await expect(connector.handlers.connect({}))
+      await expect(connector.handlers.connect({}, ctx()))
         .rejects.toThrow('Network mismatch');
     });
   });
@@ -218,7 +222,7 @@ describe('dapp-connector', () => {
       connector = createConnector({
         bundleOverrides: { stateFn: () => rx.of(mockState({ unshieldedBalances: balances })) },
       });
-      const result = await connector.handlers.getUnshieldedBalances({});
+      const result = await connector.handlers.getUnshieldedBalances({}, ctx());
       expect(result).toEqual(balances);
     });
   });
@@ -229,7 +233,7 @@ describe('dapp-connector', () => {
       connector = createConnector({
         bundleOverrides: { stateFn: () => rx.of(mockState({ shieldedBalances: balances })) },
       });
-      const result = await connector.handlers.getShieldedBalances({});
+      const result = await connector.handlers.getShieldedBalances({}, ctx());
       expect(result).toEqual(balances);
     });
   });
@@ -239,7 +243,7 @@ describe('dapp-connector', () => {
       connector = createConnector({
         bundleOverrides: { stateFn: () => rx.of(mockState({ dustBalance: 42000n })) },
       });
-      const result = await connector.handlers.getDustBalance({}) as any;
+      const result = await connector.handlers.getDustBalance({}, ctx()) as any;
       expect(result.balance).toBe(42000n);
       expect(result.cap).toBe(42000n);
     });
@@ -248,7 +252,7 @@ describe('dapp-connector', () => {
   describe('getTxHistory', () => {
     it('returns entries with correct TxStatus object shape', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getTxHistory({ pageNumber: 0, pageSize: 10 }) as any[];
+      const result = await connector.handlers.getTxHistory({ pageNumber: 0, pageSize: 10 }, ctx()) as any[];
       expect(result).toHaveLength(2);
       expect(result[0]).toEqual({ txHash: 'tx-hash-001', txStatus: { status: 'finalized' } });
       expect(result[1]).toEqual({ txHash: 'tx-hash-002', txStatus: { status: 'pending' } });
@@ -256,14 +260,14 @@ describe('dapp-connector', () => {
 
     it('paginates correctly', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getTxHistory({ pageNumber: 0, pageSize: 1 }) as any[];
+      const result = await connector.handlers.getTxHistory({ pageNumber: 0, pageSize: 1 }, ctx()) as any[];
       expect(result).toHaveLength(1);
       expect(result[0].txHash).toBe('tx-hash-001');
     });
 
     it('returns page 2', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getTxHistory({ pageNumber: 1, pageSize: 1 }) as any[];
+      const result = await connector.handlers.getTxHistory({ pageNumber: 1, pageSize: 1 }, ctx()) as any[];
       expect(result).toHaveLength(1);
       expect(result[0].txHash).toBe('tx-hash-002');
     });
@@ -276,13 +280,13 @@ describe('dapp-connector', () => {
       connector = createConnector({
         bundleOverrides: { stateFn: () => rx.of(state) },
       });
-      const result = await connector.handlers.getTxHistory({});
+      const result = await connector.handlers.getTxHistory({}, ctx());
       expect(result).toEqual([]);
     });
 
     it('defaults to pageNumber 0 and pageSize 20', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getTxHistory({}) as any[];
+      const result = await connector.handlers.getTxHistory({}, ctx()) as any[];
       expect(result).toHaveLength(2);
     });
   });
@@ -290,7 +294,7 @@ describe('dapp-connector', () => {
   describe('getConfiguration', () => {
     it('maps NetworkConfig fields to Configuration shape', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getConfiguration({}) as any;
+      const result = await connector.handlers.getConfiguration({}, ctx()) as any;
       expect(result).toEqual({
         indexerUri: 'http://localhost:8088/api/v3/graphql',
         indexerWsUri: 'ws://localhost:8088/api/v3/graphql/ws',
@@ -304,7 +308,7 @@ describe('dapp-connector', () => {
   describe('getConnectionStatus', () => {
     it('returns connected status with networkId', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getConnectionStatus({});
+      const result = await connector.handlers.getConnectionStatus({}, ctx());
       expect(result).toEqual({ status: 'connected', networkId: 'Undeployed' });
     });
   });
@@ -317,7 +321,7 @@ describe('dapp-connector', () => {
       connector = createConnector({
         bundleOverrides: { stateFn: () => neverSynced.asObservable() },
       });
-      await expect(connector.handlers.getUnshieldedBalances({}))
+      await expect(connector.handlers.getUnshieldedBalances({}, ctx()))
         .rejects.toThrow('Wallet not synced yet');
     });
 
@@ -327,7 +331,7 @@ describe('dapp-connector', () => {
         bundleOverrides: { stateFn: () => neverSynced.asObservable() },
       });
       try {
-        await connector.handlers.getUnshieldedBalances({});
+        await connector.handlers.getUnshieldedBalances({}, ctx());
         expect.unreachable('should have thrown');
       } catch (err: any) {
         expect(err.code).toBe('Disconnected');
@@ -344,7 +348,7 @@ describe('dapp-connector', () => {
       const result = await connector.handlers.signData({
         data: 'deadbeef',
         options: { encoding: 'hex', keyType: 'unshielded' },
-      }) as any;
+      }, ctx()) as any;
       expect(result.data).toBe('deadbeef');
       expect(result.signature).toBe('abcd1234signature');
       expect(result.verifyingKey).toBe('5678efghpubkey');
@@ -360,7 +364,7 @@ describe('dapp-connector', () => {
         await expect(connector.handlers.signData({
           data: 'deadbeef',
           options: { encoding: 'hex', keyType: 'unshielded' },
-        })).rejects.toThrow('User rejected the request');
+        }, ctx())).rejects.toThrow('User rejected the request');
       } finally {
         Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
       }
@@ -374,7 +378,7 @@ describe('dapp-connector', () => {
       try {
         connector = createConnector({ approvalOptions: {} });
         try {
-          await connector.handlers.submitTransaction({ tx: 'aabb' });
+          await connector.handlers.submitTransaction({ tx: 'aabb' }, ctx());
           expect.unreachable('should have thrown');
         } catch (err: any) {
           expect(err.code).toBe('Rejected');
@@ -400,7 +404,7 @@ describe('dapp-connector', () => {
       const result = await connector.handlers.signData({
         data: 'cafebabe',
         options: { encoding: 'hex', keyType: 'unshielded' },
-      }) as any;
+      }, ctx()) as any;
 
       expect(result.data).toBe('cafebabe');
       expect((bundle.keystore as any).signData).toHaveBeenCalledWith(
@@ -420,7 +424,7 @@ describe('dapp-connector', () => {
       const result = await connector.handlers.signData({
         data: b64Data,
         options: { encoding: 'base64' },
-      }) as any;
+      }, ctx()) as any;
 
       expect(result.data).toBe(b64Data);
       expect((bundle.keystore as any).signData).toHaveBeenCalledWith(
@@ -439,7 +443,7 @@ describe('dapp-connector', () => {
       const result = await connector.handlers.signData({
         data: 'sign me',
         options: { encoding: 'text' },
-      }) as any;
+      }, ctx()) as any;
 
       expect(result.data).toBe('sign me');
       expect((bundle.keystore as any).signData).toHaveBeenCalledWith(
@@ -452,7 +456,7 @@ describe('dapp-connector', () => {
       await expect(connector.handlers.signData({
         data: 'test',
         options: { encoding: 'binary' },
-      })).rejects.toThrow('Unknown encoding: binary');
+      }, ctx())).rejects.toThrow('Unknown encoding: binary');
     });
 
     it('throws for unsupported keyType', async () => {
@@ -460,14 +464,14 @@ describe('dapp-connector', () => {
       await expect(connector.handlers.signData({
         data: 'test',
         options: { encoding: 'text', keyType: 'shielded' },
-      })).rejects.toThrow('Unsupported keyType');
+      }, ctx())).rejects.toThrow('Unsupported keyType');
     });
 
     it('throws when data is missing', async () => {
       connector = createConnector();
       await expect(connector.handlers.signData({
         options: { encoding: 'hex' },
-      })).rejects.toThrow('data and options.encoding are required');
+      }, ctx())).rejects.toThrow('data and options.encoding are required');
     });
 
     it('throws when encoding is missing', async () => {
@@ -475,7 +479,7 @@ describe('dapp-connector', () => {
       await expect(connector.handlers.signData({
         data: 'test',
         options: {},
-      })).rejects.toThrow('data and options.encoding are required');
+      }, ctx())).rejects.toThrow('data and options.encoding are required');
     });
 
     it('returns signature and verifyingKey as strings', async () => {
@@ -483,7 +487,7 @@ describe('dapp-connector', () => {
       const result = await connector.handlers.signData({
         data: 'aabb',
         options: { encoding: 'hex' },
-      }) as any;
+      }, ctx()) as any;
       expect(typeof result.signature).toBe('string');
       expect(typeof result.verifyingKey).toBe('string');
     });
@@ -494,13 +498,13 @@ describe('dapp-connector', () => {
   describe('input validation', () => {
     it('makeTransfer throws when desiredOutputs is missing', async () => {
       connector = createConnector();
-      await expect(connector.handlers.makeTransfer({}))
+      await expect(connector.handlers.makeTransfer({}, ctx()))
         .rejects.toThrow('desiredOutputs must be a non-empty array');
     });
 
     it('makeTransfer throws when desiredOutputs is empty', async () => {
       connector = createConnector();
-      await expect(connector.handlers.makeTransfer({ desiredOutputs: [] }))
+      await expect(connector.handlers.makeTransfer({ desiredOutputs: [] }, ctx()))
         .rejects.toThrow('desiredOutputs must be a non-empty array');
     });
 
@@ -508,24 +512,24 @@ describe('dapp-connector', () => {
       connector = createConnector();
       await expect(connector.handlers.makeTransfer({
         desiredOutputs: [{ kind: 'public', type: '0000', value: '100', recipient: 'addr' }],
-      })).rejects.toThrow('Invalid output kind: "public"');
+      }, ctx())).rejects.toThrow('Invalid output kind: "public"');
     });
 
     it('submitTransaction throws when tx is missing', async () => {
       connector = createConnector();
-      await expect(connector.handlers.submitTransaction({}))
+      await expect(connector.handlers.submitTransaction({}, ctx()))
         .rejects.toThrow('tx is required');
     });
 
     it('balanceUnsealedTransaction throws when tx is missing', async () => {
       connector = createConnector();
-      await expect(connector.handlers.balanceUnsealedTransaction({}))
+      await expect(connector.handlers.balanceUnsealedTransaction({}, ctx()))
         .rejects.toThrow('tx is required');
     });
 
     it('balanceSealedTransaction throws when tx is missing', async () => {
       connector = createConnector();
-      await expect(connector.handlers.balanceSealedTransaction({}))
+      await expect(connector.handlers.balanceSealedTransaction({}, ctx()))
         .rejects.toThrow('tx is required');
     });
 
@@ -534,7 +538,7 @@ describe('dapp-connector', () => {
       await expect(connector.handlers.makeIntent({
         desiredInputs: [],
         desiredOutputs: [],
-      })).rejects.toThrow('options is required for makeIntent');
+      }, ctx())).rejects.toThrow('options is required for makeIntent');
     });
   });
 
@@ -543,7 +547,7 @@ describe('dapp-connector', () => {
   describe('getUnshieldedAddress', () => {
     it('returns bech32m-encoded unshielded address', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getUnshieldedAddress({}) as any;
+      const result = await connector.handlers.getUnshieldedAddress({}, ctx()) as any;
       expect(result).toHaveProperty('unshieldedAddress');
       expect(typeof result.unshieldedAddress).toBe('string');
     });
@@ -552,7 +556,7 @@ describe('dapp-connector', () => {
   describe('getShieldedAddresses', () => {
     it('returns shielded address and public keys', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getShieldedAddresses({}) as any;
+      const result = await connector.handlers.getShieldedAddresses({}, ctx()) as any;
       expect(result).toHaveProperty('shieldedAddress');
       expect(result.shieldedCoinPublicKey).toBe('coin-pub-key-hex');
       expect(result.shieldedEncryptionPublicKey).toBe('enc-pub-key-hex');
@@ -562,7 +566,7 @@ describe('dapp-connector', () => {
   describe('getDustAddress', () => {
     it('returns bech32m-encoded dust address', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getDustAddress({}) as any;
+      const result = await connector.handlers.getDustAddress({}, ctx()) as any;
       expect(result).toHaveProperty('dustAddress');
       expect(typeof result.dustAddress).toBe('string');
     });
@@ -581,7 +585,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }))
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()))
         .rejects.toThrow('ZK proof generation timed out');
     });
 
@@ -593,7 +597,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      const result = await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }) as any;
+      const result = await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()) as any;
       expect(result.tx).toBe('serialized_FINALIZED_TX');
     });
 
@@ -605,7 +609,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }))
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()))
         .rejects.toThrow('signing failed');
     });
 
@@ -617,7 +621,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      await expect(connector.handlers.balanceSealedTransaction({ tx: 'aabb' }))
+      await expect(connector.handlers.balanceSealedTransaction({ tx: 'aabb' }, ctx()))
         .rejects.toThrow('proof generation failed');
     });
   });
@@ -627,7 +631,7 @@ describe('dapp-connector', () => {
   describe('getProvingProvider', () => {
     it('returns proof server URI', async () => {
       connector = createConnector();
-      const result = await connector.handlers.getProvingProvider({}) as any;
+      const result = await connector.handlers.getProvingProvider({}, ctx()) as any;
       expect(result.provingProvider).toBe('ready');
       expect(result.proverServerUri).toBe('http://localhost:6300');
     });
@@ -642,7 +646,7 @@ describe('dapp-connector', () => {
       connector = createConnector();
       const result = await connector.handlers.hintUsage({
         methodNames: ['getUnshieldedBalances', 'makeTransfer'],
-      });
+      }, ctx());
       expect(result).toBeUndefined();
     });
   });

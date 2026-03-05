@@ -31,9 +31,23 @@ export interface JsonRpcErrorResponse {
 
 export type JsonRpcResponse = JsonRpcSuccessResponse | JsonRpcErrorResponse;
 
-// ── Method handler type ──
+// ── JSON-RPC 2.0 notification (server → client, no id) ──
 
-export type RpcHandler = (params: Record<string, unknown>) => Promise<unknown>;
+export interface JsonRpcNotification {
+  jsonrpc: '2.0';
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+// ── Handler context & type ──
+
+/** Per-invocation context passed to each handler (scoped to the calling connection) */
+export interface RpcHandlerContext {
+  /** Send a JSON-RPC notification to the calling client */
+  notify: (method: string, params?: Record<string, unknown>) => void;
+}
+
+export type RpcHandler = (params: Record<string, unknown>, context: RpcHandlerContext) => Promise<unknown>;
 
 // ── DApp Connector error code → JSON-RPC error code mapping ──
 
@@ -86,6 +100,8 @@ export interface RpcConnection {
   authenticated: boolean;
   /** Network ID after connect */
   networkId?: string;
+  /** Send a JSON-RPC notification to this client (no-op if socket is closed) */
+  notify(method: string, params?: Record<string, unknown>): void;
 }
 
 // ── Server options ──
@@ -161,6 +177,11 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
       id,
       connectedAt: new Date(),
       authenticated: false,
+      notify(method: string, params?: Record<string, unknown>): void {
+        if (ws.readyState !== ws.OPEN) return;
+        const notification: JsonRpcNotification = { jsonrpc: '2.0', method, ...(params && { params }) };
+        ws.send(JSON.stringify(notification, jsonReplacer));
+      },
     };
     connections.set(id, connection);
     onConnect?.(connection);
@@ -196,7 +217,8 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
           return;
         }
 
-        const result = await handler(request.params ?? {});
+        const context: RpcHandlerContext = { notify: connection.notify.bind(connection) };
+        const result = await handler(request.params ?? {}, context);
 
         // Mark as authenticated after successful connect
         if (request.method === 'connect' && result && typeof result === 'object') {

@@ -47,7 +47,8 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   process.stderr.write(keyValue('Network', networkName) + '\n');
   process.stderr.write(keyValue('Address', formatAddress(config.address, true)) + '\n');
   process.stderr.write(keyValue('Port', String(port)) + '\n');
-  process.stderr.write(keyValue('Approval', approveAll ? 'auto-approve all' : autoApproveReads ? 'auto-approve reads' : 'prompt for all') + '\n');
+  process.stderr.write(keyValue('Auto-approve reads', approveAll || autoApproveReads ? 'yes' : 'no') + '\n');
+  process.stderr.write(keyValue('Auto-approve writes', approveAll ? 'yes' : 'no') + '\n');
   process.stderr.write('\n');
 
   // ── Suppress SDK noise ──

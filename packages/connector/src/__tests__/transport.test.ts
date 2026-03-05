@@ -251,6 +251,62 @@ describe('createTransport', () => {
     transport.close(); // Should not throw
   });
 
+  it('calls onNotification when server sends a notification (no id)', async () => {
+    server = createTestServer((method) => {
+      if (method === 'trigger') return 'ok';
+      return null;
+    });
+
+    const notifications: Array<{ method: string; params: any }> = [];
+
+    const transport = await createTransport({
+      url: server.url,
+      onNotification: (method, params) => {
+        notifications.push({ method, params });
+      },
+    });
+
+    // Server sends a notification to all connected clients
+    for (const client of server.wss.clients) {
+      client.send(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'approval:pending',
+        params: { method: 'submitTransaction' },
+      }));
+    }
+
+    // Give the event loop a tick
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].method).toBe('approval:pending');
+    expect(notifications[0].params.method).toBe('submitTransaction');
+    transport.close();
+  });
+
+  it('ignores notifications when onNotification is not set', async () => {
+    server = createTestServer((method) => {
+      if (method === 'ping') return 'pong';
+      return null;
+    });
+
+    const transport = await createTransport({ url: server.url });
+
+    // Server sends a notification — should not crash
+    for (const client of server.wss.clients) {
+      client.send(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'approval:pending',
+        params: { method: 'test' },
+      }));
+    }
+
+    // Regular call still works
+    const result = await transport.call('ping');
+    expect(result).toBe('pong');
+    transport.close();
+  });
+
   it('uses auto-incrementing request IDs', async () => {
     const ids: number[] = [];
     server = createTestServer((_method, _params, id) => {

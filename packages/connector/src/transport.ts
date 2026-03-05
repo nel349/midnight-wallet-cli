@@ -21,6 +21,8 @@ export interface TransportOptions {
   timeout?: number;
   /** Called when the WebSocket connection closes */
   onDisconnect?: () => void;
+  /** Called when the server sends a JSON-RPC notification (message with method but no id) */
+  onNotification?: (method: string, params: Record<string, unknown>) => void;
 }
 
 interface PendingCall {
@@ -50,7 +52,7 @@ function jsonReplacer(_key: string, value: unknown): unknown {
 const DEFAULT_TIMEOUT = 300_000; // 5 minutes
 
 export async function createTransport(options: TransportOptions): Promise<RpcTransport> {
-  const { url, timeout = DEFAULT_TIMEOUT, onDisconnect } = options;
+  const { url, timeout = DEFAULT_TIMEOUT, onDisconnect, onNotification } = options;
   const pending = new Map<number, PendingCall>();
   let nextId = 1;
   let closed = false;
@@ -97,6 +99,12 @@ export async function createTransport(options: TransportOptions): Promise<RpcTra
       parsed = JSON.parse(data);
     } catch {
       return; // Malformed response — ignore
+    }
+
+    // Server-sent notification (no id, has method) — dispatch and skip pending lookup
+    if (parsed.id === undefined && typeof parsed.method === 'string') {
+      onNotification?.(parsed.method, parsed.params ?? {});
+      return;
     }
 
     const id = parsed.id;

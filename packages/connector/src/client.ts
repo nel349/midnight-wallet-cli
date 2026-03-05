@@ -25,6 +25,10 @@ export interface WalletClientOptions {
   networkId: string;
   /** Per-call timeout in ms (default: 300_000 = 5 minutes) */
   timeout?: number;
+  /** Called when the server begins waiting for terminal approval on a write method */
+  onApprovalPending?: (method: string) => void;
+  /** Called when the server finishes terminal approval (approved or rejected) */
+  onApprovalResolved?: (method: string, result: 'approved' | 'rejected') => void;
 }
 
 // ── WalletClient interface ──
@@ -39,7 +43,7 @@ export interface WalletClient extends ConnectedAPI {
 // ── Factory ──
 
 export async function createWalletClient(options: WalletClientOptions): Promise<WalletClient> {
-  const { url, networkId, timeout } = options;
+  const { url, networkId, timeout, onApprovalPending, onApprovalResolved } = options;
 
   const disconnectHandlers: Array<() => void> = [];
 
@@ -49,6 +53,13 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
     onDisconnect: () => {
       for (const handler of disconnectHandlers) {
         handler();
+      }
+    },
+    onNotification: (method, params) => {
+      if (method === 'approval:pending') {
+        onApprovalPending?.(params.method as string);
+      } else if (method === 'approval:resolved') {
+        onApprovalResolved?.(params.method as string, params.result as 'approved' | 'rejected');
       }
     },
   });

@@ -492,6 +492,67 @@ describe('createWalletClient', () => {
     expect(fired).toEqual(['first', 'second', 'third']);
   });
 
+  // ── Approval notifications ──
+
+  it('fires onApprovalPending when server sends approval:pending', async () => {
+    server = createMockServer({
+      handlers: {
+        // Custom submitTransaction that sends notification before responding
+        submitTransaction: () => {
+          // Send notification to all connected clients
+          for (const client of server!.wss.clients) {
+            client.send(JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'approval:pending',
+              params: { method: 'submitTransaction' },
+            }));
+          }
+          // Small delay then respond
+          return new Promise((resolve) => setTimeout(() => resolve(undefined), 50));
+        },
+      },
+    });
+
+    const pendingMethods: string[] = [];
+    const client = await createWalletClient({
+      url: server.url,
+      networkId: 'Undeployed',
+      onApprovalPending: (method) => { pendingMethods.push(method); },
+    });
+
+    await client.submitTransaction('aabb');
+    expect(pendingMethods).toEqual(['submitTransaction']);
+    client.disconnect();
+  });
+
+  it('fires onApprovalResolved when server sends approval:resolved', async () => {
+    server = createMockServer({
+      handlers: {
+        submitTransaction: () => {
+          for (const client of server!.wss.clients) {
+            client.send(JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'approval:resolved',
+              params: { method: 'submitTransaction', result: 'approved' },
+            }));
+          }
+          return new Promise((resolve) => setTimeout(() => resolve(undefined), 50));
+        },
+      },
+    });
+
+    const resolved: Array<{ method: string; result: string }> = [];
+    const client = await createWalletClient({
+      url: server.url,
+      networkId: 'Undeployed',
+      onApprovalResolved: (method, result) => { resolved.push({ method, result }); },
+    });
+
+    await client.submitTransaction('aabb');
+    expect(resolved).toEqual([{ method: 'submitTransaction', result: 'approved' }]);
+    client.disconnect();
+  });
+
   // ── Error propagation ──
 
   it('propagates PermissionRejected error from server', async () => {
