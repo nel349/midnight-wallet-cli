@@ -24,7 +24,8 @@ export interface DesiredInput {
 
 // ── Transaction Status ──
 
-export type ExecutionStatus = Record<number, 'Success' | 'Failure'>;
+/** JSON serialization turns numeric keys to strings, so wire format is Record<string, ...> */
+export type ExecutionStatus = Record<string, 'Success' | 'Failure'>;
 
 export type TxStatus =
   | { status: 'finalized'; executionStatus: ExecutionStatus }
@@ -65,6 +66,12 @@ export interface ProvingProvider {
     keyLocation: string,
     overwriteBindingInput?: bigint,
   ): Promise<Uint8Array>;
+}
+
+/** Extended proving provider returned by the wallet client over JSON-RPC */
+export interface WalletProvingProvider extends ProvingProvider {
+  /** URI of the proof server — use this directly until bidirectional RPC proving is supported */
+  proverServerUri: string;
 }
 
 // ── Configuration & Status ──
@@ -129,7 +136,7 @@ export interface WalletConnectedAPI {
   signData(data: string, options: SignDataOptions): Promise<Signature>;
   submitTransaction(tx: string): Promise<void>;
 
-  getProvingProvider(keyMaterialProvider: KeyMaterialProvider): Promise<ProvingProvider>;
+  getProvingProvider(keyMaterialProvider: KeyMaterialProvider): Promise<WalletProvingProvider>;
 
   getConfiguration(): Promise<Configuration>;
   getConnectionStatus(): Promise<ConnectionStatus>;

@@ -19,6 +19,7 @@ export type {
   Signature,
   KeyMaterialProvider,
   ProvingProvider,
+  WalletProvingProvider,
   APIError,
   ErrorCode,
 } from './types.ts';

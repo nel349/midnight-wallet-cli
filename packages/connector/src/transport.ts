@@ -3,6 +3,16 @@
 
 import { reconstructError, type JsonRpcError } from './errors.ts';
 
+// ── WebSocket abstraction (works with both browser WebSocket and Node ws) ──
+
+interface WebSocketLike {
+  readyState: number;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+  addEventListener(type: string, listener: (ev: any) => void): void;
+  removeEventListener(type: string, listener: (ev: any) => void): void;
+}
+
 // ── Types ──
 
 export interface TransportOptions {
@@ -50,7 +60,7 @@ export async function createTransport(options: TransportOptions): Promise<RpcTra
     ? globalThis.WebSocket
     : (await import('ws')).default;
 
-  const ws = new WS(url) as any;
+  const ws = new WS(url) as unknown as WebSocketLike;
 
   // Wait for connection to open
   await new Promise<void>((resolve, reject) => {

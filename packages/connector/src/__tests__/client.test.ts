@@ -220,15 +220,27 @@ describe('createWalletClient', () => {
 
   // ── History ──
 
-  it('getTxHistory returns history entries', async () => {
-    server = createMockServer();
+  it('getTxHistory sends pageNumber and pageSize params', async () => {
+    let receivedParams: any;
+    server = createMockServer({
+      handlers: {
+        getTxHistory: (params) => {
+          receivedParams = params;
+          return [
+            { txHash: 'aabb', txStatus: { status: 'finalized' } },
+            { txHash: 'ccdd', txStatus: { status: 'pending' } },
+          ];
+        },
+      },
+    });
     const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
 
-    const history = await client.getTxHistory(0, 20);
+    const history = await client.getTxHistory(2, 10);
     expect(history).toHaveLength(2);
     expect(history[0].txHash).toBe('aabb');
     expect(history[0].txStatus.status).toBe('finalized');
-    expect(history[1].txStatus.status).toBe('pending');
+    expect(receivedParams.pageNumber).toBe(2);
+    expect(receivedParams.pageSize).toBe(10);
     client.disconnect();
   });
 
@@ -256,41 +268,84 @@ describe('createWalletClient', () => {
 
   // ── Write methods ──
 
-  it('makeTransfer dispatches RPC and returns tx hex', async () => {
-    server = createMockServer();
+  it('makeTransfer sends correct params and returns tx hex', async () => {
+    let receivedParams: any;
+    server = createMockServer({
+      handlers: {
+        makeTransfer: (params) => {
+          receivedParams = params;
+          return { tx: 'deadbeef' };
+        },
+      },
+    });
     const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
 
-    const result = await client.makeTransfer([
-      { kind: 'unshielded', type: NATIVE_TOKEN, value: 100_000_000n, recipient: 'midnight1qrecipient' },
-    ]);
+    const result = await client.makeTransfer(
+      [{ kind: 'unshielded', type: NATIVE_TOKEN, value: 100_000_000n, recipient: 'midnight1qrecipient' }],
+      { payFees: true },
+    );
     expect(result.tx).toBe('deadbeef');
+    // Verify parameter fidelity — bigint serialized as string
+    expect(receivedParams.desiredOutputs[0].kind).toBe('unshielded');
+    expect(receivedParams.desiredOutputs[0].type).toBe(NATIVE_TOKEN);
+    expect(receivedParams.desiredOutputs[0].value).toBe('100000000');
+    expect(receivedParams.desiredOutputs[0].recipient).toBe('midnight1qrecipient');
+    expect(receivedParams.options.payFees).toBe(true);
     client.disconnect();
   });
 
-  it('submitTransaction dispatches and returns void', async () => {
-    server = createMockServer();
+  it('submitTransaction sends tx param correctly', async () => {
+    let receivedParams: any;
+    server = createMockServer({
+      handlers: {
+        submitTransaction: (params) => {
+          receivedParams = params;
+          return undefined;
+        },
+      },
+    });
     const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
 
     const result = await client.submitTransaction('aabbccdd');
     expect(result).toBeUndefined();
+    expect(receivedParams.tx).toBe('aabbccdd');
     client.disconnect();
   });
 
-  it('balanceUnsealedTransaction returns balanced tx', async () => {
-    server = createMockServer();
+  it('balanceUnsealedTransaction sends tx and options params', async () => {
+    let receivedParams: any;
+    server = createMockServer({
+      handlers: {
+        balanceUnsealedTransaction: (params) => {
+          receivedParams = params;
+          return { tx: 'balanced_unsealed' };
+        },
+      },
+    });
     const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
 
-    const result = await client.balanceUnsealedTransaction('raw_tx_hex');
+    const result = await client.balanceUnsealedTransaction('raw_tx_hex', { payFees: false });
     expect(result.tx).toBe('balanced_unsealed');
+    expect(receivedParams.tx).toBe('raw_tx_hex');
+    expect(receivedParams.options.payFees).toBe(false);
     client.disconnect();
   });
 
-  it('balanceSealedTransaction returns balanced tx', async () => {
-    server = createMockServer();
+  it('balanceSealedTransaction sends tx param', async () => {
+    let receivedParams: any;
+    server = createMockServer({
+      handlers: {
+        balanceSealedTransaction: (params) => {
+          receivedParams = params;
+          return { tx: 'balanced_sealed' };
+        },
+      },
+    });
     const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
 
     const result = await client.balanceSealedTransaction('raw_tx_hex');
     expect(result.tx).toBe('balanced_sealed');
+    expect(receivedParams.tx).toBe('raw_tx_hex');
     client.disconnect();
   });
 
@@ -317,38 +372,77 @@ describe('createWalletClient', () => {
     client.disconnect();
   });
 
-  it('signData returns signature', async () => {
-    server = createMockServer();
+  it('signData sends correct params and returns signature', async () => {
+    let receivedParams: any;
+    server = createMockServer({
+      handlers: {
+        signData: (params) => {
+          receivedParams = params;
+          return { data: 'hello', signature: 'sig123', verifyingKey: 'vk456' };
+        },
+      },
+    });
     const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
 
     const result = await client.signData('hello', { encoding: 'text', keyType: 'unshielded' });
     expect(result.signature).toBe('sig123');
     expect(result.verifyingKey).toBe('vk456');
+    expect(receivedParams.data).toBe('hello');
+    expect(receivedParams.options.encoding).toBe('text');
+    expect(receivedParams.options.keyType).toBe('unshielded');
     client.disconnect();
   });
 
   // ── Proving provider ──
 
-  it('getProvingProvider returns stub with proverServerUri', async () => {
+  it('getProvingProvider returns proverServerUri and working stubs', async () => {
     server = createMockServer();
     const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
 
-    const provider = await client.getProvingProvider({
+    const keyMaterialProvider = {
       getZKIR: async () => new Uint8Array(),
       getProverKey: async () => new Uint8Array(),
       getVerifierKey: async () => new Uint8Array(),
-    });
-    expect((provider as any).proverServerUri).toBe('http://localhost:6300');
+    };
+
+    const provider = await client.getProvingProvider(keyMaterialProvider);
+    // proverServerUri is now properly typed via WalletProvingProvider
+    expect(provider.proverServerUri).toBe('http://localhost:6300');
+
+    // Stubs throw with informative message
+    try {
+      await provider.check(new Uint8Array(), 'key');
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err.message).toContain('not yet supported');
+    }
+
+    try {
+      await provider.prove(new Uint8Array(), 'key');
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err.message).toContain('not yet supported');
+    }
+
     client.disconnect();
   });
 
   // ── Hints ──
 
-  it('hintUsage dispatches without error', async () => {
-    server = createMockServer();
+  it('hintUsage sends methodNames array correctly', async () => {
+    let receivedParams: any;
+    server = createMockServer({
+      handlers: {
+        hintUsage: (params) => {
+          receivedParams = params;
+          return undefined;
+        },
+      },
+    });
     const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
 
     await client.hintUsage(['getUnshieldedBalances', 'makeTransfer']);
+    expect(receivedParams.methodNames).toEqual(['getUnshieldedBalances', 'makeTransfer']);
     client.disconnect();
   });
 
@@ -380,5 +474,49 @@ describe('createWalletClient', () => {
     } catch (err: any) {
       expect(err.message).toContain('not connected');
     }
+  });
+
+  it('multiple onDisconnect handlers all fire', async () => {
+    server = createMockServer();
+    const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
+
+    const fired: string[] = [];
+    client.onDisconnect(() => { fired.push('first'); });
+    client.onDisconnect(() => { fired.push('second'); });
+    client.onDisconnect(() => { fired.push('third'); });
+
+    await server.close();
+    server = null;
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fired).toEqual(['first', 'second', 'third']);
+  });
+
+  // ── Error propagation ──
+
+  it('propagates PermissionRejected error from server', async () => {
+    server = createMockServer({
+      handlers: {
+        makeTransfer: () => {
+          throw {
+            code: -32001,
+            message: 'Permission denied for makeTransfer',
+            data: { type: 'DAppConnectorAPIError', code: 'PermissionRejected' },
+          };
+        },
+      },
+    });
+    const client = await createWalletClient({ url: server.url, networkId: 'Undeployed' });
+
+    try {
+      await client.makeTransfer([
+        { kind: 'unshielded', type: NATIVE_TOKEN, value: 1n, recipient: 'midnight1q' },
+      ]);
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err.type).toBe('DAppConnectorAPIError');
+      expect(err.code).toBe('PermissionRejected');
+    }
+    client.disconnect();
   });
 });

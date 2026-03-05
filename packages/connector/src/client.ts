@@ -11,7 +11,7 @@ import type {
   DesiredInput,
   HistoryEntry,
   KeyMaterialProvider,
-  ProvingProvider,
+  WalletProvingProvider,
   Signature,
   SignDataOptions,
 } from './types.ts';
@@ -141,7 +141,7 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
 
     // ── Proving provider ──
 
-    async getProvingProvider(_keyMaterialProvider: KeyMaterialProvider) {
+    async getProvingProvider(_keyMaterialProvider: KeyMaterialProvider): Promise<WalletProvingProvider> {
       // The CLI server returns { provingProvider: 'ready', proverServerUri }
       // Real proving over JSON-RPC requires bidirectional RPC (future).
       // For now, return a stub that delegates to the proof server.
@@ -152,13 +152,13 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
 
       return {
         proverServerUri: result.proverServerUri,
-        async check() {
+        async check(_serializedPreimage: Uint8Array, _keyLocation: string): Promise<(bigint | undefined)[]> {
           throw new Error('Proving over WebSocket is not yet supported — use proverServerUri directly');
         },
-        async prove() {
+        async prove(_serializedPreimage: Uint8Array, _keyLocation: string, _overwriteBindingInput?: bigint): Promise<Uint8Array> {
           throw new Error('Proving over WebSocket is not yet supported — use proverServerUri directly');
         },
-      } as unknown as ProvingProvider;
+      };
     },
 
     // ── Configuration ──

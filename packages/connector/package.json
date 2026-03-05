@@ -4,6 +4,22 @@
   "type": "module",
   "description": "Client library for connecting DApps to the Midnight CLI wallet over WebSocket JSON-RPC",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nel349/midnight-wallet-cli.git",
+    "directory": "packages/connector"
+  },
+  "keywords": [
+    "midnight",
+    "blockchain",
+    "wallet",
+    "dapp-connector",
+    "json-rpc",
+    "websocket"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

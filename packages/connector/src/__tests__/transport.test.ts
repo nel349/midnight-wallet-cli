@@ -177,6 +177,80 @@ describe('createTransport', () => {
     }
   });
 
+  it('resolves concurrent calls independently by ID', async () => {
+    server = createTestServer((method) => {
+      // Respond with method name so we can verify correct matching
+      if (method === 'slow') {
+        return new Promise((resolve) => setTimeout(() => resolve('slow_result'), 50));
+      }
+      return `fast_${method}`;
+    });
+
+    const transport = await createTransport({ url: server.url });
+
+    // Fire 3 calls concurrently
+    const [r1, r2, r3] = await Promise.all([
+      transport.call('alpha'),
+      transport.call('slow'),
+      transport.call('gamma'),
+    ]);
+
+    expect(r1).toBe('fast_alpha');
+    expect(r2).toBe('slow_result');
+    expect(r3).toBe('fast_gamma');
+    transport.close();
+  });
+
+  it('rejects in-flight calls when close() is called', async () => {
+    server = createTestServer(() => {
+      // Never respond — call stays pending
+      return new Promise(() => {});
+    });
+
+    const transport = await createTransport({ url: server.url, timeout: 10_000 });
+    const pending = transport.call('hanging');
+
+    // Close while call is in-flight
+    transport.close();
+
+    try {
+      await pending;
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err.message).toBe('Transport closed');
+    }
+  });
+
+  it('rejects in-flight calls when server disconnects', async () => {
+    server = createTestServer(() => {
+      // Never respond
+      return new Promise(() => {});
+    });
+
+    const transport = await createTransport({ url: server.url, timeout: 10_000 });
+    const pending = transport.call('hanging');
+
+    // Server terminates the connection
+    await server.close();
+    server = null;
+
+    try {
+      await pending;
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err.message).toBe('WebSocket connection closed');
+    }
+    transport.close();
+  });
+
+  it('close() is idempotent — calling twice does not throw', async () => {
+    server = createTestServer(() => 'ok');
+
+    const transport = await createTransport({ url: server.url });
+    transport.close();
+    transport.close(); // Should not throw
+  });
+
   it('uses auto-incrementing request IDs', async () => {
     const ids: number[] = [];
     server = createTestServer((_method, _params, id) => {

@@ -38,6 +38,17 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # ── Connector package ──
+
+      - name: Connector — Typecheck
+        run: npm run typecheck --workspace=packages/connector
+
+      - name: Connector — Build
+        run: npm run build --workspace=packages/connector
+
+      - name: Connector — Tests
+        run: npm test --workspace=packages/connector
+
   publish-check:
     runs-on: ubuntu-latest
     needs: test
@@ -61,5 +72,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Check package
+      - name: Check CLI package
         run: npm pack --dry-run
+
+      - name: Connector — Build
+        run: npm run build --workspace=packages/connector
+
+      - name: Check Connector package
+        run: npm pack --dry-run --workspace=packages/connector

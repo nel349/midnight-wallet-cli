@@ -5,7 +5,7 @@ import type { APIError, ErrorCode } from './types.ts';
 
 // ── RPC code → DApp Connector error code ──
 
-const RPC_CODE_TO_ERROR: Record<number, ErrorCode> = {
+export const RPC_CODE_TO_ERROR: Record<number, ErrorCode> = {
   [-32000]: 'Rejected',
   [-32001]: 'PermissionRejected',
   [-32002]: 'Disconnected',
@@ -19,8 +19,8 @@ export interface JsonRpcError {
   code: number;
   message: string;
   data?: {
-    type: string;
-    code: string;
+    type: 'DAppConnectorAPIError';
+    code: ErrorCode;
   };
 }
 
