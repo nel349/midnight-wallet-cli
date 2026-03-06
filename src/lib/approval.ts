@@ -46,7 +46,7 @@ const READ_ONLY_METHODS = new Set([
   'getConnectionStatus',
 ]);
 
-/** Prep-step methods that have no on-chain effect — safe to auto-approve when submit will prompt */
+/** Prep-step methods with no on-chain effect — auto-approved only when autoApproveReads is true */
 const PREP_METHODS = new Set([
   'balanceUnsealedTransaction',
   'balanceSealedTransaction',

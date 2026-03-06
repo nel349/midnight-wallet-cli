@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   renderApprovalBox,
   isReadOnlyMethod,
+  isPrepMethod,
   promptApproval,
   type ApprovalRequest,
 } from '../lib/approval.ts';
@@ -23,7 +24,7 @@ describe('approval', () => {
       expect(isReadOnlyMethod('getConnectionStatus')).toBe(true);
     });
 
-    it('returns false for write methods', () => {
+    it('returns false for write and prep methods', () => {
       expect(isReadOnlyMethod('makeTransfer')).toBe(false);
       expect(isReadOnlyMethod('submitTransaction')).toBe(false);
       expect(isReadOnlyMethod('balanceUnsealedTransaction')).toBe(false);
@@ -34,6 +35,29 @@ describe('approval', () => {
 
     it('returns false for unknown methods', () => {
       expect(isReadOnlyMethod('unknownMethod')).toBe(false);
+    });
+  });
+
+  describe('isPrepMethod', () => {
+    it('returns true for balance transaction methods', () => {
+      expect(isPrepMethod('balanceUnsealedTransaction')).toBe(true);
+      expect(isPrepMethod('balanceSealedTransaction')).toBe(true);
+    });
+
+    it('returns false for write methods', () => {
+      expect(isPrepMethod('submitTransaction')).toBe(false);
+      expect(isPrepMethod('makeTransfer')).toBe(false);
+      expect(isPrepMethod('signData')).toBe(false);
+      expect(isPrepMethod('makeIntent')).toBe(false);
+    });
+
+    it('returns false for read-only methods', () => {
+      expect(isPrepMethod('getUnshieldedBalances')).toBe(false);
+      expect(isPrepMethod('getConfiguration')).toBe(false);
+    });
+
+    it('returns false for unknown methods', () => {
+      expect(isPrepMethod('unknownMethod')).toBe(false);
     });
   });
 
@@ -169,6 +193,43 @@ describe('approval', () => {
       await promptApproval(readRequest, { autoApproveReads: true });
       const written = stripAnsi(stderrOutput.join(''));
       expect(written).toContain('Auto-approved (read-only)');
+    });
+
+    it('auto-approves prep methods when autoApproveReads is true', async () => {
+      const prepRequest: ApprovalRequest = {
+        method: 'balanceUnsealedTransaction',
+        network: 'undeployed',
+        details: [],
+      };
+      const result = await promptApproval(prepRequest, { autoApproveReads: true });
+      expect(result).toBe('approve');
+      const written = stripAnsi(stderrOutput.join(''));
+      expect(written).toContain('Auto-approved (prep)');
+    });
+
+    it('auto-approves balanceSealedTransaction as prep method', async () => {
+      const prepRequest: ApprovalRequest = {
+        method: 'balanceSealedTransaction',
+        network: 'undeployed',
+        details: [],
+      };
+      const result = await promptApproval(prepRequest, { autoApproveReads: true });
+      expect(result).toBe('approve');
+    });
+
+    it('does not auto-approve prep methods when autoApproveReads is false', async () => {
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+
+      const prepRequest: ApprovalRequest = {
+        method: 'balanceUnsealedTransaction',
+        network: 'undeployed',
+        details: [],
+      };
+      const result = await promptApproval(prepRequest, { autoApproveReads: false });
+      expect(result).toBe('reject'); // falls through to non-TTY rejection
+
+      Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
     });
 
     it('does not auto-approve write methods when only autoApproveReads is set', async () => {

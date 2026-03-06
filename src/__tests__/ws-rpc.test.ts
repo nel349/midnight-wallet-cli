@@ -254,6 +254,135 @@ describe('ws-rpc', () => {
     });
   });
 
+  describe('requestCount', () => {
+    it('increments per request on the same connection', async () => {
+      const port = nextPort();
+      const counts: number[] = [];
+      server = createRpcServer({
+        port,
+        handlers: {
+          ping: async () => 'pong',
+        },
+        onRequest: (conn) => counts.push(conn.requestCount),
+      });
+
+      const ws = await connectClient(port);
+      clients.push(ws);
+
+      sendRpc(ws, 1, 'ping');
+      await waitForMessage(ws);
+      sendRpc(ws, 2, 'ping');
+      await waitForMessage(ws);
+      sendRpc(ws, 3, 'ping');
+      await waitForMessage(ws);
+
+      expect(counts).toEqual([1, 2, 3]);
+    });
+  });
+
+  describe('onResponse', () => {
+    it('calls onResponse with result on success', async () => {
+      const port = nextPort();
+      const responses: Array<{ method: string; result: unknown; error?: string }> = [];
+      server = createRpcServer({
+        port,
+        handlers: {
+          echo: async (params) => params,
+        },
+        onResponse: (_conn, req, _durationMs, result, error) => {
+          responses.push({ method: req.method, result, error });
+        },
+      });
+
+      const ws = await connectClient(port);
+      clients.push(ws);
+
+      sendRpc(ws, 1, 'echo', { msg: 'hi' });
+      await waitForMessage(ws);
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0].method).toBe('echo');
+      expect(responses[0].result).toEqual({ msg: 'hi' });
+      expect(responses[0].error).toBeUndefined();
+    });
+
+    it('calls onResponse with error on failure', async () => {
+      const port = nextPort();
+      const responses: Array<{ method: string; result?: unknown; error?: string }> = [];
+      server = createRpcServer({
+        port,
+        handlers: {
+          fail: async () => { throw new Error('broken'); },
+        },
+        onResponse: (_conn, req, _durationMs, result, error) => {
+          responses.push({ method: req.method, result, error });
+        },
+      });
+
+      const ws = await connectClient(port);
+      clients.push(ws);
+
+      sendRpc(ws, 1, 'fail');
+      await waitForMessage(ws);
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0].method).toBe('fail');
+      expect(responses[0].result).toBeUndefined();
+      expect(responses[0].error).toBe('broken');
+    });
+
+    it('provides durationMs greater than or equal to zero', async () => {
+      const port = nextPort();
+      let capturedDuration = -1;
+      server = createRpcServer({
+        port,
+        handlers: {
+          slow: async () => {
+            await new Promise((r) => setTimeout(r, 20));
+            return 'done';
+          },
+        },
+        onResponse: (_conn, _req, durationMs) => {
+          capturedDuration = durationMs;
+        },
+      });
+
+      const ws = await connectClient(port);
+      clients.push(ws);
+
+      sendRpc(ws, 1, 'slow');
+      await waitForMessage(ws);
+
+      expect(capturedDuration).toBeGreaterThanOrEqual(15);
+    });
+  });
+
+  describe('connectionId in handler context', () => {
+    it('passes connectionId to handler context', async () => {
+      const port = nextPort();
+      let capturedId = '';
+      server = createRpcServer({
+        port,
+        handlers: {
+          whoami: async (_params, context) => {
+            capturedId = context.connectionId;
+            return { id: context.connectionId };
+          },
+        },
+      });
+
+      const ws = await connectClient(port);
+      clients.push(ws);
+
+      const responsePromise = waitForMessage(ws);
+      sendRpc(ws, 1, 'whoami');
+      const response = await responsePromise;
+
+      expect(capturedId).toMatch(/^conn_\d+$/);
+      expect(response.result.id).toBe(capturedId);
+    });
+  });
+
   describe('createApiError', () => {
     it('creates an APIError with correct properties', () => {
       const err = createApiError('Rejected', 'User said no');
