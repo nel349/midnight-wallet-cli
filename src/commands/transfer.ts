@@ -68,9 +68,6 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
           spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
         }
       },
-      onSyncDetail(pending) {
-        spinner.update(`Syncing wallet... (waiting: ${pending})`);
-      },
       onDust(status) {
         spinner.update(`Dust: ${status}`);
       },

@@ -59,3 +59,6 @@ export const FILE_MODE = 0o600;  // owner rw only — wallet files containing se
 
 // Localnet directory name (under ~/.midnight/)
 export const LOCALNET_DIR_NAME = 'localnet';
+
+// DApp Connector server port (99=midnight, 32=ws)
+export const DEFAULT_SERVE_PORT = 9932;

@@ -38,7 +38,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     address: config.address,
   });
 
-  const bundle = buildFacade(seedBuffer, networkConfig);
+  const bundle = await buildFacade(seedBuffer, networkConfig);
 
   const cleanup = async () => {
     try { await stopFacade(bundle); } catch { /* best-effort */ }
@@ -95,8 +95,6 @@ async function dustRegister(
         const pct = Math.min(Math.round((applied / highest) * 100), 100);
         spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
       }
-    }, (pending) => {
-      spinner.update(`Syncing wallet... (waiting: ${pending})`);
     });
 
     if (signal?.aborted) throw new Error('Operation cancelled');
@@ -106,7 +104,7 @@ async function dustRegister(
     // Use shared ensureDust — handles: early return if dust exists,
     // registration of unregistered UTXOs, waiting for dust coins.
     // Pass syncedState to avoid shareReplay stale-read issue.
-    const result = await ensureDust(bundle, (status) => {
+    const result = await ensureDust(bundle, (status: string) => {
       spinner.update(status);
     }, syncedState);
 
@@ -116,7 +114,7 @@ async function dustRegister(
     const state = await rx.firstValueFrom(
       bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
     );
-    const dustBal = state.dust.walletBalance(new Date());
+    const dustBal = state.dust.balance(new Date());
 
     if (result.alreadyAvailable) {
       spinner.stop('Dust already available');
@@ -168,8 +166,6 @@ async function dustStatus(
         const pct = Math.min(Math.round((applied / highest) * 100), 100);
         spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
       }
-    }, (pending) => {
-      spinner.update(`Syncing wallet... (waiting: ${pending})`);
     });
 
     if (signal?.aborted) throw new Error('Operation cancelled');
@@ -180,7 +176,7 @@ async function dustStatus(
       bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
     );
 
-    const dustBalance = state.dust.walletBalance(new Date());
+    const dustBalance = state.dust.balance(new Date());
     const hasAvailableDust = state.dust.availableCoins.length > 0;
     const allUtxos = state.unshielded.availableCoins;
     const unregisteredUtxos = allUtxos.filter(

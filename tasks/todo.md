@@ -74,11 +74,26 @@
 - [x] All unit tests pass (`npm test`) — 302 tests
 - [x] Manual test: airdrop flow verified on local devnet
 
+## Phase 7: Pillar 1 — AI Agent Friendly (COMPLETE)
+- [x] `--json` output flag on all commands
+- [x] MCP server via `midnight-wallet-mcp` binary
+- [x] `--agent` flag on help for comprehensive AI reference manual
+- [x] Structured exit codes in `exit-codes.ts`
+
+## Phase 8: Pillar 2 — DApp Connector Server
+
+`midnight serve` — DApp Connector API v4.0.1 over local WebSocket JSON-RPC.
+Full plan: `tasks/pillar2-dapp-connector-plan.md`
+
+- [ ] Add reverse RPC to ws-rpc.ts
+- [ ] Create dapp-connector.ts (18 API methods)
+- [ ] Create serve.ts command
+- [ ] Wire into CLI (wallet.ts, help.ts, art.ts)
+- [ ] Tests + verification
+
 ## Future (not in scope now)
-- [ ] `--json` output flag for machine-readable output
 - [ ] Shielded balance display
 - [ ] WalletFacade-based balance (full sync, shows dust)
 - [ ] `wallet list` — show all wallets in ~/.midnight/
 - [ ] `wallet switch` — change active wallet
 - [ ] `--watch` flag for balance command
-- [ ] DApp connector — local WS server implementing `@midnight-ntwrk/midnight-dapp-connector-api` (v4.0.0), allows browser dApps to request tx approval via CLI

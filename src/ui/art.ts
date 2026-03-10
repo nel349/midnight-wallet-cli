@@ -66,6 +66,7 @@ export const COMMAND_BRIEFS: [name: string, brief: string][] = [
   ['dust',            'Manage dust (fee tokens)'],
   ['config',          'Manage CLI config'],
   ['localnet',        'Manage local network'],
+  ['serve',           'DApp Connector server'],
   ['help',            'Show command usage'],
 ];
 

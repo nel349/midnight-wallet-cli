@@ -218,6 +218,29 @@ const COMMAND_SPECS: CommandSpec[] = [
     },
   },
   {
+    name: 'serve',
+    description: 'Start DApp Connector server over WebSocket JSON-RPC',
+    usage: 'midnight serve [--port <n>] [--wallet <file>] [--network <name>] [--approve-all] [--no-auto-approve-reads] [--json]',
+    flags: [
+      '--port <n>                    Server port (default: 9932)',
+      '--wallet <file>               Custom wallet file path',
+      '--network <name>              Override network detection',
+      '--approve-all                 Auto-approve all requests (reads + writes)',
+      '--no-auto-approve-reads       Prompt for read methods too',
+    ],
+    examples: [
+      'midnight serve',
+      'midnight serve --port 8080',
+      'midnight serve --approve-all',
+    ],
+    jsonFields: {
+      port: 'Server port number',
+      network: 'Network name',
+      address: 'Wallet address (bech32m)',
+      status: 'Server status (listening)',
+    },
+  },
+  {
     name: 'localnet',
     description: 'Manage a local Midnight network via Docker Compose',
     usage: 'midnight localnet <up|stop|down|status|logs|clean>',

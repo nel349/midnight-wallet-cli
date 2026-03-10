@@ -36,8 +36,8 @@ function mockState(opts: {
   return {
     isSynced: true,
     dust: {
-      walletBalance: () => dustBal,
-      dustAddress: 'mock-dust-address',
+      balance: () => dustBal,
+      address: 'mock-dust-address',
       availableCoins,
     },
     unshielded: {
@@ -267,9 +267,9 @@ describe('ensureDust', () => {
     expect(dustCreateTx).not.toHaveBeenCalled();
   });
 
-  it('returns immediately when walletBalance positive but no available coins', async () => {
+  it('returns immediately when balance positive but no available coins', async () => {
     const dustCreateTx = vi.fn();
-    // walletBalance > 0 but availableCoins is empty — dust exists (pending),
+    // balance > 0 but availableCoins is empty — dust exists (pending),
     // skip registration to avoid burning dust fees
     const bundle = createBundleStub({
       stateFn: () => rx.of(mockState({ dustBalance: 500n, availableDustCoins: 0 })),
