@@ -551,7 +551,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
         if (attempt < MAX_SYNC_ATTEMPTS && String(err?.message).includes('timed out')) {
           onDust?.(`Sync timed out, retrying (attempt ${attempt + 1}/${MAX_SYNC_ATTEMPTS})...`);
           await stopFacade(bundle).catch(() => {});
-          bundle = buildFacade(seedBuffer, networkConfig);
+          bundle = await buildFacade(seedBuffer, networkConfig);
           continue;
         }
         throw err;
