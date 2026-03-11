@@ -34,11 +34,24 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 | `midnight address --seed <hex>` | Derive an address from a seed |
 | `midnight genesis-address` | Show the genesis wallet address |
 | `midnight inspect-cost` | Display current block cost limits |
-| `midnight config get/set` | Manage persistent config (network, active wallet, etc.) |
+| `midnight serve` | Start DApp Connector server (WebSocket JSON-RPC) |
+| `midnight config get/set` | Manage persistent config (network, wallet, endpoints) |
 | `midnight localnet up/stop/down/status` | Manage a local Midnight network via Docker |
 | `midnight help [command]` | Show usage for all or a specific command |
 
 ## Quick Start
+
+### Preprod (testnet)
+
+```bash
+# Generate a wallet on preprod
+midnight wallet generate alice --network preprod
+
+# Check balance
+midnight balance
+```
+
+### Local development
 
 ```bash
 # Start local network
@@ -51,10 +64,8 @@ midnight wallet generate dev --network undeployed
 midnight airdrop 1000
 midnight dust register
 
-# Check balance
+# Check balance and transfer
 midnight balance
-
-# Transfer NIGHT
 midnight transfer mn_addr_undeployed1... 100
 ```
 
@@ -62,7 +73,10 @@ midnight transfer mn_addr_undeployed1... 100
 
 | Network | Description |
 |---------|-------------|
+| `preprod` | Midnight pre-production testnet |
 | `undeployed` | Local network via Docker (`midnight localnet up`) |
+
+Use `--network <name>` to select a network, or persist it with `midnight config set network preprod`.
 
 ## JSON Output for Automation
 
@@ -199,4 +213,4 @@ For documentation, guides, and more: [midnight-wallet-cli-hub](https://github.co
 
 - Node.js >= 20
 - Docker (for `midnight localnet` commands)
-- A running proof server on `localhost:6300` (for transactions on undeployed network)
+- A running proof server on `localhost:6300` (for transactions — required on all networks)

@@ -4,46 +4,26 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
-### Wallet State Cache
+## [0.2.0] - 2026-03-11
 
-Persistent cache of serialized wallet state (`serializeState()` / `.restore()`). Subsequent CLI runs restore from cache and only sync new transactions since checkpoint. Reduces repeat sync from 1–5 min to 5–30 seconds. Use `--no-cache` flag to bypass.
+### Added
 
-### Preprod Network Support
+- **Multi-wallet support** — Named wallet management via `mn wallet generate|list|use|info|remove`. Wallets stored as `~/.midnight/wallets/<name>.json` with active wallet tracked in config. The `--wallet` flag accepts a wallet name (e.g. `--wallet alice`) in addition to file paths. Old `~/.midnight/wallet.json` auto-migrates to `wallets/default.json` on first run. `mn generate` is deprecated in favor of `mn wallet generate <name>`.
+- **Preprod network support** — Connect to the Midnight pre-production testnet with `--network preprod`. Includes built-in endpoint URLs for indexer, node, and proof server.
+- **Endpoint override flags** — `--proof-server`, `--node`, `--indexer-ws` flags on transaction commands. Persist overrides with `mn config set proof-server <url>`. Priority: flag > config > network default.
+- **Wallet state cache** — Persistent cache of serialized wallet state. Subsequent runs restore from checkpoint and only sync new transactions. Reduces repeat sync from 1–5 min to 5–30 seconds. Use `--no-cache` to bypass.
+- **Wallet name validation** — Shared `isValidWalletName()` validator rejects path traversal, `.json` suffix, control characters, and other unsafe names across all wallet operations.
+- **Testcontainer auto-detection** — On `undeployed` network, automatically detects Docker-mapped ports for node, indexer, and proof server.
 
-Added preprod network with proof server and endpoint override flags (`--proof-server`, `--node`, `--indexer-ws`).
+### Improved
 
-### Multi-Wallet Support
-
-Named wallet management via `mn wallet generate|list|use|info|remove`. Wallets are stored as `~/.midnight/wallets/<name>.json` with an active wallet tracked in config. The `--wallet` flag now accepts a wallet name (e.g. `--wallet alice`) in addition to file paths. Old `~/.midnight/wallet.json` files are auto-migrated to `wallets/default.json` on first run. `mn generate` is deprecated in favor of `mn wallet generate <name>`.
-
-### DApp Connector Server — Developer Experience
-
-These improvements make `mn serve` more informative and less disruptive for DApp developers.
-
-#### Connection ID in approval prompt
-Each WebSocket connection gets a stable ID (`conn_1`, `conn_2`, ...) that appears in the approval dialog. When multiple DApps connect to the same wallet, you can tell which one is asking.
-
-#### Transaction size in approval prompt
-Balance and submit approval prompts now show the transaction payload size (e.g. "4.2 KB"), helping developers spot oversized transactions before they hit the chain.
-
-#### Request counter per connection
-Every RPC request is numbered per connection, making it easy to correlate activity in the server log:
-```
-  [00:16:42] conn_1 #3 → balanceUnsealedTransaction
-```
-
-#### Request timing in server log
-Each response logs how long the handler took, so you can see whether slowness is in proving, balancing, or submitting:
-```
-  ✓ conn_1 ← balanceUnsealedTransaction (2.3s)
-  ✗ conn_1 ← submitTransaction (0.1s) Insufficient dust
-```
-
-#### Tx hash in server log after submit
-After a successful `submitTransaction`, the transaction hash is logged so you can trace it in the indexer without digging through SDK output.
-
-#### Combined balance + submit approval
-Every DApp write operation used to require two separate approvals (balance, then submit) seconds apart. Now, balance operations (prep steps with no on-chain effect) are auto-approved, and only the final `submitTransaction` (the irreversible on-chain write) prompts for approval. One approval per write instead of two, on the step that matters.
+- **DApp Connector Server (`mn serve`)**
+  - Connection IDs (`conn_1`, `conn_2`) in approval prompts and logs
+  - Transaction payload size shown in approval prompts
+  - Per-connection request counter for log correlation
+  - Response timing in server log (e.g. `← submitTransaction (2.3s)`)
+  - Transaction hash logged after successful submit
+  - Combined balance + submit approval — prep steps auto-approved, only the final `submitTransaction` prompts
 
 ## [0.1.11] - 2026-03-04
 
