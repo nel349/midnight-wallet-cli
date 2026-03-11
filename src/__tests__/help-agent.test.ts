@@ -88,7 +88,7 @@ describe('help --agent', () => {
     const out = io.stdout();
 
     expect(out).toContain('EXAMPLE WORKFLOW');
-    expect(out).toContain('midnight generate');
+    expect(out).toContain('midnight wallet generate');
     expect(out).toContain('midnight balance');
     expect(out).toContain('midnight airdrop');
   });

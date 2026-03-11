@@ -1,6 +1,7 @@
-// generate command — create a new wallet
+// generate command — create a new wallet (DEPRECATED)
+// Use "midnight wallet generate <name>" instead.
 // Three modes: random mnemonic (default), --seed <hex>, --mnemonic "..."
-// Saves wallet config to ~/.midnight/wallet.json (or --output <file>)
+// Legacy behavior: saves to ~/.midnight/wallet.json (or --output <file>)
 
 import * as fs from 'fs';
 import * as path from 'path';

@@ -3,9 +3,11 @@
 //                       [--approve-all] [--no-auto-approve-reads] [--json]
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
-import { loadWalletConfig } from '../lib/wallet-config.ts';
+import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
+import { applyEndpointOverrides } from '../lib/network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors } from '../lib/facade.ts';
+import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
 import { createDAppConnector } from '../lib/dapp-connector.ts';
 import { createRpcServer, type RpcServer } from '../lib/ws-rpc.ts';
@@ -31,14 +33,20 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
   // ── Load wallet ──
 
-  const walletPath = getFlag(args, 'wallet');
-  const config = loadWalletConfig(walletPath);
+  const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   const { name: networkName, config: networkConfig } = resolveNetwork({
     args,
     walletNetwork: config.network,
     address: config.address,
+  });
+
+  // Apply endpoint overrides: --flag > config > network default
+  applyEndpointOverrides(networkConfig, {
+    proofServer: getFlag(args, 'proof-server'),
+    node: getFlag(args, 'node'),
+    indexerWS: getFlag(args, 'indexer-ws'),
   });
 
   // ── Header ──
@@ -58,10 +66,16 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   });
   const restoreRpc = suppressRpcNoise();
 
+  const noCache = hasFlag(args, 'no-cache');
+
   // ── Build & sync facade ──
 
   const spinner = startSpinner('Building wallet facade...');
-  const bundle = await buildFacade(seedBuffer, networkConfig);
+  const cache = noCache ? null : loadWalletCache(config.address, networkName);
+  const bundle = await buildFacade(seedBuffer, networkConfig, cache);
+  if (bundle.restoredFromCache) {
+    spinner.update('Restoring from cache...');
+  }
 
   // Cleanup helper — stops facade and restores console
   const cleanup = async () => {
@@ -75,13 +89,20 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
   try {
     spinner.update('Syncing wallet...');
-    await startAndSyncFacade(bundle, (applied, highest) => {
-      if (highest > 0) {
-        const pct = Math.min(Math.round((applied / highest) * 100), 100);
-        spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
-      }
+    await startAndSyncFacade(bundle, {
+      onProgress: (applied, highest) => {
+        if (highest > 0) {
+          const pct = Math.min(Math.round((applied / highest) * 100), 100);
+          spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
+        }
+      },
     });
     spinner.stop('Wallet synced');
+
+    // Save cache after successful sync
+    if (!noCache) {
+      try { await saveWalletCache(config.address, networkName, bundle.facade); } catch { /* best-effort */ }
+    }
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
@@ -156,6 +177,10 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     // ── Shutdown ──
 
     process.stderr.write('\n' + dim('  Shutting down...') + '\n');
+    // Save cache on graceful shutdown (captures latest state)
+    if (!noCache) {
+      try { await saveWalletCache(config.address, networkName, bundle.facade); } catch { /* best-effort */ }
+    }
     try { await server.close(); } catch { /* best-effort */ }
     connector.dispose();
     connector = undefined;

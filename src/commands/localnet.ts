@@ -95,7 +95,7 @@ async function handleUp(jsonMode: boolean): Promise<void> {
     process.stdout.write(`${svc.name}=${svc.state}:${svc.port}\n`);
   }
 
-  process.stderr.write('\n' + dim('  Next: ') + bold('midnight generate --network undeployed') + '\n');
+  process.stderr.write('\n' + dim('  Next: ') + bold('midnight wallet generate dev --network undeployed') + '\n');
 }
 
 async function handleStop(jsonMode: boolean): Promise<void> {

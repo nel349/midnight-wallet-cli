@@ -2,8 +2,10 @@
 // Usage: midnight transfer <to> <amount>
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
-import { loadWalletConfig } from '../lib/wallet-config.ts';
+import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
+import { applyEndpointOverrides } from '../lib/network.ts';
+import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { parseAmount, executeTransfer } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -34,7 +36,7 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
   const amountNight = parseAmount(amountStr);
 
   // Load wallet config to get sender seed
-  const walletPath = getFlag(args, 'wallet');
+  const walletPath = resolveWalletPath(getFlag(args, 'wallet'));
   const config = loadWalletConfig(walletPath);
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
@@ -45,6 +47,13 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
     address: config.address,
   });
 
+  // Apply endpoint overrides: --flag > config > network default
+  applyEndpointOverrides(networkConfig, {
+    proofServer: getFlag(args, 'proof-server'),
+    node: getFlag(args, 'node'),
+    indexerWS: getFlag(args, 'indexer-ws'),
+  });
+
   // Show header on stderr
   process.stderr.write('\n' + header('Transfer') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
@@ -53,6 +62,7 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
   process.stderr.write(keyValue('Amount', bold(amountNight + ' NIGHT')) + '\n');
   process.stderr.write('\n');
 
+  const noCache = hasFlag(args, 'no-cache');
   const spinner = startSpinner('Starting wallet...');
 
   try {
@@ -62,6 +72,9 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
       recipientAddress,
       amountNight,
       signal,
+      noCache,
+      walletAddress: config.address,
+      networkName,
       onSync(applied, highest) {
         if (highest > 0) {
           const pct = Math.min(Math.round((applied / highest) * 100), 100);

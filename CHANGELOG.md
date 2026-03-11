@@ -4,6 +4,18 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+### Wallet State Cache
+
+Persistent cache of serialized wallet state (`serializeState()` / `.restore()`). Subsequent CLI runs restore from cache and only sync new transactions since checkpoint. Reduces repeat sync from 1–5 min to 5–30 seconds. Use `--no-cache` flag to bypass.
+
+### Preprod Network Support
+
+Added preprod network with proof server and endpoint override flags (`--proof-server`, `--node`, `--indexer-ws`).
+
+### Multi-Wallet Support
+
+Named wallet management via `mn wallet generate|list|use|info|remove`. Wallets are stored as `~/.midnight/wallets/<name>.json` with an active wallet tracked in config. The `--wallet` flag now accepts a wallet name (e.g. `--wallet alice`) in addition to file paths. Old `~/.midnight/wallet.json` files are auto-migrated to `wallets/default.json` on first run. `mn generate` is deprecated in favor of `mn wallet generate <name>`.
+
 ### DApp Connector Server — Developer Experience
 
 These improvements make `mn serve` more informative and less disruptive for DApp developers.

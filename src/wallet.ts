@@ -8,6 +8,7 @@ import { errorBox } from './ui/format.ts';
 import { classifyError } from './lib/exit-codes.ts';
 import { suppressStderr, writeJsonError } from './lib/json-output.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
+import { migrateOldWallet } from './lib/wallet-config.ts';
 
 // --mcp: start MCP server instead of CLI (for: npx midnight-wallet-cli --mcp)
 if (process.argv.includes('--mcp')) {
@@ -30,6 +31,9 @@ if (hasFlag(args, 'help') || hasFlag(args, 'h')) {
 
 // Default to help when no command given
 const command = args.command ?? 'help';
+
+// Auto-migrate old ~/.midnight/wallet.json → wallets/default.json (silent, one-time)
+migrateOldWallet();
 
 // Suppress stderr in JSON mode (spinners, headers, animations)
 let restoreStderr: (() => void) | undefined;
@@ -56,7 +60,15 @@ async function run(): Promise<void> {
       const { default: handler } = await import('./commands/help.ts');
       return handler(args);
     }
+    case 'wallet': {
+      const { default: handler } = await import('./commands/wallet.ts');
+      return handler(args);
+    }
     case 'generate': {
+      process.stderr.write(
+        '\n  Note: "midnight generate" is deprecated.\n' +
+        '  Use "midnight wallet generate <name>" instead.\n\n'
+      );
       const { default: handler } = await import('./commands/generate.ts');
       return handler(args);
     }

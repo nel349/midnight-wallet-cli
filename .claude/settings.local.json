@@ -10,7 +10,16 @@
       "mcp__midnight-wallet__midnight_transfer",
       "Bash(grep:*)",
       "Bash(npx tsc:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "mcp__midnight-wallet__midnight_wallet_list",
+      "mcp__midnight-wallet__midnight_wallet_info",
+      "mcp__midnight-wallet__midnight_wallet_generate",
+      "mcp__midnight-wallet__midnight_wallet_use",
+      "mcp__midnight-wallet__midnight_wallet_remove",
+      "Bash(node --import tsx src/wallet.ts wallet generate '../evil' 2>&1; echo \"EXIT: $?\")",
+      "Bash(node --import tsx src/wallet.ts wallet generate 'test.json' 2>&1; echo \"EXIT: $?\")",
+      "mcp__midnight-wallet__midnight_config_set",
+      "mcp__midnight-wallet__midnight_config_get"
     ]
   },
   "enableAllProjectMcpServers": true,

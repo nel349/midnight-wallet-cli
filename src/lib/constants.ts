@@ -60,5 +60,28 @@ export const FILE_MODE = 0o600;  // owner rw only — wallet files containing se
 // Localnet directory name (under ~/.midnight/)
 export const LOCALNET_DIR_NAME = 'localnet';
 
+// Wallet state cache
+export const CACHE_VERSION = 1;
+export const CACHE_DIR_NAME = 'cache';
+
+// Multi-wallet support
+export const WALLETS_DIR_NAME = 'wallets';
+export const DEFAULT_WALLET_NAME = 'default';
+
+/**
+ * Validate a wallet name (not a path).
+ * Rejects empty strings, path separators, '.json' suffix, '..' traversal,
+ * and control characters. Returns true if the name is safe.
+ */
+export function isValidWalletName(name: string): boolean {
+  if (!name || name !== name.trim()) return false;
+  if (/[\/\\]/.test(name)) return false;
+  if (name.endsWith('.json')) return false;
+  if (name === '.' || name === '..') return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f]/.test(name)) return false;
+  return true;
+}
+
 // DApp Connector server port (99=midnight, 32=ws)
 export const DEFAULT_SERVE_PORT = 9932;

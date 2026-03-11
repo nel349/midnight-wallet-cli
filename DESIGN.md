@@ -3,28 +3,32 @@
 ## Storage
 
 All wallet CLI state lives in `~/.midnight/` (hidden directory):
-- `~/.midnight/wallet.json` — default wallet file
-- `~/.midnight/config.json` — persistent config (default network, etc.)
+- `~/.midnight/wallets/<name>.json` — named wallet files (e.g. `default.json`, `alice.json`)
+- `~/.midnight/config.json` — persistent config (default network, active wallet, endpoint overrides)
 
-`--wallet <file>` on any command points at a custom wallet path. `--output <file>` on generate saves to a custom path.
+`--wallet <name|file>` on any command selects a wallet by name (resolved to `wallets/<name>.json`) or by file path (backward compat). The active wallet is tracked in `config.json` via the `wallet` key and used when no `--wallet` flag is given.
 
-Future: `wallet list` and `wallet switch` for managing multiple wallets.
+Old `~/.midnight/wallet.json` files are auto-migrated to `wallets/default.json` on first run.
 
 ## Subcommand Table
 
 | Command | Args / Flags | Description |
 |---------|-------------|-------------|
-| `wallet generate` | `[--network <name>]` `[--seed <hex>]` `[--mnemonic "..."]` `[--output <file>]` `[--force]` | Generate a new wallet (random mnemonic, or restore from seed/mnemonic). Saves to `~/.midnight/wallet.json` unless `--output` specifies a custom path. Refuses to overwrite an existing file unless `--force` is specified. `--seed` and `--mnemonic` are mutually exclusive. |
-| `wallet info` | `[--wallet <file>]` | Display wallet address, network, creation date. Does NOT show seed/mnemonic. |
-| `wallet balance` | `[address]` `[--network <name>]` `[--indexer-ws <url>]` | Check unshielded balance via lightweight GraphQL subscription. If no address, reads from wallet. |
-| `wallet transfer` | `<to> <amount>` `[--wallet <file>]` `[--genesis]` `[--proof-server <url>]` `[--no-fees]` | Transfer unshielded NIGHT. `--genesis` uses seed 0x01 (auto-detects network from `<to>` address). Full flow: sync, dust check, build recipe, sign, prove, submit. |
-| `wallet dust register` | `[--wallet <file>]` `[--proof-server <url>]` | Register NIGHT UTXOs for dust generation. Required before any fee-paying transaction. |
-| `wallet dust status` | `[--wallet <file>]` `[--proof-server <url>]` | Check dust registration status and current dust balance. Requires WalletFacade sync. |
-| `wallet address` | `[--seed <hex>]` `[--network <name>]` `[--index <n>]` | Derive and display an unshielded address from a seed without creating a wallet file. |
-| `wallet genesis-address` | `[--network <name>]` | Display the genesis wallet address (seed 0x01) for a given network. |
-| `wallet inspect-cost` | (none) | Display current block limits derived from LedgerParameters. |
-| `wallet config` | `set <key> <value>` / `get <key>` | Manage persistent config. Keys: `network` (default: `undeployed`). Stored in `~/.midnight/config.json`. |
-| `wallet help` | `[command]` | Show usage for all commands or a specific command. |
+| `mn wallet generate <name>` | `[--network <name>]` `[--seed <hex>]` `[--mnemonic "..."]` `[--force]` | Create a named wallet. Saves to `~/.midnight/wallets/<name>.json`. Sets as active wallet. `--seed` and `--mnemonic` are mutually exclusive. |
+| `mn wallet list` | | List all wallets with name, address, network, and active marker. |
+| `mn wallet use <name>` | | Set the active wallet. |
+| `mn wallet info [name]` | | Show wallet details (active wallet if no name given). |
+| `mn wallet remove <name>` | | Remove a wallet (refuses active or last wallet). |
+| `mn info` | `[--wallet <name\|file>]` | Display wallet address, network, creation date. Does NOT show seed/mnemonic. |
+| `mn balance` | `[address]` `[--network <name>]` `[--indexer-ws <url>]` | Check unshielded balance via lightweight GraphQL subscription. If no address, reads from active wallet. |
+| `mn transfer` | `<to> <amount>` `[--wallet <name\|file>]` `[--proof-server <url>]` | Transfer unshielded NIGHT. Full flow: sync, dust check, build recipe, sign, prove, submit. |
+| `mn dust register` | `[--wallet <name\|file>]` `[--proof-server <url>]` | Register NIGHT UTXOs for dust generation. Required before any fee-paying transaction. |
+| `mn dust status` | `[--wallet <name\|file>]` `[--proof-server <url>]` | Check dust registration status and current dust balance. Requires WalletFacade sync. |
+| `mn address` | `[--seed <hex>]` `[--network <name>]` `[--index <n>]` | Derive and display an unshielded address from a seed without creating a wallet file. |
+| `mn genesis-address` | `[--network <name>]` | Display the genesis wallet address (seed 0x01) for a given network. |
+| `mn inspect-cost` | (none) | Display current block limits derived from LedgerParameters. |
+| `mn config` | `set <key> <value>` / `get <key>` | Manage persistent config. Keys: `network`, `wallet`, `proof-server`, `node`, `indexer-ws`. Stored in `~/.midnight/config.json`. |
+| `mn help` | `[command]` | Show usage for all commands or a specific command. |
 
 ### Network Flag
 
@@ -54,7 +58,7 @@ All magic values: GENESIS_SEED, NATIVE_TOKEN_TYPE, TOKEN_DECIMALS (6), dust cost
 HD wallet key derivation for the three Midnight roles (Zswap, NightExternal, Dust). All use account=0, index=0.
 
 ### `lib/wallet-config.ts`
-Load/save wallet files. Default path: `~/.midnight/wallet.json`. Creates `~/.midnight/` directory if it doesn't exist. The wallet config stores: seed (hex), optional mnemonic, network name, derived address, creation timestamp.
+Load/save wallet files. Named wallets stored in `~/.midnight/wallets/<name>.json`. Provides `resolveWalletPath()` for name-to-path resolution, `listWallets()`, `removeWallet()`, `migrateOldWallet()`, and active wallet management. The wallet config stores: seed (hex), optional mnemonic, network name, derived address, creation timestamp.
 
 ### `lib/facade.ts`
 Build the full WalletFacade from a seed and network config. Assembles ShieldedWallet + UnshieldedWallet + DustWallet. Provides sync helper with progress reporting and clean shutdown.
@@ -142,7 +146,7 @@ All animations write to stderr, respect `NO_COLOR` (degrade to static text when 
 
 ```
 argv → parse subcommand + flags
-     → load wallet.json if needed
+     → resolve wallet path (name or file via resolveWalletPath)
      → detect network
      → execute (no proof server required)
      → format output to stdout
@@ -153,7 +157,7 @@ argv → parse subcommand + flags
 
 ```
 argv → parse subcommand + flags
-     → load wallet from ~/.midnight/wallet.json (or --wallet)
+     → resolve wallet path (name or file via resolveWalletPath)
      → resolve network config (testcontainer detection for undeployed)
      → build WalletFacade from seed
      → pre-send sync (short timeout ~10s, catches stale UTXOs before building tx)
@@ -181,7 +185,7 @@ If we don't hit error 115 in practice (because the facade handles it internally)
 
 ### Error Handling
 - All errors to stderr, exit code 1
-- Wallet file missing → suggest `wallet generate`
+- Wallet file missing → suggest `midnight wallet generate <name>`
 - Network detection failure → list valid networks
 - Insufficient balance → show current vs required
 - Stale UTXO (error 115) → auto-retry with re-sync (see above)

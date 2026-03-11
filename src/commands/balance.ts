@@ -2,8 +2,9 @@
 // Reads address from positional arg or wallet file
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
-import { loadWalletConfig } from '../lib/wallet-config.ts';
+import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
+import { applyEndpointOverrides } from '../lib/network.ts';
 import { checkBalance, isNativeToken } from '../lib/balance-subscription.ts';
 import { header, keyValue, divider, formatNight, formatAddress, toNight } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -19,8 +20,7 @@ export default async function balanceCommand(args: ParsedArgs): Promise<void> {
     address = args.subcommand;
   } else {
     // Load from wallet file
-    const walletPath = getFlag(args, 'wallet');
-    const config = loadWalletConfig(walletPath);
+    const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
     address = config.address;
     walletNetwork = config.network;
   }
@@ -36,15 +36,18 @@ export default async function balanceCommand(args: ParsedArgs): Promise<void> {
     address,
   });
 
-  // Allow --indexer-ws override
-  const indexerWsOverride = getFlag(args, 'indexer-ws');
-  const indexerWS = indexerWsOverride ?? networkConfig.indexerWS;
+  // Apply endpoint overrides: --flag > config > network default
+  applyEndpointOverrides(networkConfig, {
+    proofServer: getFlag(args, 'proof-server'),
+    node: getFlag(args, 'node'),
+    indexerWS: getFlag(args, 'indexer-ws'),
+  });
 
   // Spinner on stderr
   const spinner = startSpinner(`Checking balance on ${networkName}...`);
 
   try {
-    const result = await checkBalance(address, indexerWS, (current, highest) => {
+    const result = await checkBalance(address, networkConfig.indexerWS, (current, highest) => {
       if (highest > 0) {
         const pct = Math.round((current / highest) * 100);
         spinner.update(`Syncing transactions... ${pct}%`);

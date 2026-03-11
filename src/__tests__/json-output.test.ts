@@ -397,7 +397,7 @@ describe('help --json', () => {
     const globalFlags = data.globalFlags as Array<Record<string, string>>;
     const flagNames = globalFlags.map(f => f.name);
     expect(flagNames).toContain('--json');
-    expect(flagNames).toContain('--wallet <file>');
+    expect(flagNames).toContain('--wallet <name|file>');
     expect(flagNames).toContain('--network <name>');
   });
 

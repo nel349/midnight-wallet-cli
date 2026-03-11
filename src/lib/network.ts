@@ -1,4 +1,5 @@
 import { execSync } from 'child_process';
+import { loadCliConfig } from './cli-config.ts';
 
 export type NetworkName = 'preprod' | 'preview' | 'undeployed';
 
@@ -127,6 +128,41 @@ export function resolveNetworkConfig(name: NetworkName): NetworkConfig {
     if (detected.proofServerPort) {
       config.proofServer = `http://localhost:${detected.proofServerPort}`;
     }
+  }
+
+  return config;
+}
+
+export interface EndpointOverrides {
+  proofServer?: string;
+  node?: string;
+  indexerWS?: string;
+}
+
+/**
+ * Apply endpoint overrides to a network config.
+ * Priority: flag overrides > persistent config > network defaults.
+ * Mutates and returns the config for convenience.
+ */
+export function applyEndpointOverrides(
+  config: NetworkConfig,
+  flagOverrides: EndpointOverrides,
+  configDir?: string,
+): NetworkConfig {
+  const cliConfig = loadCliConfig(configDir);
+
+  config.proofServer = flagOverrides.proofServer ?? cliConfig['proof-server'] ?? config.proofServer;
+  config.node = flagOverrides.node ?? cliConfig.node ?? config.node;
+  config.indexerWS = flagOverrides.indexerWS ?? cliConfig['indexer-ws'] ?? config.indexerWS;
+
+  // Keep indexer HTTP in sync if indexer WS was overridden
+  // (derive HTTP URL from WS URL by stripping /ws suffix and adjusting protocol)
+  if (flagOverrides.indexerWS ?? cliConfig['indexer-ws']) {
+    const wsUrl = config.indexerWS;
+    config.indexer = wsUrl
+      .replace(/^wss:/, 'https:')
+      .replace(/^ws:/, 'http:')
+      .replace(/\/ws$/, '');
   }
 
   return config;

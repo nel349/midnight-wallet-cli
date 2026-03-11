@@ -142,9 +142,161 @@ describe('setConfigValue', () => {
   });
 });
 
+describe('endpoint config keys', () => {
+  it('setConfigValue persists proof-server URL', () => {
+    setConfigValue('proof-server', 'http://my-prover:6300', TEST_DIR);
+    expect(getConfigValue('proof-server', TEST_DIR)).toBe('http://my-prover:6300');
+  });
+
+  it('setConfigValue persists node URL', () => {
+    setConfigValue('node', 'wss://rpc.preprod.midnight.network', TEST_DIR);
+    expect(getConfigValue('node', TEST_DIR)).toBe('wss://rpc.preprod.midnight.network');
+  });
+
+  it('setConfigValue persists indexer-ws URL', () => {
+    setConfigValue('indexer-ws', 'wss://indexer.preprod.midnight.network/api/v3/graphql/ws', TEST_DIR);
+    expect(getConfigValue('indexer-ws', TEST_DIR)).toBe('wss://indexer.preprod.midnight.network/api/v3/graphql/ws');
+  });
+
+  it('rejects invalid URL for endpoint keys', () => {
+    expect(() => setConfigValue('proof-server', 'not-a-url', TEST_DIR)).toThrow('Invalid URL');
+    expect(() => setConfigValue('node', 'localhost:9944', TEST_DIR)).toThrow('Must start with');
+  });
+
+  it('accepts http, https, ws, wss protocols', () => {
+    setConfigValue('proof-server', 'http://localhost:6300', TEST_DIR);
+    setConfigValue('node', 'ws://localhost:9944', TEST_DIR);
+    expect(getConfigValue('proof-server', TEST_DIR)).toBe('http://localhost:6300');
+    expect(getConfigValue('node', TEST_DIR)).toBe('ws://localhost:9944');
+  });
+
+  it('returns (not set) for unset endpoint keys', () => {
+    expect(getConfigValue('proof-server', TEST_DIR)).toBe('(not set)');
+    expect(getConfigValue('node', TEST_DIR)).toBe('(not set)');
+    expect(getConfigValue('indexer-ws', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('does not interfere with network config', () => {
+    setConfigValue('network', 'preprod', TEST_DIR);
+    setConfigValue('proof-server', 'http://localhost:6300', TEST_DIR);
+    expect(getConfigValue('network', TEST_DIR)).toBe('preprod');
+    expect(getConfigValue('proof-server', TEST_DIR)).toBe('http://localhost:6300');
+  });
+
+  it('loadCliConfig reads endpoint keys from file', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({
+        network: 'preprod',
+        'proof-server': 'http://my-prover:6300',
+        node: 'wss://my-node',
+        'indexer-ws': 'wss://my-indexer/ws',
+      }),
+    );
+    const config = loadCliConfig(TEST_DIR);
+    expect(config.network).toBe('preprod');
+    expect(config['proof-server']).toBe('http://my-prover:6300');
+    expect(config.node).toBe('wss://my-node');
+    expect(config['indexer-ws']).toBe('wss://my-indexer/ws');
+  });
+
+  it('loadCliConfig ignores non-string endpoint values', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({
+        network: 'preprod',
+        'proof-server': 123,
+        node: true,
+      }),
+    );
+    const config = loadCliConfig(TEST_DIR);
+    expect(config['proof-server']).toBeUndefined();
+    expect(config.node).toBeUndefined();
+  });
+});
+
+describe('wallet config key', () => {
+  it('setConfigValue persists wallet name', () => {
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('alice');
+  });
+
+  it('overwrites a previous wallet value', () => {
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    setConfigValue('wallet', 'bob', TEST_DIR);
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('bob');
+  });
+
+  it('rejects wallet name with path separators', () => {
+    expect(() => setConfigValue('wallet', '../evil', TEST_DIR)).toThrow('Invalid wallet name');
+    expect(() => setConfigValue('wallet', 'path/to/wallet', TEST_DIR)).toThrow('Invalid wallet name');
+    expect(() => setConfigValue('wallet', 'path\\to\\wallet', TEST_DIR)).toThrow('Invalid wallet name');
+  });
+
+  it('rejects wallet name ending in .json', () => {
+    expect(() => setConfigValue('wallet', 'alice.json', TEST_DIR)).toThrow('Invalid wallet name');
+  });
+
+  it('rejects empty wallet name', () => {
+    expect(() => setConfigValue('wallet', '', TEST_DIR)).toThrow('Invalid wallet name');
+  });
+
+  it('rejects whitespace-only wallet name', () => {
+    expect(() => setConfigValue('wallet', '   ', TEST_DIR)).toThrow('Invalid wallet name');
+  });
+
+  it('returns (not set) when wallet is not configured', () => {
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('does not corrupt existing config on validation failure', () => {
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    expect(() => setConfigValue('wallet', '../bad', TEST_DIR)).toThrow();
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('alice');
+  });
+
+  it('loadCliConfig reads wallet key from file', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({ network: 'preprod', wallet: 'alice' }),
+    );
+    const config = loadCliConfig(TEST_DIR);
+    expect(config.wallet).toBe('alice');
+  });
+
+  it('loadCliConfig ignores non-string wallet values', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({ network: 'preprod', wallet: 123 }),
+    );
+    const config = loadCliConfig(TEST_DIR);
+    expect(config.wallet).toBeUndefined();
+  });
+
+  it('does not interfere with other config keys', () => {
+    setConfigValue('network', 'preprod', TEST_DIR);
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    setConfigValue('proof-server', 'http://localhost:6300', TEST_DIR);
+    expect(getConfigValue('network', TEST_DIR)).toBe('preprod');
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('alice');
+    expect(getConfigValue('proof-server', TEST_DIR)).toBe('http://localhost:6300');
+  });
+});
+
 describe('getValidConfigKeys', () => {
   it('includes network', () => {
     expect(getValidConfigKeys()).toContain('network');
+  });
+
+  it('includes wallet key', () => {
+    expect(getValidConfigKeys()).toContain('wallet');
+  });
+
+  it('includes endpoint keys', () => {
+    const keys = getValidConfigKeys();
+    expect(keys).toContain('proof-server');
+    expect(keys).toContain('node');
+    expect(keys).toContain('indexer-ws');
   });
 
   it('returns at least one key', () => {
