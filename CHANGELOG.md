@@ -33,32 +33,86 @@ After a successful `submitTransaction`, the transaction hash is logged so you ca
 #### Combined balance + submit approval
 Every DApp write operation used to require two separate approvals (balance, then submit) seconds apart. Now, balance operations (prep steps with no on-chain effect) are auto-approved, and only the final `submitTransaction` (the irreversible on-chain write) prompts for approval. One approval per write instead of two, on the step that matters.
 
-## [0.2.0] - 2025-05-01
+## [0.1.11] - 2026-03-04
 
 ### Added
 - DApp Connector Server (`mn serve`) — WebSocket JSON-RPC server implementing all 18 ConnectedAPI methods
 - Terminal approval prompts for write operations with auto-approve modes
-- SDK v2.0.0-rc upgrade (WalletFacade, dust wallet, shielded/unshielded)
-- Dust registration retry logic with RPC noise suppression
-- `--json` output flag for AI agent integration
+- Connector client package (`midnight-wallet-connector`)
 - MCP server (`midnight-wallet-mcp`) for Claude Code and other MCP clients
-- Connector client package (`@midnight-wallet-cli/connector`)
+- `--json` output flag for AI agent integration
+- `midnight status` and `midnight doctor` commands for infrastructure health and diagnostics
 
 ### Changed
+- SDK v2.0.0-rc upgrade (WalletFacade, dust wallet, shielded/unshielded)
 - Minified build output
 - Centralized package metadata via `src/lib/pkg.ts`
+- Workspace configuration for connector package
 
-## [0.1.5] - 2025-04-15
+## [0.1.10] - 2026-03-03
+
+### Fixed
+- Dust wallet sync detection and transfer pre-flight check
+- RPC noise suppression scoped once per outer operation
+
+## [0.1.9] - 2026-03-03
+
+### Fixed
+- Transfer error handling for dust capacity and transaction rejection
+
+## [0.1.8] - 2026-03-03
+
+### Added
+- Minified build output for smaller package size
+
+### Fixed
+- Dust registration retry for fresh localnets (error 138)
+
+## [0.1.7] - 2026-03-03
+
+### Changed
+- Centralized package metadata and removed createRequire usage
+- Removed demo files
+
+## [0.1.6] - 2026-03-01
+
+### Fixed
+- Wordmark animation frame alignment and materialize flash effect
+
+## [0.1.5] - 2026-03-01
 
 ### Added
 - Animated logo and wordmark on startup
 - `--agent` flag for comprehensive AI reference manual
 - Localnet management (`mn localnet up/stop/down/status/clean`)
 
-### Fixed
-- Wordmark animation frame alignment
+## [0.1.4] - 2026-03-01
 
-## [0.1.0] - 2025-04-01
+### Added
+- MCP server for wallet management
+- CI workflow
+
+## [0.1.3] - 2026-03-01
+
+### Added
+- `--json` output for AI agent integration
+- DApp connector server and HTTP payment flow support
+
+## [0.1.2] - 2026-03-01
+
+### Added
+- Transfer and airdrop commands
+
+### Fixed
+- Suppress transient SDK errors and improve sync warning UX
+
+## [0.1.1] - 2026-03-01
+
+### Changed
+- Migrated to ledger-v7
+- Renamed `send` command to `transfer`
+
+## [0.1.0] - 2026-03-01
 
 ### Added
 - Initial release
