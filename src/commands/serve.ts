@@ -5,6 +5,7 @@
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
+import { applyEndpointOverrides } from '../lib/network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors } from '../lib/facade.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
 import { createDAppConnector } from '../lib/dapp-connector.ts';
@@ -39,6 +40,13 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     args,
     walletNetwork: config.network,
     address: config.address,
+  });
+
+  // Apply endpoint overrides: --flag > config > network default
+  applyEndpointOverrides(networkConfig, {
+    proofServer: getFlag(args, 'proof-server'),
+    node: getFlag(args, 'node'),
+    indexerWS: getFlag(args, 'indexer-ws'),
   });
 
   // ── Header ──

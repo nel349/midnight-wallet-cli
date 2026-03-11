@@ -159,11 +159,14 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'transfer',
     description: 'Send NIGHT tokens to another address',
-    usage: 'midnight transfer <to> <amount> [--wallet <file>]',
+    usage: 'midnight transfer <to> <amount> [--wallet <file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>]',
     flags: [
       '<to>                Recipient bech32m address',
       '<amount>            Amount in NIGHT to send',
       '--wallet <file>     Custom wallet file path',
+      '--proof-server <url>  Override proof server URL',
+      '--node <url>          Override substrate node RPC URL',
+      '--indexer-ws <url>    Override indexer WebSocket URL',
     ],
     examples: [
       'midnight transfer mn_addr_undeployed1... 100',
@@ -179,11 +182,14 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'dust',
     description: 'Register UTXOs for dust (fee token) generation or check status',
-    usage: 'midnight dust <register|status> [--wallet <file>]',
+    usage: 'midnight dust <register|status> [--wallet <file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>]',
     flags: [
       'register            Register NIGHT UTXOs for dust generation',
       'status              Check dust registration status and balance',
       '--wallet <file>     Custom wallet file path',
+      '--proof-server <url>  Override proof server URL',
+      '--node <url>          Override substrate node RPC URL',
+      '--indexer-ws <url>    Override indexer WebSocket URL',
     ],
     examples: [
       'midnight dust register',
@@ -201,15 +207,20 @@ const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'config',
-    description: 'Manage persistent config (default network, etc.)',
+    description: 'Manage persistent config (default network, endpoints, etc.)',
     usage: 'midnight config <get|set> <key> [value]',
     flags: [
       'get <key>           Read a config value',
       'set <key> <value>   Write a config value',
+      '',
+      'Keys: network, proof-server, node, indexer-ws',
     ],
     examples: [
       'midnight config get network',
       'midnight config set network preprod',
+      'midnight config set proof-server http://localhost:6300',
+      'midnight config set node wss://rpc.preprod.midnight.network',
+      'midnight config set indexer-ws wss://indexer.preprod.midnight.network/api/v3/graphql/ws',
     ],
     jsonFields: {
       action: 'get or set',
@@ -220,11 +231,14 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'serve',
     description: 'Start DApp Connector server over WebSocket JSON-RPC',
-    usage: 'midnight serve [--port <n>] [--wallet <file>] [--network <name>] [--approve-all] [--no-auto-approve-reads] [--json]',
+    usage: 'midnight serve [--port <n>] [--wallet <file>] [--network <name>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--approve-all] [--no-auto-approve-reads] [--json]',
     flags: [
       '--port <n>                    Server port (default: 9932)',
       '--wallet <file>               Custom wallet file path',
       '--network <name>              Override network detection',
+      '--proof-server <url>          Override proof server URL',
+      '--node <url>                  Override substrate node RPC URL',
+      '--indexer-ws <url>            Override indexer WebSocket URL',
       '--approve-all                 Auto-approve all requests (reads + writes)',
       '--no-auto-approve-reads       Prompt for read methods too',
     ],

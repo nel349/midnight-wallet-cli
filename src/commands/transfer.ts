@@ -4,6 +4,7 @@
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
+import { applyEndpointOverrides } from '../lib/network.ts';
 import { parseAmount, executeTransfer } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -43,6 +44,13 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
     args,
     walletNetwork: config.network,
     address: config.address,
+  });
+
+  // Apply endpoint overrides: --flag > config > network default
+  applyEndpointOverrides(networkConfig, {
+    proofServer: getFlag(args, 'proof-server'),
+    node: getFlag(args, 'node'),
+    indexerWS: getFlag(args, 'indexer-ws'),
   });
 
   // Show header on stderr

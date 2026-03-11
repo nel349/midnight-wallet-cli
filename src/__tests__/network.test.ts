@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import {
   detectNetworkFromAddress,
   isValidNetworkName,
   getNetworkConfig,
   getValidNetworkNames,
   resolveNetworkConfig,
+  applyEndpointOverrides,
 } from '../lib/network.ts';
 
 describe('detectNetworkFromAddress', () => {
@@ -142,5 +146,78 @@ describe('resolveNetworkConfig', () => {
     a.node = 'wss://mutated';
     const b = resolveNetworkConfig('preprod');
     expect(b.node).toBe('wss://rpc.preprod.midnight.network');
+  });
+});
+
+describe('applyEndpointOverrides', () => {
+  const TEST_DIR = path.join(os.tmpdir(), `midnight-network-test-${process.pid}`);
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it('applies flag overrides for proofServer', () => {
+    const config = getNetworkConfig('preprod');
+    applyEndpointOverrides(config, { proofServer: 'http://custom:6300' }, TEST_DIR);
+    expect(config.proofServer).toBe('http://custom:6300');
+  });
+
+  it('applies flag overrides for node', () => {
+    const config = getNetworkConfig('preprod');
+    applyEndpointOverrides(config, { node: 'wss://custom-node' }, TEST_DIR);
+    expect(config.node).toBe('wss://custom-node');
+  });
+
+  it('applies flag overrides for indexerWS and derives indexer HTTP', () => {
+    const config = getNetworkConfig('preprod');
+    applyEndpointOverrides(config, { indexerWS: 'wss://custom-indexer/api/v3/graphql/ws' }, TEST_DIR);
+    expect(config.indexerWS).toBe('wss://custom-indexer/api/v3/graphql/ws');
+    expect(config.indexer).toBe('https://custom-indexer/api/v3/graphql');
+  });
+
+  it('falls back to persistent config when no flag provided', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({ network: 'preprod', 'proof-server': 'http://config-prover:6300' }),
+    );
+    const config = getNetworkConfig('preprod');
+    applyEndpointOverrides(config, {}, TEST_DIR);
+    expect(config.proofServer).toBe('http://config-prover:6300');
+  });
+
+  it('flag overrides take priority over persistent config', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({ network: 'preprod', 'proof-server': 'http://config-prover:6300' }),
+    );
+    const config = getNetworkConfig('preprod');
+    applyEndpointOverrides(config, { proofServer: 'http://flag-prover:6300' }, TEST_DIR);
+    expect(config.proofServer).toBe('http://flag-prover:6300');
+  });
+
+  it('preserves network defaults when no overrides exist', () => {
+    const config = getNetworkConfig('preprod');
+    const original = { ...config };
+    applyEndpointOverrides(config, {}, TEST_DIR);
+    expect(config.proofServer).toBe(original.proofServer);
+    expect(config.node).toBe(original.node);
+    expect(config.indexerWS).toBe(original.indexerWS);
+    expect(config.indexer).toBe(original.indexer);
+  });
+
+  it('does not modify networkId', () => {
+    const config = getNetworkConfig('preprod');
+    applyEndpointOverrides(config, { proofServer: 'http://custom:6300' }, TEST_DIR);
+    expect(config.networkId).toBe('PreProd');
+  });
+
+  it('derives http indexer from ws:// protocol', () => {
+    const config = getNetworkConfig('undeployed');
+    applyEndpointOverrides(config, { indexerWS: 'ws://localhost:9999/api/v3/graphql/ws' }, TEST_DIR);
+    expect(config.indexer).toBe('http://localhost:9999/api/v3/graphql');
   });
 });

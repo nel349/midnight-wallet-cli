@@ -7,6 +7,7 @@ import * as rx from 'rxjs';
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
+import { applyEndpointOverrides } from '../lib/network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
 import { ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatNight, formatDust, successMessage, toNight, toDust } from '../ui/format.ts';
@@ -36,6 +37,13 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     args,
     walletNetwork: config.network,
     address: config.address,
+  });
+
+  // Apply endpoint overrides: --flag > config > network default
+  applyEndpointOverrides(networkConfig, {
+    proofServer: getFlag(args, 'proof-server'),
+    node: getFlag(args, 'node'),
+    indexerWS: getFlag(args, 'indexer-ws'),
   });
 
   const bundle = await buildFacade(seedBuffer, networkConfig);

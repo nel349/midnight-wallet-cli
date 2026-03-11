@@ -6,13 +6,22 @@ import { type NetworkName, isValidNetworkName } from './network.ts';
 
 export interface CliConfig {
   network: NetworkName;
+  'proof-server'?: string;
+  node?: string;
+  'indexer-ws'?: string;
 }
 
 const DEFAULT_CLI_CONFIG: CliConfig = {
   network: 'undeployed',
 };
 
-const VALID_CONFIG_KEYS: readonly string[] = ['network'] as const;
+const VALID_CONFIG_KEYS: readonly string[] = ['network', 'proof-server', 'node', 'indexer-ws'] as const;
+
+const ENDPOINT_KEYS = new Set(['proof-server', 'node', 'indexer-ws']);
+
+function isValidUrl(value: string): boolean {
+  return /^(https?|wss?):\/\/.+/.test(value);
+}
 
 function getConfigDir(configDir?: string): string {
   return configDir ?? path.join(homedir(), MIDNIGHT_DIR);
@@ -54,11 +63,23 @@ export function loadCliConfig(configDir?: string): CliConfig {
     return { ...DEFAULT_CLI_CONFIG };
   }
 
-  return {
+  const config: CliConfig = {
     network: parsed.network && isValidNetworkName(parsed.network)
       ? parsed.network
       : DEFAULT_CLI_CONFIG.network,
   };
+
+  if (parsed['proof-server'] && typeof parsed['proof-server'] === 'string') {
+    config['proof-server'] = parsed['proof-server'];
+  }
+  if (parsed.node && typeof parsed.node === 'string') {
+    config.node = parsed.node;
+  }
+  if (parsed['indexer-ws'] && typeof parsed['indexer-ws'] === 'string') {
+    config['indexer-ws'] = parsed['indexer-ws'];
+  }
+
+  return config;
 }
 
 /**
@@ -78,6 +99,10 @@ export function getConfigValue(key: string, configDir?: string): string {
   const config = loadCliConfig(configDir);
 
   if (key === 'network') return config.network;
+  if (ENDPOINT_KEYS.has(key)) {
+    const value = config[key as keyof CliConfig];
+    return typeof value === 'string' ? value : '(not set)';
+  }
 
   throw new Error(
     `Unknown config key: "${key}"\nValid keys: ${VALID_CONFIG_KEYS.join(', ')}`
@@ -97,6 +122,13 @@ export function setConfigValue(key: string, value: string, configDir?: string): 
       );
     }
     config.network = value;
+  } else if (ENDPOINT_KEYS.has(key)) {
+    if (!isValidUrl(value)) {
+      throw new Error(
+        `Invalid URL for "${key}": "${value}"\nMust start with http://, https://, ws://, or wss://`
+      );
+    }
+    config[key as 'proof-server' | 'node' | 'indexer-ws'] = value;
   } else {
     throw new Error(
       `Unknown config key: "${key}"\nValid keys: ${VALID_CONFIG_KEYS.join(', ')}`

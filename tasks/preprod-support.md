@@ -44,8 +44,8 @@ Currently only `--indexer-ws` exists on the balance command. For preprod users w
 | Flag | Commands | Purpose |
 |---|---|---|
 | `--proof-server <url>` | transfer, dust register, serve | Override proof server URL |
-| `--node <url>` | transfer, dust register | Override substrate node RPC URL |
-| `--indexer-ws <url>` | balance (already exists), transfer, dust register | Override indexer WebSocket URL |
+| `--node <url>` | transfer, dust register, serve | Override substrate node RPC URL |
+| `--indexer-ws <url>` | balance (already exists), transfer, dust register, serve | Override indexer WebSocket URL |
 
 #### 3. Documentation Updates
 
@@ -63,7 +63,9 @@ Currently only `--indexer-ws` exists on the balance command. For preprod users w
 | `src/lib/transfer.ts` | Transfer execution, uses proof server |
 | `src/commands/transfer.ts` | Transfer CLI, needs `--proof-server` flag |
 | `src/commands/dust.ts` | Dust register CLI, needs `--proof-server` flag |
+| `src/commands/serve.ts` | Serve CLI, needs `--proof-server` flag |
 | `src/lib/dapp-connector.ts` | Serve mode, exposes endpoints to dApps |
+| `src/lib/cli-config.ts` | Config storage — currently only supports `network` key, needs extending |
 | `src/mcp-server.ts` | MCP tool definitions |
 
 ## Preprod Infrastructure
@@ -97,6 +99,7 @@ To use the CLI on preprod, a user needs:
 - [ ] Add `--indexer-ws <url>` flag to transfer command (balance already has it)
 - [ ] Add `--indexer-ws <url>` flag to dust register command
 - [ ] Thread endpoint overrides through to `resolveNetworkConfig()` or pass directly
+- [ ] Extend `cli-config.ts` to support new keys: `proof-server`, `node`, `indexer-ws` (currently only `network` is in `VALID_CONFIG_KEYS`)
 - [ ] Support persistent endpoint config: `midnight config set proof-server <url>`, `node`, `indexer-ws`
 - [ ] Flag overrides take priority over config, config overrides network defaults
 - [ ] Add `--proof-server` support to `mn serve` / dapp-connector

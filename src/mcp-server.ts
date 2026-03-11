@@ -206,6 +206,9 @@ const TOOLS: ToolDef[] = [
         to: { type: 'string', description: 'Recipient bech32m address' },
         amount: { type: 'string', description: 'Amount in NIGHT to send' },
         wallet: { type: 'string', description: 'Custom wallet file path' },
+        'proof-server': { type: 'string', description: 'Override proof server URL' },
+        node: { type: 'string', description: 'Override substrate node RPC URL' },
+        'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
       },
       required: ['to', 'amount'],
     },
@@ -227,6 +230,9 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         wallet: { type: 'string', description: 'Custom wallet file path' },
+        'proof-server': { type: 'string', description: 'Override proof server URL' },
+        node: { type: 'string', description: 'Override substrate node RPC URL' },
+        'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
       },
     },
     async handler(params) {
@@ -242,6 +248,9 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         wallet: { type: 'string', description: 'Custom wallet file path' },
+        'proof-server': { type: 'string', description: 'Override proof server URL' },
+        node: { type: 'string', description: 'Override substrate node RPC URL' },
+        'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
       },
     },
     async handler(params) {
