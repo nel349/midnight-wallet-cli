@@ -66,6 +66,7 @@ const handlerLoaders: Record<string, () => Promise<{ default: CommandHandler }>>
   'dust':            () => import('./commands/dust.ts'),
   'config':          () => import('./commands/config.ts'),
   'localnet':        () => import('./commands/localnet.ts'),
+  'wallet':          () => import('./commands/wallet.ts'),
 };
 
 async function importHandler(name: string) {
@@ -78,14 +79,14 @@ async function importHandler(name: string) {
 const TOOLS: ToolDef[] = [
   {
     name: 'midnight_generate',
-    description: 'Generate a new wallet (random mnemonic, or restore from seed/mnemonic)',
+    description: 'Generate a new wallet (deprecated — use midnight_wallet_generate instead)',
     inputSchema: {
       type: 'object',
       properties: {
         network: { type: 'string', description: 'Network: preprod, preview, undeployed', enum: ['preprod', 'preview', 'undeployed'] },
         seed: { type: 'string', description: 'Restore from existing seed (64-char hex)' },
         mnemonic: { type: 'string', description: 'Restore from BIP-39 mnemonic (24 words)' },
-        output: { type: 'string', description: 'Custom output path (default: ~/.midnight/wallet.json)' },
+        output: { type: 'string', description: 'Custom output path (deprecated — use midnight_wallet_generate instead)' },
         force: { type: 'string', description: 'Set to "true" to overwrite existing wallet file' },
       },
     },
@@ -97,12 +98,119 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'midnight_wallet_generate',
+    description: 'Create a new named wallet and set it as active',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Wallet name (e.g. "alice", "dev")' },
+        network: { type: 'string', description: 'Network: preprod, preview, undeployed', enum: ['preprod', 'preview', 'undeployed'] },
+        seed: { type: 'string', description: 'Restore from existing seed (64-char hex)' },
+        mnemonic: { type: 'string', description: 'Restore from BIP-39 mnemonic (24 words)' },
+        force: { type: 'string', description: 'Set to "true" to overwrite existing wallet' },
+      },
+      required: ['name'],
+    },
+    async handler(params) {
+      const name = params.name as string;
+      const args = buildArgs('wallet', params, 'generate');
+      args.positionals = [name];
+      delete args.flags.name;
+      if (params.force === 'true' || params.force === true) args.flags.force = true;
+      const handler = await importHandler('wallet');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_wallet_list',
+    description: 'List all wallets with name, address, network, and active marker',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+    async handler() {
+      const args: ParsedArgs = {
+        command: 'wallet',
+        subcommand: 'list',
+        positionals: [],
+        flags: { json: true },
+      };
+      const handler = await importHandler('wallet');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_wallet_use',
+    description: 'Set the active wallet by name',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Wallet name to activate' },
+      },
+      required: ['name'],
+    },
+    async handler(params) {
+      const name = params.name as string;
+      const args: ParsedArgs = {
+        command: 'wallet',
+        subcommand: 'use',
+        positionals: [name],
+        flags: { json: true },
+      };
+      const handler = await importHandler('wallet');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_wallet_info',
+    description: 'Show details for a named wallet or the active wallet',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Wallet name (default: active wallet)' },
+      },
+    },
+    async handler(params) {
+      const name = params.name as string | undefined;
+      const args: ParsedArgs = {
+        command: 'wallet',
+        subcommand: 'info',
+        positionals: name ? [name] : [],
+        flags: { json: true },
+      };
+      const handler = await importHandler('wallet');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_wallet_remove',
+    description: 'Remove a named wallet (refuses active or last wallet)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Wallet name to remove' },
+      },
+      required: ['name'],
+    },
+    async handler(params) {
+      const name = params.name as string;
+      const args: ParsedArgs = {
+        command: 'wallet',
+        subcommand: 'remove',
+        positionals: [name],
+        flags: { json: true },
+      };
+      const handler = await importHandler('wallet');
+      return captureCommand(handler, args);
+    },
+  },
+  {
     name: 'midnight_info',
     description: 'Display wallet address, network, creation date (no secrets shown)',
     inputSchema: {
       type: 'object',
       properties: {
-        wallet: { type: 'string', description: 'Custom wallet file path' },
+        wallet: { type: 'string', description: 'Wallet name or path' },
       },
     },
     async handler(params) {
@@ -118,7 +226,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         address: { type: 'string', description: 'Address to check (or reads from wallet file)' },
-        wallet: { type: 'string', description: 'Custom wallet file path' },
+        wallet: { type: 'string', description: 'Wallet name or path' },
         network: { type: 'string', description: 'Override network detection', enum: ['preprod', 'preview', 'undeployed'] },
         'indexer-ws': { type: 'string', description: 'Custom indexer WebSocket URL' },
       },
@@ -185,7 +293,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         amount: { type: 'string', description: 'Amount in NIGHT to airdrop' },
-        wallet: { type: 'string', description: 'Custom wallet file path' },
+        wallet: { type: 'string', description: 'Wallet name or path' },
         'no-cache': { type: 'string', description: 'Set to "true" to bypass wallet state cache' },
       },
       required: ['amount'],
@@ -206,7 +314,7 @@ const TOOLS: ToolDef[] = [
       properties: {
         to: { type: 'string', description: 'Recipient bech32m address' },
         amount: { type: 'string', description: 'Amount in NIGHT to send' },
-        wallet: { type: 'string', description: 'Custom wallet file path' },
+        wallet: { type: 'string', description: 'Wallet name or path' },
         'proof-server': { type: 'string', description: 'Override proof server URL' },
         node: { type: 'string', description: 'Override substrate node RPC URL' },
         'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
@@ -231,7 +339,7 @@ const TOOLS: ToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        wallet: { type: 'string', description: 'Custom wallet file path' },
+        wallet: { type: 'string', description: 'Wallet name or path' },
         'proof-server': { type: 'string', description: 'Override proof server URL' },
         node: { type: 'string', description: 'Override substrate node RPC URL' },
         'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
@@ -250,7 +358,7 @@ const TOOLS: ToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        wallet: { type: 'string', description: 'Custom wallet file path' },
+        wallet: { type: 'string', description: 'Wallet name or path' },
         'proof-server': { type: 'string', description: 'Override proof server URL' },
         node: { type: 'string', description: 'Override substrate node RPC URL' },
         'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },

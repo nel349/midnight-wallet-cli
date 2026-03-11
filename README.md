@@ -20,7 +20,11 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 
 | Command | Description |
 |---------|-------------|
-| `midnight generate` | Generate a new wallet or restore from seed/mnemonic |
+| `midnight wallet generate <name>` | Create a named wallet and set it as active |
+| `midnight wallet list` | List all wallets with active marker |
+| `midnight wallet use <name>` | Set the active wallet |
+| `midnight wallet info [name]` | Show wallet details |
+| `midnight wallet remove <name>` | Remove a wallet |
 | `midnight info` | Display wallet address, network, creation date |
 | `midnight balance [address]` | Check unshielded NIGHT balance |
 | `midnight transfer <to> <amount>` | Send NIGHT tokens to another address |
@@ -30,7 +34,7 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 | `midnight address --seed <hex>` | Derive an address from a seed |
 | `midnight genesis-address` | Show the genesis wallet address |
 | `midnight inspect-cost` | Display current block cost limits |
-| `midnight config get/set` | Manage persistent config (default network, etc.) |
+| `midnight config get/set` | Manage persistent config (network, active wallet, etc.) |
 | `midnight localnet up/stop/down/status` | Manage a local Midnight network via Docker |
 | `midnight help [command]` | Show usage for all or a specific command |
 
@@ -41,7 +45,7 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 midnight localnet up
 
 # Generate a wallet
-midnight generate --network undeployed
+midnight wallet generate dev --network undeployed
 
 # Airdrop tokens and register dust
 midnight airdrop 1000
@@ -158,11 +162,16 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 ### Available MCP Tools
 
-Once connected, your AI agent gets access to 17 tools:
+Once connected, your AI agent gets access to 22 tools:
 
 | Tool | Description |
 |------|-------------|
-| `midnight_generate` | Generate or restore a wallet |
+| `midnight_wallet_generate` | Create a named wallet |
+| `midnight_wallet_list` | List all wallets |
+| `midnight_wallet_use` | Set active wallet |
+| `midnight_wallet_info` | Show wallet details |
+| `midnight_wallet_remove` | Remove a wallet |
+| `midnight_generate` | Generate a wallet (deprecated) |
 | `midnight_info` | Show wallet info (no secrets) |
 | `midnight_balance` | Check NIGHT balance |
 | `midnight_address` | Derive address from seed |

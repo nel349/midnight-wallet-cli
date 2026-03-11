@@ -22,8 +22,40 @@ interface CommandSpec {
 
 const COMMAND_SPECS: CommandSpec[] = [
   {
+    name: 'wallet',
+    description: 'Manage named wallets (generate, list, use, info, remove)',
+    usage: 'midnight wallet <generate|list|use|info|remove> [args]',
+    flags: [
+      'generate <name>     Create a new named wallet and set it as active',
+      'list                Show all wallets with active marker',
+      'use <name>          Set active wallet',
+      'info [name]         Show wallet details (active wallet if no name)',
+      'remove <name>       Delete a wallet (refuses active or last wallet)',
+      '',
+      'generate flags:',
+      '--network <name>    Network: preprod, preview, undeployed',
+      '--seed <hex>        Restore from existing seed (64-char hex)',
+      '--mnemonic "..."    Restore from BIP-39 mnemonic (24 words)',
+      '--force             Overwrite existing wallet file',
+    ],
+    examples: [
+      'midnight wallet generate alice --network preprod',
+      'midnight wallet list',
+      'midnight wallet use alice',
+      'midnight wallet info alice',
+      'midnight wallet remove bob',
+    ],
+    jsonFields: {
+      name: 'Wallet name',
+      address: 'Wallet address (bech32m)',
+      network: 'Network name',
+      active: 'Whether this is the active wallet',
+      wallets: 'Array of wallet info objects (list only)',
+    },
+  },
+  {
     name: 'generate',
-    description: 'Generate a new wallet (random mnemonic, or restore from seed/mnemonic)',
+    description: '(Deprecated — use "midnight wallet generate <name>" instead)',
     usage: 'midnight generate [--network <name>] [--seed <hex>] [--mnemonic "..."] [--output <file>] [--force]',
     flags: [
       '--network <name>    Network: preprod, preview, undeployed',
@@ -34,8 +66,6 @@ const COMMAND_SPECS: CommandSpec[] = [
     ],
     examples: [
       'midnight generate --network preprod',
-      'midnight generate --network preprod --output my-wallet.json',
-      'midnight generate --seed 0123456789abcdef...',
     ],
     jsonFields: {
       address: 'Generated wallet address (bech32m)',
@@ -49,9 +79,9 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'info',
     description: 'Display wallet address, network, creation date (no secrets shown)',
-    usage: 'midnight info [--wallet <file>]',
+    usage: 'midnight info [--wallet <name|file>]',
     flags: [
-      '--wallet <file>     Custom wallet file path',
+      '--wallet <name|file> Wallet name or path',
     ],
     examples: [
       'midnight info',
@@ -140,10 +170,10 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'airdrop',
     description: 'Fund your wallet from the genesis wallet (undeployed network only)',
-    usage: 'midnight airdrop <amount> [--wallet <file>] [--no-cache]',
+    usage: 'midnight airdrop <amount> [--wallet <name|file>] [--no-cache]',
     flags: [
       '<amount>            Amount in NIGHT to airdrop',
-      '--wallet <file>     Custom wallet file path',
+      '--wallet <name|file> Wallet name or path',
       '--no-cache          Bypass wallet state cache',
     ],
     examples: [
@@ -160,11 +190,11 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'transfer',
     description: 'Send NIGHT tokens to another address',
-    usage: 'midnight transfer <to> <amount> [--wallet <file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache]',
+    usage: 'midnight transfer <to> <amount> [--wallet <name|file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache]',
     flags: [
       '<to>                Recipient bech32m address',
       '<amount>            Amount in NIGHT to send',
-      '--wallet <file>     Custom wallet file path',
+      '--wallet <name|file> Wallet name or path',
       '--proof-server <url>  Override proof server URL',
       '--node <url>          Override substrate node RPC URL',
       '--indexer-ws <url>    Override indexer WebSocket URL',
@@ -184,11 +214,11 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'dust',
     description: 'Register UTXOs for dust (fee token) generation or check status',
-    usage: 'midnight dust <register|status> [--wallet <file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache]',
+    usage: 'midnight dust <register|status> [--wallet <name|file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache]',
     flags: [
       'register            Register NIGHT UTXOs for dust generation',
       'status              Check dust registration status and balance',
-      '--wallet <file>     Custom wallet file path',
+      '--wallet <name|file> Wallet name or path',
       '--proof-server <url>  Override proof server URL',
       '--node <url>          Override substrate node RPC URL',
       '--indexer-ws <url>    Override indexer WebSocket URL',
@@ -216,11 +246,12 @@ const COMMAND_SPECS: CommandSpec[] = [
       'get <key>           Read a config value',
       'set <key> <value>   Write a config value',
       '',
-      'Keys: network, proof-server, node, indexer-ws',
+      'Keys: network, wallet, proof-server, node, indexer-ws',
     ],
     examples: [
       'midnight config get network',
       'midnight config set network preprod',
+      'midnight config set wallet alice',
       'midnight config set proof-server http://localhost:6300',
       'midnight config set node wss://rpc.preprod.midnight.network',
       'midnight config set indexer-ws wss://indexer.preprod.midnight.network/api/v3/graphql/ws',
@@ -234,10 +265,10 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'serve',
     description: 'Start DApp Connector server over WebSocket JSON-RPC',
-    usage: 'midnight serve [--port <n>] [--wallet <file>] [--network <name>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--approve-all] [--no-auto-approve-reads] [--no-cache] [--json]',
+    usage: 'midnight serve [--port <n>] [--wallet <name|file>] [--network <name>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--approve-all] [--no-auto-approve-reads] [--no-cache] [--json]',
     flags: [
       '--port <n>                    Server port (default: 9932)',
-      '--wallet <file>               Custom wallet file path',
+      '--wallet <name|file>          Wallet name or path',
       '--network <name>              Override network detection',
       '--proof-server <url>          Override proof server URL',
       '--node <url>                  Override substrate node RPC URL',
@@ -367,7 +398,7 @@ function outputJsonManifest(): void {
     },
     globalFlags: [
       { name: '--json', description: 'Output structured JSON to stdout (suppresses all stderr)' },
-      { name: '--wallet <file>', description: 'Custom wallet file path' },
+      { name: '--wallet <name|file>', description: 'Wallet name or path' },
       { name: '--network <name>', description: 'Override network (preprod, preview, undeployed)' },
       { name: '--version, -v', description: 'Print CLI version' },
       { name: '--help, -h', description: 'Show help' },
@@ -487,15 +518,21 @@ Setup — add to your MCP config:
 If not installed globally, use "command": "npx" with
 "args": ["-y", "midnight-wallet-cli@latest", "--mcp"] instead.
 
-AVAILABLE MCP TOOLS (17)
+AVAILABLE MCP TOOLS (22)
 ────────────────────────
 
   Tool Name                    Description                                          Required Params
-  midnight_generate            Generate or restore a wallet                         —
+  midnight_wallet_generate     Create a named wallet                                name
+  midnight_wallet_list         List all wallets                                     —
+  midnight_wallet_use          Set active wallet                                    name
+  midnight_wallet_info         Show wallet details                                  —
+  midnight_wallet_remove       Remove a named wallet                                name
+  midnight_generate            Generate or restore a wallet (deprecated)            —
   midnight_info                Display wallet metadata                              —
   midnight_balance             Check unshielded balance                             —
   midnight_address             Derive address from seed                             seed
   midnight_genesis_address     Genesis wallet address                               —
+  midnight_inspect_cost        Display block cost limits                            —
   midnight_airdrop             Fund wallet from genesis (undeployed only)           amount
   midnight_transfer            Send NIGHT tokens                                    to, amount
   midnight_dust_register       Register UTXOs for dust generation                   —
@@ -508,7 +545,7 @@ AVAILABLE MCP TOOLS (17)
   midnight_localnet_status     Show service status and ports                        —
   midnight_localnet_clean      Remove conflicting containers                        —
 
-Optional params shared by wallet tools: wallet (custom wallet path),
+Optional params shared by wallet tools: wallet (wallet name or path),
 network (preprod, preview, undeployed).
 
 All tools return JSON. Errors return: {error, code, message}.
@@ -517,7 +554,7 @@ TYPICAL AGENT WORKFLOW
 ──────────────────────
 
   1. midnight_localnet_up          → Start local network
-  2. midnight_generate             → Create wallet (network: "undeployed")
+  2. midnight_wallet_generate      → Create wallet (name: "dev", network: "undeployed")
   3. midnight_airdrop              → Fund wallet (amount: "1000")
   4. midnight_dust_register        → Register UTXOs for fee tokens
   5. midnight_balance              → Verify balance
@@ -528,8 +565,8 @@ EXAMPLE WORKFLOW
 ────────────────
 
   # 1. Generate a wallet
-  midnight generate --network undeployed --json
-  # → {"address":"mn_addr_...","network":"undeployed","seed":"...","mnemonic":"...","file":"...","createdAt":"..."}
+  midnight wallet generate dev --network undeployed --json
+  # → {"name":"dev","address":"mn_addr_...","network":"undeployed","seed":"...","mnemonic":"...","file":"...","createdAt":"...","active":true}
 
   # 2. Check balance
   midnight balance --json

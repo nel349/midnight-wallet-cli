@@ -3,7 +3,7 @@
 //                       [--approve-all] [--no-auto-approve-reads] [--json]
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
-import { loadWalletConfig } from '../lib/wallet-config.ts';
+import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors } from '../lib/facade.ts';
@@ -33,8 +33,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
   // ── Load wallet ──
 
-  const walletPath = getFlag(args, 'wallet');
-  const config = loadWalletConfig(walletPath);
+  const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   const { name: networkName, config: networkConfig } = resolveNetwork({

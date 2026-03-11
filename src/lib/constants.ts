@@ -64,5 +64,9 @@ export const LOCALNET_DIR_NAME = 'localnet';
 export const CACHE_VERSION = 1;
 export const CACHE_DIR_NAME = 'cache';
 
+// Multi-wallet support
+export const WALLETS_DIR_NAME = 'wallets';
+export const DEFAULT_WALLET_NAME = 'default';
+
 // DApp Connector server port (99=midnight, 32=ws)
 export const DEFAULT_SERVE_PORT = 9932;

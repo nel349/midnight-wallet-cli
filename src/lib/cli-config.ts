@@ -9,13 +9,14 @@ export interface CliConfig {
   'proof-server'?: string;
   node?: string;
   'indexer-ws'?: string;
+  wallet?: string;
 }
 
 const DEFAULT_CLI_CONFIG: CliConfig = {
   network: 'undeployed',
 };
 
-const VALID_CONFIG_KEYS: readonly string[] = ['network', 'proof-server', 'node', 'indexer-ws'] as const;
+const VALID_CONFIG_KEYS: readonly string[] = ['network', 'proof-server', 'node', 'indexer-ws', 'wallet'] as const;
 
 const ENDPOINT_KEYS = new Set(['proof-server', 'node', 'indexer-ws']);
 
@@ -78,6 +79,9 @@ export function loadCliConfig(configDir?: string): CliConfig {
   if (parsed['indexer-ws'] && typeof parsed['indexer-ws'] === 'string') {
     config['indexer-ws'] = parsed['indexer-ws'];
   }
+  if (parsed.wallet && typeof parsed.wallet === 'string') {
+    config.wallet = parsed.wallet;
+  }
 
   return config;
 }
@@ -99,6 +103,7 @@ export function getConfigValue(key: string, configDir?: string): string {
   const config = loadCliConfig(configDir);
 
   if (key === 'network') return config.network;
+  if (key === 'wallet') return config.wallet ?? '(not set)';
   if (ENDPOINT_KEYS.has(key)) {
     const value = config[key as keyof CliConfig];
     return typeof value === 'string' ? value : '(not set)';
@@ -122,6 +127,13 @@ export function setConfigValue(key: string, value: string, configDir?: string): 
       );
     }
     config.network = value;
+  } else if (key === 'wallet') {
+    if (!value || /[\/\\]/.test(value)) {
+      throw new Error(
+        `Invalid wallet name: "${value}"\nWallet name must be a simple name (no path separators).`
+      );
+    }
+    config.wallet = value;
   } else if (ENDPOINT_KEYS.has(key)) {
     if (!isValidUrl(value)) {
       throw new Error(

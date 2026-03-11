@@ -2,7 +2,7 @@
 // Usage: midnight transfer <to> <amount>
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
-import { loadWalletConfig } from '../lib/wallet-config.ts';
+import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
@@ -36,7 +36,7 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
   const amountNight = parseAmount(amountStr);
 
   // Load wallet config to get sender seed
-  const walletPath = getFlag(args, 'wallet');
+  const walletPath = resolveWalletPath(getFlag(args, 'wallet'));
   const config = loadWalletConfig(walletPath);
   const seedBuffer = Buffer.from(config.seed, 'hex');
 

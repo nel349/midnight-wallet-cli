@@ -2,7 +2,7 @@
 // Only works on undeployed network (local devnet)
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
-import { loadWalletConfig } from '../lib/wallet-config.ts';
+import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
@@ -27,8 +27,7 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
   const amountNight = parseAmount(amountStr);
 
   // Load wallet config to get recipient address and network
-  const walletPath = getFlag(args, 'wallet');
-  const config = loadWalletConfig(walletPath);
+  const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
 
   // Resolve network — must be undeployed
   const { name: networkName, config: networkConfig } = resolveNetwork({

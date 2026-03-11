@@ -7,6 +7,11 @@ import { COMMAND_SPECS } from '../commands/help.ts';
 
 // Expected MCP tool names — one per CLI command/subcommand
 const EXPECTED_TOOLS = [
+  'midnight_wallet_generate',
+  'midnight_wallet_list',
+  'midnight_wallet_use',
+  'midnight_wallet_info',
+  'midnight_wallet_remove',
   'midnight_generate',
   'midnight_info',
   'midnight_balance',
@@ -43,8 +48,8 @@ describe('MCP tool coverage', () => {
     }
   });
 
-  it('has 17 expected tools', () => {
-    expect(EXPECTED_TOOLS).toHaveLength(17);
+  it('has 22 expected tools', () => {
+    expect(EXPECTED_TOOLS).toHaveLength(22);
   });
 
   it('every COMMAND_SPEC with jsonFields is covered', () => {

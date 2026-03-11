@@ -4,7 +4,7 @@
 import * as ledger from '@midnight-ntwrk/ledger-v7';
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
-import { loadWalletConfig } from '../lib/wallet-config.ts';
+import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForLiteSyncedState, type FacadeBundle } from '../lib/facade.ts';
@@ -28,7 +28,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   }
 
   // Load wallet config
-  const walletPath = getFlag(args, 'wallet');
+  const walletPath = resolveWalletPath(getFlag(args, 'wallet'));
   const config = loadWalletConfig(walletPath);
   const seedBuffer = Buffer.from(config.seed, 'hex');
 

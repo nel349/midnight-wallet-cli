@@ -55,7 +55,7 @@ export function getWordmarkMaterializeFrame(progress: number): string[] {
 
 // Short descriptions for the compact horizontal help layout (≤30 chars each)
 export const COMMAND_BRIEFS: [name: string, brief: string][] = [
-  ['generate',        'Generate or restore a wallet'],
+  ['wallet',          'Manage named wallets'],
   ['info',            'Display wallet metadata'],
   ['balance',         'Check unshielded balance'],
   ['address',         'Derive address from seed'],

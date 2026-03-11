@@ -34,7 +34,7 @@ describe('help command — general help', () => {
     const args = parseArgs(['help']);
     await helpCommand(args);
     const err = io.stderr();
-    expect(err).toContain('generate');
+    expect(err).toContain('wallet');
     expect(err).toContain('info');
     expect(err).toContain('balance');
     expect(err).toContain('address');
@@ -55,7 +55,7 @@ describe('help command — general help', () => {
     expect(err).not.toContain('██████████████');
     // Has command list
     expect(err).toContain('Commands');
-    expect(err).toContain('generate');
+    expect(err).toContain('wallet');
     expect(err).toContain('balance');
   });
 });
