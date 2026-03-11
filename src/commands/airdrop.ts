@@ -4,7 +4,9 @@
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
+import { applyEndpointOverrides } from '../lib/network.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
+import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
 import { parseAmount, executeTransfer } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatNight, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -35,6 +37,13 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
     address: config.address,
   });
 
+  // Apply endpoint overrides: --flag > config > network default
+  applyEndpointOverrides(networkConfig, {
+    proofServer: getFlag(args, 'proof-server'),
+    node: getFlag(args, 'node'),
+    indexerWS: getFlag(args, 'indexer-ws'),
+  });
+
   if (networkName !== 'undeployed') {
     throw new Error(
       `Airdrop is only available on the "undeployed" network (local devnet).\n` +
@@ -43,8 +52,10 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
     );
   }
 
+  const noCache = hasFlag(args, 'no-cache');
   const recipientAddress = config.address;
   const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
+  const genesisAddress = deriveUnshieldedAddress(genesisSeedBuffer, networkName);
 
   // Show header on stderr
   process.stderr.write('\n' + header('Airdrop') + '\n\n');
@@ -63,6 +74,9 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
       recipientAddress,
       amountNight,
       signal,
+      noCache,
+      walletAddress: genesisAddress,
+      networkName,
       onSync(applied, highest) {
         if (highest > 0) {
           const pct = Math.round((applied / highest) * 100);

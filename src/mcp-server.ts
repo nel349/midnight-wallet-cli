@@ -186,6 +186,7 @@ const TOOLS: ToolDef[] = [
       properties: {
         amount: { type: 'string', description: 'Amount in NIGHT to airdrop' },
         wallet: { type: 'string', description: 'Custom wallet file path' },
+        'no-cache': { type: 'string', description: 'Set to "true" to bypass wallet state cache' },
       },
       required: ['amount'],
     },
@@ -209,6 +210,7 @@ const TOOLS: ToolDef[] = [
         'proof-server': { type: 'string', description: 'Override proof server URL' },
         node: { type: 'string', description: 'Override substrate node RPC URL' },
         'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
+        'no-cache': { type: 'string', description: 'Set to "true" to bypass wallet state cache' },
       },
       required: ['to', 'amount'],
     },
@@ -233,6 +235,7 @@ const TOOLS: ToolDef[] = [
         'proof-server': { type: 'string', description: 'Override proof server URL' },
         node: { type: 'string', description: 'Override substrate node RPC URL' },
         'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
+        'no-cache': { type: 'string', description: 'Set to "true" to bypass wallet state cache' },
       },
     },
     async handler(params) {
@@ -251,6 +254,7 @@ const TOOLS: ToolDef[] = [
         'proof-server': { type: 'string', description: 'Override proof server URL' },
         node: { type: 'string', description: 'Override substrate node RPC URL' },
         'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
+        'no-cache': { type: 'string', description: 'Set to "true" to bypass wallet state cache' },
       },
     },
     async handler(params) {

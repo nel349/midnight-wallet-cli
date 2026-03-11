@@ -20,7 +20,7 @@ const VALID_CONFIG_KEYS: readonly string[] = ['network', 'proof-server', 'node',
 const ENDPOINT_KEYS = new Set(['proof-server', 'node', 'indexer-ws']);
 
 function isValidUrl(value: string): boolean {
-  return /^(https?|wss?):\/\/.+/.test(value);
+  return /^(https?|wss?):\/\/\S+/.test(value);
 }
 
 function getConfigDir(configDir?: string): string {

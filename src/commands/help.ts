@@ -140,10 +140,11 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'airdrop',
     description: 'Fund your wallet from the genesis wallet (undeployed network only)',
-    usage: 'midnight airdrop <amount> [--wallet <file>]',
+    usage: 'midnight airdrop <amount> [--wallet <file>] [--no-cache]',
     flags: [
       '<amount>            Amount in NIGHT to airdrop',
       '--wallet <file>     Custom wallet file path',
+      '--no-cache          Bypass wallet state cache',
     ],
     examples: [
       'midnight airdrop 1000',
@@ -159,7 +160,7 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'transfer',
     description: 'Send NIGHT tokens to another address',
-    usage: 'midnight transfer <to> <amount> [--wallet <file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>]',
+    usage: 'midnight transfer <to> <amount> [--wallet <file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache]',
     flags: [
       '<to>                Recipient bech32m address',
       '<amount>            Amount in NIGHT to send',
@@ -167,6 +168,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--proof-server <url>  Override proof server URL',
       '--node <url>          Override substrate node RPC URL',
       '--indexer-ws <url>    Override indexer WebSocket URL',
+      '--no-cache            Bypass wallet state cache',
     ],
     examples: [
       'midnight transfer mn_addr_undeployed1... 100',
@@ -182,7 +184,7 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'dust',
     description: 'Register UTXOs for dust (fee token) generation or check status',
-    usage: 'midnight dust <register|status> [--wallet <file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>]',
+    usage: 'midnight dust <register|status> [--wallet <file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache]',
     flags: [
       'register            Register NIGHT UTXOs for dust generation',
       'status              Check dust registration status and balance',
@@ -190,6 +192,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--proof-server <url>  Override proof server URL',
       '--node <url>          Override substrate node RPC URL',
       '--indexer-ws <url>    Override indexer WebSocket URL',
+      '--no-cache            Bypass wallet state cache',
     ],
     examples: [
       'midnight dust register',
@@ -231,7 +234,7 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'serve',
     description: 'Start DApp Connector server over WebSocket JSON-RPC',
-    usage: 'midnight serve [--port <n>] [--wallet <file>] [--network <name>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--approve-all] [--no-auto-approve-reads] [--json]',
+    usage: 'midnight serve [--port <n>] [--wallet <file>] [--network <name>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--approve-all] [--no-auto-approve-reads] [--no-cache] [--json]',
     flags: [
       '--port <n>                    Server port (default: 9932)',
       '--wallet <file>               Custom wallet file path',
@@ -241,6 +244,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--indexer-ws <url>            Override indexer WebSocket URL',
       '--approve-all                 Auto-approve all requests (reads + writes)',
       '--no-auto-approve-reads       Prompt for read methods too',
+      '--no-cache                    Bypass wallet state cache',
     ],
     examples: [
       'midnight serve',

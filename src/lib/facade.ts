@@ -13,6 +13,7 @@ import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
 import { deriveShieldedSeed, deriveUnshieldedSeed, deriveDustSeed } from './derivation.ts';
+import { type WalletCacheData } from './wallet-cache.ts';
 import {
   DUST_COST_OVERHEAD,
   DUST_FEE_BLOCKS_MARGIN,
@@ -26,6 +27,8 @@ const NETWORK_ID_MAP: Record<string, NetworkId.NetworkId> = {
   Undeployed: NetworkId.NetworkId.Undeployed,
 };
 
+export type SyncMode = 'full' | 'lite';
+
 export interface FacadeBundle {
   facade: WalletFacade;
   keystore: ReturnType<typeof createKeystore>;
@@ -33,13 +36,23 @@ export interface FacadeBundle {
   dustSecretKey: ReturnType<typeof ledger.DustSecretKey.fromSeed>;
   /** Active subscription that keeps shareReplay buffers alive. Cleaned up by stopFacade. */
   keepAlive?: rx.Subscription;
+  /** Whether the facade was restored from cached state (vs built from scratch). */
+  restoredFromCache?: boolean;
 }
 
 /**
  * Build a complete WalletFacade from a seed and network config.
  * Returns the facade plus all keys needed for signing and proving.
+ *
+ * When `cache` is provided, wallets are restored from serialized state
+ * instead of starting fresh — the SDK then only syncs new transactions
+ * since the last checkpoint.
  */
-export async function buildFacade(seedBuffer: Buffer, networkConfig: NetworkConfig): Promise<FacadeBundle> {
+export async function buildFacade(
+  seedBuffer: Buffer,
+  networkConfig: NetworkConfig,
+  cache?: WalletCacheData | null,
+): Promise<FacadeBundle> {
   const networkId = NETWORK_ID_MAP[networkConfig.networkId];
   if (networkId === undefined) {
     throw new Error(`Unknown networkId: ${networkConfig.networkId}`);
@@ -70,7 +83,8 @@ export async function buildFacade(seedBuffer: Buffer, networkConfig: NetworkConf
     relayURL: new URL(networkConfig.node),
   };
 
-  const facade = await WalletFacade.init({
+  // Fresh build — starts all wallets from keys (no cache).
+  const initFresh = () => WalletFacade.init({
     configuration,
     shielded: (cfg) => ShieldedWallet(cfg).startWithSecretKeys(zswapSecretKeys),
     unshielded: (cfg) => UnshieldedWallet(cfg).startWithPublicKey(PublicKey.fromKeyStore(keystore)),
@@ -80,7 +94,28 @@ export async function buildFacade(seedBuffer: Buffer, networkConfig: NetworkConf
     ),
   });
 
-  return { facade, keystore, zswapSecretKeys, dustSecretKey };
+  // Attempt cache restore — fall back to fresh build on any deserialization error.
+  let restoredFromCache = false;
+  let facade: WalletFacade;
+
+  if (cache) {
+    try {
+      facade = await WalletFacade.init({
+        configuration,
+        shielded: (cfg) => ShieldedWallet(cfg).restore(cache.shielded),
+        unshielded: (cfg) => UnshieldedWallet(cfg).restore(cache.unshielded),
+        dust: (cfg) => DustWallet(cfg).restore(cache.dust),
+      });
+      restoredFromCache = true;
+    } catch (err) {
+      process.stderr.write(`  Cache restore failed, building from scratch: ${(err as Error).message}\n`);
+      facade = await initFresh();
+    }
+  } else {
+    facade = await initFresh();
+  }
+
+  return { facade, keystore, zswapSecretKeys, dustSecretKey, restoredFromCache };
 }
 
 /**
@@ -97,8 +132,7 @@ export async function buildFacade(seedBuffer: Buffer, networkConfig: NetworkConf
  * Shielded and unshielded wallets don't have this issue because the indexer
  * sends progress messages (unshielded) or zswap events (shielded) on every block.
  */
-function isFacadeSynced(state: FacadeState): boolean {
-  const shieldedOk = state.shielded?.state?.progress?.isStrictlyComplete() ?? false;
+export function isFacadeSynced(state: FacadeState, syncMode: SyncMode = 'full'): boolean {
   const unshieldedOk = state.unshielded?.progress?.isStrictlyComplete() ?? false;
 
   // For dust: try isStrictlyComplete first; if it fails due to isConnected bug,
@@ -107,12 +141,21 @@ function isFacadeSynced(state: FacadeState): boolean {
   if (!dustOk) {
     try {
       const p = state.dust?.state?.progress as any;
-      if (p && p.appliedIndex >= p.highestRelevantWalletIndex) {
+      // Guard: only use the index fallback when highestRelevantWalletIndex > 0.
+      // Both indices start at 0 before the indexer reports event counts, so
+      // without this guard, 0 >= 0 fires immediately on the first emission
+      // before any dust events have been processed.
+      if (p && p.highestRelevantWalletIndex > 0 && p.appliedIndex >= p.highestRelevantWalletIndex) {
         dustOk = true;
       }
     } catch { /* best-effort */ }
   }
 
+  if (syncMode === 'lite') {
+    return unshieldedOk && dustOk;
+  }
+
+  const shieldedOk = state.shielded?.state?.progress?.isStrictlyComplete() ?? false;
   return shieldedOk && unshieldedOk && dustOk;
 }
 
@@ -121,7 +164,7 @@ function isDustSyncPending(state: FacadeState): boolean {
   if (state.dust?.state?.progress?.isStrictlyComplete()) return false;
   try {
     const p = state.dust?.state?.progress as any;
-    if (p && p.appliedIndex >= p.highestRelevantWalletIndex) return false;
+    if (p && p.highestRelevantWalletIndex > 0 && p.appliedIndex >= p.highestRelevantWalletIndex) return false;
   } catch { /* best-effort */ }
   return true;
 }
@@ -135,12 +178,18 @@ function isDustSyncPending(state: FacadeState): boolean {
  * 2. Detects sync completion to resolve the sync promise
  * 3. Keeps shareReplay({ refCount: true }) buffers alive for the command lifetime
  */
+export interface SyncOptions {
+  onProgress?: (applied: number, highest: number) => void;
+  onSyncDetail?: (detail: string) => void;
+  timeoutMs?: number;
+  syncMode?: SyncMode;
+}
+
 export async function startAndSyncFacade(
   bundle: FacadeBundle,
-  onProgress?: (applied: number, highest: number) => void,
-  onSyncDetail?: (detail: string) => void,
-  timeoutMs?: number,
+  options: SyncOptions = {},
 ): Promise<FacadeState> {
+  const { onProgress, onSyncDetail, timeoutMs, syncMode = 'full' } = options;
   const { facade, zswapSecretKeys, dustSecretKey } = bundle;
 
   await facade.start(zswapSecretKeys, dustSecretKey);
@@ -170,16 +219,16 @@ export async function startAndSyncFacade(
         if (onSyncDetail) {
           try {
             const pending: string[] = [];
-            if (!state.shielded?.state?.progress?.isStrictlyComplete()) pending.push('shielded');
+            if (syncMode === 'full' && !state.shielded?.state?.progress?.isStrictlyComplete()) pending.push('shielded');
             if (isDustSyncPending(state)) pending.push('dust');
             if (!state.unshielded?.progress?.isStrictlyComplete()) pending.push('unshielded');
             if (pending.length > 0) onSyncDetail(pending.join(', '));
           } catch { /* best-effort diagnostic */ }
         }
 
-        // Resolve when fully synced (uses custom predicate to work around
+        // Resolve when synced (uses custom predicate to work around
         // dust wallet isConnected bug — see isFacadeSynced above)
-        if (isFacadeSynced(state)) {
+        if (isFacadeSynced(state, syncMode)) {
           resolved = true;
           clearTimeout(timeout);
           resolve(state);
@@ -196,13 +245,50 @@ export async function startAndSyncFacade(
 }
 
 /**
+ * Wait for a fully-populated lite-synced state (unshielded + dust data ready).
+ *
+ * The index fallback in `isFacadeSynced` resolves sync before the dust wallet
+ * has processed its events into `balance()` and `availableCoins`. This helper
+ * waits for dust's `isStrictlyComplete()` (which requires `isConnected` — set
+ * when actual DustLedgerEvents arrive and populate state data).
+ *
+ * On active chains (preprod): resolves quickly — a few seconds after lite sync.
+ * On idle chains (no dust events): times out after 15s, returns best-effort state.
+ *
+ * Use this for data-reading calls (dust status, balances) where accurate state
+ * matters. Use `isFacadeSynced` with lite mode for sync gating where the index
+ * fallback is acceptable.
+ */
+export async function waitForLiteSyncedState(bundle: FacadeBundle): Promise<FacadeState> {
+  const isDataReady = (s: FacadeState): boolean => {
+    const unshieldedOk = s.unshielded?.progress?.isStrictlyComplete() ?? false;
+    const dustOk = s.dust?.state?.progress?.isStrictlyComplete() ?? false;
+    return unshieldedOk && dustOk;
+  };
+
+  try {
+    return await rx.firstValueFrom(
+      bundle.facade.state().pipe(
+        rx.filter(isDataReady),
+        rx.timeout(15_000),
+      )
+    );
+  } catch {
+    // Timeout — idle chain where dust never connects (no DustLedgerEvents).
+    // Fall back to the latest available state (dust balance will be 0, which
+    // is correct for a chain with no dust activity).
+    return await rx.firstValueFrom(bundle.facade.state());
+  }
+}
+
+/**
  * Quick sync for pre-send validation.
  * Shorter timeout — just catches stale UTXOs before building a transaction.
  */
-export async function quickSync(bundle: FacadeBundle): Promise<FacadeState> {
+export async function quickSync(bundle: FacadeBundle, syncMode: SyncMode = 'full'): Promise<FacadeState> {
   return rx.firstValueFrom(
     bundle.facade.state().pipe(
-      rx.filter((state) => isFacadeSynced(state)),
+      rx.filter((state) => isFacadeSynced(state, syncMode)),
       rx.timeout(PRE_SEND_SYNC_TIMEOUT_MS),
     )
   );

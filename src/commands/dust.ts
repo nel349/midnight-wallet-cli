@@ -2,13 +2,13 @@
 // Usage: midnight dust register | midnight dust status
 
 import * as ledger from '@midnight-ntwrk/ledger-v7';
-import * as rx from 'rxjs';
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
+import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForLiteSyncedState, type FacadeBundle } from '../lib/facade.ts';
+import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatNight, formatDust, successMessage, toNight, toDust } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -46,7 +46,11 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     indexerWS: getFlag(args, 'indexer-ws'),
   });
 
-  const bundle = await buildFacade(seedBuffer, networkConfig);
+  const noCache = hasFlag(args, 'no-cache');
+
+  // Load cached wallet state (unless --no-cache)
+  const cache = noCache ? null : loadWalletCache(config.address, networkName);
+  const bundle = await buildFacade(seedBuffer, networkConfig, cache);
 
   const cleanup = async () => {
     try { await stopFacade(bundle); } catch { /* best-effort */ }
@@ -68,9 +72,9 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
 
   try {
     if (subcommand === 'register') {
-      await dustRegister(bundle, networkName, isJson, signal, warningRef);
+      await dustRegister(bundle, networkName, config.address, noCache, isJson, signal, warningRef);
     } else {
-      await dustStatus(bundle, networkName, isJson, signal, warningRef);
+      await dustStatus(bundle, networkName, config.address, noCache, isJson, signal, warningRef);
     }
   } finally {
     signal?.removeEventListener('abort', onAbort);
@@ -85,6 +89,8 @@ type WarningRef = { current?: (tag: string, msg: string) => void };
 async function dustRegister(
   bundle: FacadeBundle,
   networkName: string,
+  address: string,
+  noCache: boolean,
   jsonMode: boolean,
   signal?: AbortSignal,
   warningRef?: WarningRef,
@@ -92,17 +98,20 @@ async function dustRegister(
   process.stderr.write('\n' + header('Dust Register') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n\n');
 
-  const spinner = startSpinner('Syncing wallet...');
+  const spinner = startSpinner(bundle.restoredFromCache ? 'Restoring from cache...' : 'Syncing wallet...');
   if (warningRef) {
     warningRef.current = (_tag, msg) => spinner.update(`Syncing wallet... (${msg}, retrying)`);
   }
 
   try {
-    const syncedState = await startAndSyncFacade(bundle, (applied, highest) => {
-      if (highest > 0) {
-        const pct = Math.min(Math.round((applied / highest) * 100), 100);
-        spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
-      }
+    const syncedState = await startAndSyncFacade(bundle, {
+      syncMode: 'lite',
+      onProgress: (applied, highest) => {
+        if (highest > 0) {
+          const pct = Math.min(Math.round((applied / highest) * 100), 100);
+          spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
+        }
+      },
     });
 
     if (signal?.aborted) throw new Error('Operation cancelled');
@@ -118,11 +127,16 @@ async function dustRegister(
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
-    // Get final dust balance for output
-    const state = await rx.firstValueFrom(
-      bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
-    );
+    // Wait for dust data to be fully populated before reading balance.
+    // The lite sync may have resolved via the index fallback before dust
+    // events were processed — waitForLiteSyncedState waits for isStrictlyComplete.
+    const state = await waitForLiteSyncedState(bundle);
     const dustBal = state.dust.balance(new Date());
+
+    // Save cache after successful sync (unless --no-cache)
+    if (!noCache) {
+      try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
+    }
 
     if (result.alreadyAvailable) {
       spinner.stop('Dust already available');
@@ -156,6 +170,8 @@ async function dustRegister(
 async function dustStatus(
   bundle: FacadeBundle,
   networkName: string,
+  address: string,
+  noCache: boolean,
   jsonMode: boolean,
   signal?: AbortSignal,
   warningRef?: WarningRef,
@@ -163,26 +179,35 @@ async function dustStatus(
   process.stderr.write('\n' + header('Dust Status') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n\n');
 
-  const spinner = startSpinner('Syncing wallet...');
+  const spinner = startSpinner(bundle.restoredFromCache ? 'Restoring from cache...' : 'Syncing wallet...');
   if (warningRef) {
     warningRef.current = (_tag, msg) => spinner.update(`Syncing wallet... (${msg}, retrying)`);
   }
 
   try {
-    await startAndSyncFacade(bundle, (applied, highest) => {
-      if (highest > 0) {
-        const pct = Math.min(Math.round((applied / highest) * 100), 100);
-        spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
-      }
+    await startAndSyncFacade(bundle, {
+      syncMode: 'lite',
+      onProgress: (applied, highest) => {
+        if (highest > 0) {
+          const pct = Math.min(Math.round((applied / highest) * 100), 100);
+          spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
+        }
+      },
     });
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
     spinner.update('Checking dust status...');
 
-    const state = await rx.firstValueFrom(
-      bundle.facade.state().pipe(rx.filter((s) => s.isSynced))
-    );
+    // Wait for dust data to be fully populated before reading state.
+    // The lite sync may have resolved via the index fallback before dust
+    // events were processed — waitForLiteSyncedState waits for isStrictlyComplete.
+    const state = await waitForLiteSyncedState(bundle);
+
+    // Save cache after successful sync (unless --no-cache)
+    if (!noCache) {
+      try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
+    }
 
     const dustBalance = state.dust.balance(new Date());
     const hasAvailableDust = state.dust.availableCoins.length > 0;

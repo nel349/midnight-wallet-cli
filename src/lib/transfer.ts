@@ -9,6 +9,7 @@ import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
 import { type FacadeBundle, buildFacade, startAndSyncFacade, quickSync, stopFacade, suppressSdkTransientErrors } from './facade.ts';
+import { loadWalletCache, saveWalletCache } from './wallet-cache.ts';
 import {
   NATIVE_TOKEN_TYPE,
   TOKEN_MULTIPLIER,
@@ -42,6 +43,12 @@ export interface TransferParams {
   onProving?: () => void;
   onSubmitting?: () => void;
   onSyncWarning?: (tag: string, message: string) => void;
+  /** Skip cache load and save when true. */
+  noCache?: boolean;
+  /** Wallet address for cache keying (required for cache). */
+  walletAddress?: string;
+  /** Network name for cache keying (required for cache). */
+  networkName?: string;
 }
 
 export interface TransferResult {
@@ -397,7 +404,7 @@ async function buildAndSubmitTransfer(
   while (true) {
     try {
       if (lastError) {
-        await quickSync(bundle);
+        await quickSync(bundle, 'lite');
       }
 
       const ttl = new Date(Date.now() + TX_TTL_MINUTES * 60 * 1000);
@@ -451,7 +458,7 @@ async function buildAndSubmitTransfer(
         const elapsed = formatElapsed(Date.now() - startTime);
         onDust?.(`Dust insufficient, re-ensuring (${elapsed} elapsed)...`);
         try {
-          const freshState = await quickSync(bundle);
+          const freshState = await quickSync(bundle, 'lite');
           // Fail fast if dust is below fee threshold — retrying won't help
           const dustBal = freshState.dust.balance(new Date());
           if (dustBal > 0n && dustBal < MIN_DUST_FOR_TRANSFER) {
@@ -501,6 +508,9 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     onProving,
     onSubmitting,
     onSyncWarning,
+    noCache,
+    walletAddress,
+    networkName,
   } = params;
 
   const amount = nightToMicro(amountNight);
@@ -515,8 +525,12 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
   // entire transfer flow (covers dust registration and transfer submission).
   const restoreRpc = suppressRpcNoise();
 
+  // Load cached wallet state (unless --no-cache or missing cache params)
+  const useCache = !noCache && walletAddress && networkName;
+  const cache = useCache ? loadWalletCache(walletAddress, networkName) : null;
+
   // Build facade — may be rebuilt on sync retry
-  let bundle = await buildFacade(seedBuffer, networkConfig);
+  let bundle = await buildFacade(seedBuffer, networkConfig, cache);
   let shutdownComplete = false;
 
   // Signal handling — clean shutdown on abort
@@ -542,16 +556,20 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
 
     for (let attempt = 1; attempt <= MAX_SYNC_ATTEMPTS; attempt++) {
       try {
-        syncedState = await startAndSyncFacade(
-          bundle, onSync, onSyncDetail, SYNC_ATTEMPT_TIMEOUT_MS,
-        );
+        syncedState = await startAndSyncFacade(bundle, {
+          onProgress: onSync,
+          onSyncDetail,
+          timeoutMs: SYNC_ATTEMPT_TIMEOUT_MS,
+          syncMode: 'lite',
+        });
         break;
       } catch (err: any) {
         if (signal?.aborted) throw new Error('Operation cancelled');
         if (attempt < MAX_SYNC_ATTEMPTS && String(err?.message).includes('timed out')) {
           onDust?.(`Sync timed out, retrying (attempt ${attempt + 1}/${MAX_SYNC_ATTEMPTS})...`);
           await stopFacade(bundle).catch(() => {});
-          bundle = await buildFacade(seedBuffer, networkConfig);
+          const retryCache = useCache ? loadWalletCache(walletAddress, networkName) : null;
+          bundle = await buildFacade(seedBuffer, networkConfig, retryCache);
           continue;
         }
         throw err;
@@ -601,6 +619,11 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
       onSubmitting,
       onDust,
     );
+
+    // Save cache after successful transfer (post-tx state has updated UTXOs)
+    if (useCache) {
+      try { await saveWalletCache(walletAddress, networkName, bundle.facade); } catch { /* best-effort */ }
+    }
 
     return { txHash, amountMicroNight: amount };
   } finally {
