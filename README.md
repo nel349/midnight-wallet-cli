@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/midnight-wallet-cli)](https://npm-stat.com/charts.html?package=midnight-wallet-cli)
 [![License](https://img.shields.io/npm/l/midnight-wallet-cli)](https://www.apache.org/licenses/LICENSE-2.0)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript)](https://www.typescriptlang.org/)
-[![CI](https://github.com/nel349/midnight-wallet-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/nel349/midnight-wallet-cli/actions/workflows/ci.yml)
+
 
 A standalone CLI wallet for the Midnight blockchain. Manage wallets, check balances, transfer NIGHT tokens, and run a local network — all from the terminal.
 
