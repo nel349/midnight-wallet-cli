@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
-import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME, WALLETS_DIR_NAME, DEFAULT_WALLET_NAME, DIR_MODE, FILE_MODE } from './constants.ts';
+import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME, WALLETS_DIR_NAME, DEFAULT_WALLET_NAME, DIR_MODE, FILE_MODE, isValidWalletName } from './constants.ts';
 import { isValidNetworkName } from './network.ts';
 import { loadCliConfig, saveCliConfig } from './cli-config.ts';
 
@@ -90,6 +90,11 @@ export function getActiveWalletName(): string {
  * Set the active wallet in config.
  */
 export function setActiveWallet(name: string): void {
+  if (!isValidWalletName(name)) {
+    throw new Error(
+      `Invalid wallet name: "${name}"\nWallet name must be a simple name (no path separators, .json suffix, or special characters).`
+    );
+  }
   const walletPath = path.join(getWalletsDir(), `${name}.json`);
   if (!fs.existsSync(walletPath)) {
     throw new Error(
@@ -140,6 +145,11 @@ export function listWallets(): WalletInfo[] {
  * Refuses if it's the active wallet or the last remaining wallet.
  */
 export function removeWallet(name: string): void {
+  if (!isValidWalletName(name)) {
+    throw new Error(
+      `Invalid wallet name: "${name}"\nWallet name must be a simple name (no path separators, .json suffix, or special characters).`
+    );
+  }
   const walletsDir = getWalletsDir();
   const walletPath = path.join(walletsDir, `${name}.json`);
 

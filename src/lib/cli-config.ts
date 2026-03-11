@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
-import { MIDNIGHT_DIR, DEFAULT_CONFIG_FILENAME, DIR_MODE, FILE_MODE } from './constants.ts';
+import { MIDNIGHT_DIR, DEFAULT_CONFIG_FILENAME, DIR_MODE, FILE_MODE, isValidWalletName } from './constants.ts';
 import { type NetworkName, isValidNetworkName } from './network.ts';
 
 export interface CliConfig {
@@ -128,9 +128,9 @@ export function setConfigValue(key: string, value: string, configDir?: string): 
     }
     config.network = value;
   } else if (key === 'wallet') {
-    if (!value || /[\/\\]/.test(value)) {
+    if (!isValidWalletName(value)) {
       throw new Error(
-        `Invalid wallet name: "${value}"\nWallet name must be a simple name (no path separators).`
+        `Invalid wallet name: "${value}"\nWallet name must be a simple name (no path separators, .json suffix, or special characters).`
       );
     }
     config.wallet = value;

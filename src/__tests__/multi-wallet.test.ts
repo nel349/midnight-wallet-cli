@@ -25,6 +25,7 @@ import {
   DEFAULT_WALLET_FILENAME,
   DIR_MODE,
   FILE_MODE,
+  isValidWalletName,
 } from '../lib/constants.ts';
 
 // Use a temp dir that simulates ~/.midnight
@@ -144,6 +145,19 @@ describe('removeWallet', () => {
   it('throws when wallet does not exist', () => {
     expect(() => removeWallet('nonexistent')).toThrow('not found');
   });
+
+  it('rejects invalid wallet names with path traversal', () => {
+    expect(() => removeWallet('../evil')).toThrow('Invalid wallet name');
+    expect(() => removeWallet('path/to/wallet')).toThrow('Invalid wallet name');
+  });
+
+  it('rejects empty wallet name', () => {
+    expect(() => removeWallet('')).toThrow('Invalid wallet name');
+  });
+
+  it('rejects wallet name ending in .json', () => {
+    expect(() => removeWallet('test.json')).toThrow('Invalid wallet name');
+  });
 });
 
 // ─── migrateOldWallet ───────────────────────────────────────
@@ -167,6 +181,70 @@ describe('loadWalletConfig error messages', () => {
   it('suggests "midnight wallet generate" in missing file error', () => {
     const filePath = path.join(TEST_HOME, 'nonexistent.json');
     expect(() => loadWalletConfig(filePath)).toThrow('midnight wallet generate');
+  });
+});
+
+// ─── setActiveWallet validation ──────────────────────────────
+
+describe('setActiveWallet validation', () => {
+  it('rejects path traversal names', () => {
+    expect(() => setActiveWallet('../evil')).toThrow('Invalid wallet name');
+    expect(() => setActiveWallet('a/b')).toThrow('Invalid wallet name');
+  });
+
+  it('rejects empty name', () => {
+    expect(() => setActiveWallet('')).toThrow('Invalid wallet name');
+  });
+
+  it('rejects .json suffix', () => {
+    expect(() => setActiveWallet('test.json')).toThrow('Invalid wallet name');
+  });
+
+  it('rejects control characters', () => {
+    expect(() => setActiveWallet('test\x00name')).toThrow('Invalid wallet name');
+  });
+});
+
+// ─── isValidWalletName ──────────────────────────────────────
+
+describe('isValidWalletName', () => {
+  it('accepts simple names', () => {
+    expect(isValidWalletName('alice')).toBe(true);
+    expect(isValidWalletName('bob')).toBe(true);
+    expect(isValidWalletName('my-wallet')).toBe(true);
+    expect(isValidWalletName('wallet_1')).toBe(true);
+    expect(isValidWalletName('default')).toBe(true);
+  });
+
+  it('rejects empty string', () => {
+    expect(isValidWalletName('')).toBe(false);
+  });
+
+  it('rejects whitespace-only', () => {
+    expect(isValidWalletName('   ')).toBe(false);
+    expect(isValidWalletName(' alice')).toBe(false);
+    expect(isValidWalletName('alice ')).toBe(false);
+  });
+
+  it('rejects path separators', () => {
+    expect(isValidWalletName('a/b')).toBe(false);
+    expect(isValidWalletName('a\\b')).toBe(false);
+    expect(isValidWalletName('../evil')).toBe(false);
+  });
+
+  it('rejects .json suffix', () => {
+    expect(isValidWalletName('wallet.json')).toBe(false);
+  });
+
+  it('rejects dot and double-dot', () => {
+    expect(isValidWalletName('.')).toBe(false);
+    expect(isValidWalletName('..')).toBe(false);
+  });
+
+  it('rejects control characters', () => {
+    expect(isValidWalletName('test\x00name')).toBe(false);
+    expect(isValidWalletName('test\nnewline')).toBe(false);
+    expect(isValidWalletName('\ttab')).toBe(false);
   });
 });
 

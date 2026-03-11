@@ -215,9 +215,81 @@ describe('endpoint config keys', () => {
   });
 });
 
+describe('wallet config key', () => {
+  it('setConfigValue persists wallet name', () => {
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('alice');
+  });
+
+  it('overwrites a previous wallet value', () => {
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    setConfigValue('wallet', 'bob', TEST_DIR);
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('bob');
+  });
+
+  it('rejects wallet name with path separators', () => {
+    expect(() => setConfigValue('wallet', '../evil', TEST_DIR)).toThrow('Invalid wallet name');
+    expect(() => setConfigValue('wallet', 'path/to/wallet', TEST_DIR)).toThrow('Invalid wallet name');
+    expect(() => setConfigValue('wallet', 'path\\to\\wallet', TEST_DIR)).toThrow('Invalid wallet name');
+  });
+
+  it('rejects wallet name ending in .json', () => {
+    expect(() => setConfigValue('wallet', 'alice.json', TEST_DIR)).toThrow('Invalid wallet name');
+  });
+
+  it('rejects empty wallet name', () => {
+    expect(() => setConfigValue('wallet', '', TEST_DIR)).toThrow('Invalid wallet name');
+  });
+
+  it('rejects whitespace-only wallet name', () => {
+    expect(() => setConfigValue('wallet', '   ', TEST_DIR)).toThrow('Invalid wallet name');
+  });
+
+  it('returns (not set) when wallet is not configured', () => {
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('does not corrupt existing config on validation failure', () => {
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    expect(() => setConfigValue('wallet', '../bad', TEST_DIR)).toThrow();
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('alice');
+  });
+
+  it('loadCliConfig reads wallet key from file', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({ network: 'preprod', wallet: 'alice' }),
+    );
+    const config = loadCliConfig(TEST_DIR);
+    expect(config.wallet).toBe('alice');
+  });
+
+  it('loadCliConfig ignores non-string wallet values', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({ network: 'preprod', wallet: 123 }),
+    );
+    const config = loadCliConfig(TEST_DIR);
+    expect(config.wallet).toBeUndefined();
+  });
+
+  it('does not interfere with other config keys', () => {
+    setConfigValue('network', 'preprod', TEST_DIR);
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    setConfigValue('proof-server', 'http://localhost:6300', TEST_DIR);
+    expect(getConfigValue('network', TEST_DIR)).toBe('preprod');
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('alice');
+    expect(getConfigValue('proof-server', TEST_DIR)).toBe('http://localhost:6300');
+  });
+});
+
 describe('getValidConfigKeys', () => {
   it('includes network', () => {
     expect(getValidConfigKeys()).toContain('network');
+  });
+
+  it('includes wallet key', () => {
+    expect(getValidConfigKeys()).toContain('wallet');
   });
 
   it('includes endpoint keys', () => {

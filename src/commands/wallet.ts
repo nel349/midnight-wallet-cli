@@ -19,7 +19,7 @@ import {
   getActiveWalletName,
   type WalletConfig,
 } from '../lib/wallet-config.ts';
-import { WALLETS_DIR_NAME, MIDNIGHT_DIR, DIR_MODE } from '../lib/constants.ts';
+import { WALLETS_DIR_NAME, MIDNIGHT_DIR, DIR_MODE, isValidWalletName } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, yellow, dim, green, teal } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
@@ -57,9 +57,9 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
     );
   }
 
-  if (/[\/\\]/.test(name) || name.endsWith('.json')) {
+  if (!isValidWalletName(name)) {
     throw new Error(
-      `Invalid wallet name: "${name}"\nWallet name must be a simple name (no path separators or .json extension).`
+      `Invalid wallet name: "${name}"\nWallet name must be a simple name (no path separators, .json suffix, or special characters).`
     );
   }
 
