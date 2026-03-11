@@ -47,6 +47,10 @@ export interface RpcHandlerContext {
   notify: (method: string, params?: Record<string, unknown>) => void;
   /** ID of the connection that sent this request (e.g. "conn_1") */
   connectionId: string;
+  /** JSON-RPC request ID */
+  requestId: number | string;
+  /** Handlers can stash arbitrary data here for onResponse to read */
+  metadata: Record<string, unknown>;
 }
 
 export type RpcHandler = (params: Record<string, unknown>, context: RpcHandlerContext) => Promise<unknown>;
@@ -120,7 +124,14 @@ export interface RpcServerOptions {
   /** Called on every incoming request for logging */
   onRequest?: (connection: RpcConnection, request: JsonRpcRequest) => void;
   /** Called after each request completes (success or failure) */
-  onResponse?: (connection: RpcConnection, request: JsonRpcRequest, durationMs: number, result?: unknown, error?: string) => void;
+  onResponse?: (
+    connection: RpcConnection,
+    request: JsonRpcRequest,
+    durationMs: number,
+    result?: unknown,
+    error?: { message: string; code?: string },
+    metadata?: Record<string, unknown>,
+  ) => void;
 }
 
 export interface RpcServer {
@@ -205,6 +216,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
     ws.on('message', async (raw: Buffer) => {
       let requestId: number | string | null = null;
       let request: JsonRpcRequest | undefined;
+      let context: RpcHandlerContext | undefined;
       const startTime = Date.now();
 
       try {
@@ -227,7 +239,12 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
           return;
         }
 
-        const context: RpcHandlerContext = { notify: connection.notify.bind(connection), connectionId: id };
+        context = {
+          notify: connection.notify.bind(connection),
+          connectionId: id,
+          requestId: request.id,
+          metadata: {},
+        };
         const result = await handler(request.params ?? {}, context);
         const durationMs = Date.now() - startTime;
 
@@ -243,7 +260,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
           result,
         };
         ws.send(JSON.stringify(response, jsonReplacer));
-        onResponse?.(connection, request, durationMs, result);
+        onResponse?.(connection, request, durationMs, result, undefined, context.metadata);
       } catch (err: unknown) {
         const durationMs = Date.now() - startTime;
         const rpcCode = (err as any)?.rpcCode ?? mapErrorToRpcCode(err);
@@ -258,7 +275,13 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
           error: { code: rpcCode, message, data },
         };
         ws.send(JSON.stringify(response, jsonReplacer));
-        if (request) onResponse?.(connection, request, durationMs, undefined, message);
+        if (request) {
+          const errorInfo = {
+            message,
+            code: isApiError(err) ? err.code : undefined,
+          };
+          onResponse?.(connection, request, durationMs, undefined, errorInfo, context?.metadata);
+        }
       }
     });
 

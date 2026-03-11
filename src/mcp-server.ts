@@ -64,6 +64,7 @@ const handlerLoaders: Record<string, () => Promise<{ default: CommandHandler }>>
   'airdrop':         () => import('./commands/airdrop.ts'),
   'transfer':        () => import('./commands/transfer.ts'),
   'dust':            () => import('./commands/dust.ts'),
+  'cache':           () => import('./commands/cache.ts'),
   'config':          () => import('./commands/config.ts'),
   'localnet':        () => import('./commands/localnet.ts'),
   'wallet':          () => import('./commands/wallet.ts'),
@@ -411,6 +412,44 @@ const TOOLS: ToolDef[] = [
         command: 'config',
         subcommand: 'set',
         positionals: [key, value],
+        flags: { json: true },
+      };
+      const handler = await importHandler('config');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_cache_clear',
+    description: 'Clear cached wallet sync state',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        network: { type: 'string', description: 'Only clear cache for this network', enum: ['preprod', 'preview', 'undeployed'] },
+        wallet: { type: 'string', description: 'Only clear cache for this wallet (name or path)' },
+      },
+    },
+    async handler(params) {
+      const args = buildArgs('cache', params, 'clear');
+      const handler = await importHandler('cache');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_config_unset',
+    description: 'Reset a persistent config value to its default',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Config key to reset' },
+      },
+      required: ['key'],
+    },
+    async handler(params) {
+      const key = params.key as string;
+      const args: ParsedArgs = {
+        command: 'config',
+        subcommand: 'unset',
+        positionals: [key],
         flags: { json: true },
       };
       const handler = await importHandler('config');

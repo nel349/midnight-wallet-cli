@@ -150,6 +150,29 @@ export function setConfigValue(key: string, value: string, configDir?: string): 
   saveCliConfig(config, configDir);
 }
 
+/**
+ * Unset (reset) a single config value.
+ * For 'network': resets to default ('undeployed').
+ * For optional keys: removes the key entirely.
+ */
+export function unsetConfigValue(key: string, configDir?: string): void {
+  const config = loadCliConfig(configDir);
+
+  if (key === 'network') {
+    config.network = DEFAULT_CLI_CONFIG.network;
+  } else if (key === 'wallet') {
+    delete config.wallet;
+  } else if (ENDPOINT_KEYS.has(key)) {
+    delete config[key as 'proof-server' | 'node' | 'indexer-ws'];
+  } else {
+    throw new Error(
+      `Unknown config key: "${key}"\nValid keys: ${VALID_CONFIG_KEYS.join(', ')}`
+    );
+  }
+
+  saveCliConfig(config, configDir);
+}
+
 export function getValidConfigKeys(): readonly string[] {
   return VALID_CONFIG_KEYS;
 }

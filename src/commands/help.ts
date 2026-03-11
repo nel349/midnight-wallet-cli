@@ -241,10 +241,11 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'config',
     description: 'Manage persistent config (default network, endpoints, etc.)',
-    usage: 'midnight config <get|set> <key> [value]',
+    usage: 'midnight config <get|set|unset> <key> [value]',
     flags: [
       'get <key>           Read a config value',
       'set <key> <value>   Write a config value',
+      'unset <key>         Reset a config value to its default',
       '',
       'Keys: network, wallet, proof-server, node, indexer-ws',
     ],
@@ -255,11 +256,33 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight config set proof-server http://localhost:6300',
       'midnight config set node wss://rpc.preprod.midnight.network',
       'midnight config set indexer-ws wss://indexer.preprod.midnight.network/api/v3/graphql/ws',
+      'midnight config unset proof-server',
     ],
     jsonFields: {
-      action: 'get or set',
+      action: 'get, set, or unset',
       key: 'Config key name',
       value: 'Config value',
+    },
+  },
+  {
+    name: 'cache',
+    description: 'Manage wallet state cache (clear cached sync data)',
+    usage: 'midnight cache clear [--network <name>] [--wallet <name|file>]',
+    flags: [
+      'clear               Clear cached wallet state',
+      '--network <name>    Only clear cache for this network',
+      '--wallet <name|file> Only clear cache for this wallet',
+    ],
+    examples: [
+      'midnight cache clear',
+      'midnight cache clear --network preprod',
+      'midnight cache clear --wallet alice',
+    ],
+    jsonFields: {
+      action: 'clear',
+      scope: 'all, network, or wallet',
+      network: 'Network name (when scoped)',
+      wallet: 'Wallet name (when scoped)',
     },
   },
   {
@@ -518,7 +541,7 @@ Setup — add to your MCP config:
 If not installed globally, use "command": "npx" with
 "args": ["-y", "midnight-wallet-cli@latest", "--mcp"] instead.
 
-AVAILABLE MCP TOOLS (22)
+AVAILABLE MCP TOOLS (24)
 ────────────────────────
 
   Tool Name                    Description                                          Required Params
@@ -539,6 +562,8 @@ AVAILABLE MCP TOOLS (22)
   midnight_dust_status         Check dust balance and registration                  —
   midnight_config_get          Read a config value                                  key
   midnight_config_set          Write a config value                                 key, value
+  midnight_config_unset        Reset a config value to default                      key
+  midnight_cache_clear         Clear cached wallet sync state                       —
   midnight_localnet_up         Start local network (Docker)                         —
   midnight_localnet_stop       Stop local network (preserves state)                 —
   midnight_localnet_down       Full teardown (removes volumes)                      —

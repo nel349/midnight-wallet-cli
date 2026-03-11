@@ -19,7 +19,9 @@
       "Bash(node --import tsx src/wallet.ts wallet generate '../evil' 2>&1; echo \"EXIT: $?\")",
       "Bash(node --import tsx src/wallet.ts wallet generate 'test.json' 2>&1; echo \"EXIT: $?\")",
       "mcp__midnight-wallet__midnight_config_set",
-      "mcp__midnight-wallet__midnight_config_get"
+      "mcp__midnight-wallet__midnight_config_get",
+      "Bash(npx tsx:*)",
+      "Read(//Users/norman/.midnight/cache/**)"
     ]
   },
   "enableAllProjectMcpServers": true,

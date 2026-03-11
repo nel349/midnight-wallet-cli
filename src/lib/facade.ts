@@ -282,6 +282,40 @@ export async function waitForLiteSyncedState(bundle: FacadeBundle): Promise<Faca
 }
 
 /**
+ * Wait for dust coins to actually be available (not just synced).
+ *
+ * `waitForLiteSyncedState` checks sync progress (`isStrictlyComplete`), but that
+ * resolves before `availableCoins` is populated. This helper waits until the dust
+ * wallet has at least one available coin, which is required for any write operation
+ * (balancing, transfers, swaps).
+ *
+ * On preprod: may take 10-30s after sync for dust coins to appear.
+ * Timeout falls back gracefully — the server still starts, but writes will fail
+ * until dust becomes available (the retry wrapper in dapp-connector handles that).
+ */
+export async function waitForDustAvailable(bundle: FacadeBundle, timeoutMs = 60_000): Promise<FacadeState> {
+  const hasDust = (s: FacadeState): boolean => {
+    try {
+      const dust = s.dust as any;
+      return dust?.availableCoins?.length > 0 || dust?.balance(new Date()) > 0n;
+    } catch { return false; }
+  };
+
+  try {
+    return await rx.firstValueFrom(
+      bundle.facade.state().pipe(
+        rx.filter(hasDust),
+        rx.timeout(timeoutMs),
+      )
+    );
+  } catch {
+    // Timeout — dust may not be available yet (fresh wallet, slow chain).
+    // Return latest state; caller should handle gracefully.
+    return await rx.firstValueFrom(bundle.facade.state());
+  }
+}
+
+/**
  * Quick sync for pre-send validation.
  * Shorter timeout — just catches stale UTXOs before building a transaction.
  */

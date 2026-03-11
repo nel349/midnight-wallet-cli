@@ -83,5 +83,16 @@ export function isValidWalletName(name: string): boolean {
   return true;
 }
 
+// Dust retry — facade calls that consume dust may fail transiently after
+// a rejection or sync hiccup. Retry with delay gives pending coins time
+// to be released back to available.
+export const DUST_RETRY_ATTEMPTS = 5;
+export const DUST_RETRY_DELAY_MS = 3_000;
+
+// Abandoned transaction timeout — if a DApp balances a tx but never submits
+// (or disconnects uncleanly), auto-revert after this timeout to release
+// pending dust coins. Shorter than the SDK's internal TX_TTL_MINUTES (10m).
+export const ABANDONED_TX_TIMEOUT_MS = 120_000; // 2 minutes
+
 // DApp Connector server port (99=midnight, 32=ws)
 export const DEFAULT_SERVE_PORT = 9932;

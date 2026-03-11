@@ -283,7 +283,7 @@ describe('ws-rpc', () => {
   describe('onResponse', () => {
     it('calls onResponse with result on success', async () => {
       const port = nextPort();
-      const responses: Array<{ method: string; result: unknown; error?: string }> = [];
+      const responses: Array<{ method: string; result: unknown; error?: { message: string; code?: string } }> = [];
       server = createRpcServer({
         port,
         handlers: {
@@ -308,7 +308,7 @@ describe('ws-rpc', () => {
 
     it('calls onResponse with error on failure', async () => {
       const port = nextPort();
-      const responses: Array<{ method: string; result?: unknown; error?: string }> = [];
+      const responses: Array<{ method: string; result?: unknown; error?: { message: string; code?: string } }> = [];
       server = createRpcServer({
         port,
         handlers: {
@@ -328,7 +328,7 @@ describe('ws-rpc', () => {
       expect(responses).toHaveLength(1);
       expect(responses[0].method).toBe('fail');
       expect(responses[0].result).toBeUndefined();
-      expect(responses[0].error).toBe('broken');
+      expect(responses[0].error).toEqual({ message: 'broken', code: undefined });
     });
 
     it('provides durationMs greater than or equal to zero', async () => {

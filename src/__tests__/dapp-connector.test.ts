@@ -33,7 +33,7 @@ import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
 
 /** Mock handler context with no-op notify */
-const ctx = (connectionId = 'conn_test'): RpcHandlerContext => ({ notify: vi.fn(), connectionId });
+const ctx = (connectionId = 'conn_test'): RpcHandlerContext => ({ notify: vi.fn(), connectionId, requestId: 1, metadata: {} });
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -648,6 +648,227 @@ describe('dapp-connector', () => {
         methodNames: ['getUnshieldedBalances', 'makeTransfer'],
       }, ctx());
       expect(result).toBeUndefined();
+    });
+  });
+
+  // ── Dust retry ──
+
+  describe('withDustRetry', () => {
+    it('retries on "No dust tokens" error and succeeds', async () => {
+      vi.useFakeTimers();
+      process.stderr.write = (() => true) as any;
+      let callCount = 0;
+      connector = createConnector({
+        approvalOptions: { approveAll: true },
+        bundleOverrides: {
+          balanceUnboundTransaction: () => {
+            callCount++;
+            if (callCount === 1) return Promise.reject(new Error('No dust tokens found in the wallet state'));
+            return Promise.resolve({ type: 'UNBOUND' });
+          },
+        },
+      });
+
+      const promise = connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx());
+      await vi.advanceTimersByTimeAsync(3_100);
+      const result = await promise as any;
+      expect(result.tx).toBeDefined();
+      expect(callCount).toBe(2);
+      vi.useRealTimers();
+    });
+
+    it('does not retry on non-dust errors', async () => {
+      process.stderr.write = (() => true) as any;
+      connector = createConnector({
+        approvalOptions: { approveAll: true },
+        bundleOverrides: {
+          balanceUnboundTransaction: () => Promise.reject(new Error('some other error')),
+        },
+      });
+
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()))
+        .rejects.toThrow('some other error');
+    });
+
+    it('fails after max retry attempts', { timeout: 20_000 }, async () => {
+      process.stderr.write = (() => true) as any;
+      let callCount = 0;
+      connector = createConnector({
+        approvalOptions: { approveAll: true },
+        bundleOverrides: {
+          balanceUnboundTransaction: () => {
+            callCount++;
+            return Promise.reject(new Error('No dust tokens found in the wallet state'));
+          },
+        },
+      });
+
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()))
+        .rejects.toThrow('No dust tokens');
+      expect(callCount).toBe(5); // DUST_RETRY_ATTEMPTS = 5
+    });
+  });
+
+  // ── Hex-based pending tx tracking ──
+
+  describe('pending tx tracking (hex-based)', () => {
+    it('untrackPendingTx works via hex key (not object identity)', async () => {
+      // balanceUnsealedTransaction tracks a tx, then submitTransaction untracks by hex.
+      // If untracking fails, revertPendingTxs would call revertTransaction.
+      const revertFn = vi.fn().mockResolvedValue(undefined);
+      process.stderr.write = (() => true) as any;
+
+      const bundle = createBundleStub({
+        finalizeRecipe: () => Promise.resolve({ type: 'FINALIZED_TX' }),
+        submitTransaction: () => Promise.resolve('hash-123'),
+      });
+      (bundle.facade as any).revertTransaction = revertFn;
+
+      connector = createDAppConnector({
+        bundle,
+        networkConfig: TEST_NETWORK_CONFIG,
+        approvalOptions: { approveAll: true },
+      });
+
+      const connId = 'conn_hex_test';
+
+      // Balance a tx — this tracks it
+      const balanceResult = await connector.handlers.balanceUnsealedTransaction(
+        { tx: 'aabb' }, ctx(connId),
+      ) as any;
+
+      // Submit using the hex from balance result — this untracks by hex
+      await connector.handlers.submitTransaction(
+        { tx: balanceResult.tx }, ctx(connId),
+      );
+
+      // revertPendingTxs should have nothing to revert
+      await connector.revertPendingTxs(connId);
+      expect(revertFn).not.toHaveBeenCalled();
+    });
+
+    it('revertPendingTxs reverts tracked txs on disconnect', async () => {
+      const revertFn = vi.fn().mockResolvedValue(undefined);
+      process.stderr.write = (() => true) as any;
+
+      const bundle = createBundleStub({
+        finalizeRecipe: () => Promise.resolve({ type: 'TRACKED_TX' }),
+      });
+      (bundle.facade as any).revertTransaction = revertFn;
+
+      connector = createDAppConnector({
+        bundle,
+        networkConfig: TEST_NETWORK_CONFIG,
+        approvalOptions: { approveAll: true },
+      });
+
+      const connId = 'conn_revert_test';
+      await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx(connId));
+
+      // Simulate disconnect — should revert
+      await connector.revertPendingTxs(connId);
+      expect(revertFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('submitTransaction rejection reverts and untracks', async () => {
+      const revertFn = vi.fn().mockResolvedValue(undefined);
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      process.stderr.write = (() => true) as any;
+
+      const bundle = createBundleStub({
+        finalizeRecipe: () => Promise.resolve({ type: 'REJECTED_TX' }),
+      });
+      (bundle.facade as any).revertTransaction = revertFn;
+
+      connector = createDAppConnector({
+        bundle,
+        networkConfig: TEST_NETWORK_CONFIG,
+        approvalOptions: {}, // No approveAll → rejection via non-TTY
+      });
+
+      const connId = 'conn_reject_test';
+
+      // Balance first (with auto-approve to get past approval)
+      const balanceConnector = createDAppConnector({
+        bundle,
+        networkConfig: TEST_NETWORK_CONFIG,
+        approvalOptions: { approveAll: true },
+      });
+      const balanceResult = await balanceConnector.handlers.balanceUnsealedTransaction(
+        { tx: 'aabb' }, ctx(connId),
+      ) as any;
+
+      // Submit on the non-approveAll connector → rejection
+      try {
+        await connector.handlers.submitTransaction({ tx: balanceResult.tx }, ctx(connId));
+      } catch (err: any) {
+        expect(err.code).toBe('Rejected');
+      }
+
+      // revertTransaction should have been called during rejection
+      expect(revertFn).toHaveBeenCalled();
+
+      Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+    });
+  });
+
+  // ── Abandon timer ──
+
+  describe('abandon timer', () => {
+    it('auto-reverts after timeout', async () => {
+      vi.useFakeTimers();
+      const revertFn = vi.fn().mockResolvedValue(undefined);
+      process.stderr.write = (() => true) as any;
+
+      const bundle = createBundleStub({
+        finalizeRecipe: () => Promise.resolve({ type: 'ABANDON_TX' }),
+      });
+      (bundle.facade as any).revertTransaction = revertFn;
+
+      connector = createDAppConnector({
+        bundle,
+        networkConfig: TEST_NETWORK_CONFIG,
+        approvalOptions: { approveAll: true },
+      });
+
+      const connId = 'conn_abandon';
+      await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx(connId));
+
+      // Advance past ABANDONED_TX_TIMEOUT_MS (120_000ms)
+      await vi.advanceTimersByTimeAsync(121_000);
+
+      expect(revertFn).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+
+    it('dispose clears abandon timers', async () => {
+      vi.useFakeTimers();
+      const revertFn = vi.fn().mockResolvedValue(undefined);
+      process.stderr.write = (() => true) as any;
+
+      const bundle = createBundleStub({
+        finalizeRecipe: () => Promise.resolve({ type: 'DISPOSE_TX' }),
+      });
+      (bundle.facade as any).revertTransaction = revertFn;
+
+      connector = createDAppConnector({
+        bundle,
+        networkConfig: TEST_NETWORK_CONFIG,
+        approvalOptions: { approveAll: true },
+      });
+
+      await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx('conn_dispose'));
+
+      // Dispose before timeout fires
+      connector.dispose();
+      connector = undefined;
+
+      await vi.advanceTimersByTimeAsync(121_000);
+      expect(revertFn).not.toHaveBeenCalled();
+
+      vi.useRealTimers();
     });
   });
 });

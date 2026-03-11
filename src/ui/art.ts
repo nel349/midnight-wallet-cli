@@ -65,6 +65,7 @@ export const COMMAND_BRIEFS: [name: string, brief: string][] = [
   ['transfer',        'Send NIGHT tokens'],
   ['dust',            'Manage dust (fee tokens)'],
   ['config',          'Manage CLI config'],
+  ['cache',           'Manage wallet cache'],
   ['localnet',        'Manage local network'],
   ['serve',           'DApp Connector server'],
   ['help',            'Show command usage'],
