@@ -705,7 +705,7 @@ describe('dapp-connector', () => {
 
       await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()))
         .rejects.toThrow('No dust tokens');
-      expect(callCount).toBe(5); // DUST_RETRY_ATTEMPTS = 5
+      expect(callCount).toBe(10); // DUST_RETRY_ATTEMPTS = 10
     });
   });
 
@@ -722,7 +722,7 @@ describe('dapp-connector', () => {
         finalizeRecipe: () => Promise.resolve({ type: 'FINALIZED_TX' }),
         submitTransaction: () => Promise.resolve('hash-123'),
       });
-      (bundle.facade as any).revertTransaction = revertFn;
+      (bundle.facade as any).revert = revertFn;
 
       connector = createDAppConnector({
         bundle,
@@ -754,7 +754,7 @@ describe('dapp-connector', () => {
       const bundle = createBundleStub({
         finalizeRecipe: () => Promise.resolve({ type: 'TRACKED_TX' }),
       });
-      (bundle.facade as any).revertTransaction = revertFn;
+      (bundle.facade as any).revert = revertFn;
 
       connector = createDAppConnector({
         bundle,
@@ -765,7 +765,8 @@ describe('dapp-connector', () => {
       const connId = 'conn_revert_test';
       await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx(connId));
 
-      // Simulate disconnect — should revert
+      // Simulate disconnect — reverts to release dust coins from pending.
+      // The dust-revert-patch ensures revert doesn't destroy the UTXO.
       await connector.revertPendingTxs(connId);
       expect(revertFn).toHaveBeenCalledTimes(1);
     });
@@ -773,40 +774,41 @@ describe('dapp-connector', () => {
     it('submitTransaction rejection reverts and untracks', async () => {
       const revertFn = vi.fn().mockResolvedValue(undefined);
       const origIsTTY = process.stdin.isTTY;
-      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
       process.stderr.write = (() => true) as any;
 
       const bundle = createBundleStub({
         finalizeRecipe: () => Promise.resolve({ type: 'REJECTED_TX' }),
       });
-      (bundle.facade as any).revertTransaction = revertFn;
+      (bundle.facade as any).revert = revertFn;
 
+      // Use a single connector — approvalOptions is a mutable object reference.
+      // Balance with approveAll, then remove it so submit rejects via non-TTY.
+      const opts: Record<string, any> = { approveAll: true };
       connector = createDAppConnector({
         bundle,
         networkConfig: TEST_NETWORK_CONFIG,
-        approvalOptions: {}, // No approveAll → rejection via non-TTY
+        approvalOptions: opts,
       });
 
       const connId = 'conn_reject_test';
 
-      // Balance first (with auto-approve to get past approval)
-      const balanceConnector = createDAppConnector({
-        bundle,
-        networkConfig: TEST_NETWORK_CONFIG,
-        approvalOptions: { approveAll: true },
-      });
-      const balanceResult = await balanceConnector.handlers.balanceUnsealedTransaction(
+      // Balance first (auto-approved via approveAll) — tracks the tx internally
+      const balanceResult = await connector.handlers.balanceUnsealedTransaction(
         { tx: 'aabb' }, ctx(connId),
       ) as any;
 
-      // Submit on the non-approveAll connector → rejection
+      // Switch: remove approveAll + non-TTY → submit will be rejected
+      delete opts.approveAll;
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+
+      // Submit on the SAME connector → rejection → reverts via patched revert
+      // (dust-revert-patch makes revert safe — no UTXO destruction)
       try {
         await connector.handlers.submitTransaction({ tx: balanceResult.tx }, ctx(connId));
       } catch (err: any) {
         expect(err.code).toBe('Rejected');
       }
 
-      // revertTransaction should have been called during rejection
       expect(revertFn).toHaveBeenCalled();
 
       Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
@@ -824,7 +826,7 @@ describe('dapp-connector', () => {
       const bundle = createBundleStub({
         finalizeRecipe: () => Promise.resolve({ type: 'ABANDON_TX' }),
       });
-      (bundle.facade as any).revertTransaction = revertFn;
+      (bundle.facade as any).revert = revertFn;
 
       connector = createDAppConnector({
         bundle,
@@ -838,6 +840,7 @@ describe('dapp-connector', () => {
       // Advance past ABANDONED_TX_TIMEOUT_MS (120_000ms)
       await vi.advanceTimersByTimeAsync(121_000);
 
+      // Timer fires and calls revert (safe via dust-revert-patch)
       expect(revertFn).toHaveBeenCalledTimes(1);
 
       vi.useRealTimers();
@@ -851,7 +854,7 @@ describe('dapp-connector', () => {
       const bundle = createBundleStub({
         finalizeRecipe: () => Promise.resolve({ type: 'DISPOSE_TX' }),
       });
-      (bundle.facade as any).revertTransaction = revertFn;
+      (bundle.facade as any).revert = revertFn;
 
       connector = createDAppConnector({
         bundle,

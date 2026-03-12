@@ -16,6 +16,9 @@ import { createPhaseTracker, type PhaseTracker } from './phase-tracker.ts';
 import { serializeTx, deserializeUnsealed, deserializeSealed, fromHex } from './tx-serde.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
+// Apply SDK workaround: patches CoreWallet.revertTransaction to not destroy dust UTXOs.
+// Must be imported before any facade.revert() call.
+import './dust-revert-patch.ts';
 
 // ── Helpers ──
 
@@ -54,6 +57,8 @@ export interface DAppConnector {
   handlers: Record<string, RpcHandler>;
   /** Revert all pending (unsubmitted) transactions for a connection, releasing locked coins. */
   revertPendingTxs(connectionId: string): Promise<void>;
+  /** True if any connection has a balanced-but-not-submitted transaction. */
+  hasPendingTxs(): boolean;
   dispose(): void;
 }
 
@@ -88,27 +93,27 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
 
   const secrets = { shieldedSecretKeys: zswapSecretKeys, dustSecretKey };
 
-  // Track finalized transactions per connection that haven't been submitted yet.
-  // Keyed by serialized tx hex (not object reference) so untracking works after deserialization.
-  // Each entry holds the deserialized tx (for revert) and an abandon timer.
-  const pendingTxsByConnection = new Map<string, Map<string, { tx: any; timer: ReturnType<typeof setTimeout> }>>();
+  // Track pending transactions per connection that haven't been submitted yet.
+  // Keyed by serialized tx hex so untracking works after deserialization.
+  // On rejection/disconnect/abandon, we call facade.revert(recipe) to release
+  // dust coins from pendingDustTokens. The dust-revert-patch ensures this does
+  // NOT destroy the UTXO (the SDK's default processTtls behavior).
+  const pendingTxsByConnection = new Map<string, Map<string, { recipe: any; timer: ReturnType<typeof setTimeout> }>>();
 
-  function trackPendingTx(connectionId: string, txHex: string, finalizedTx: any): void {
+  function trackPendingTx(connectionId: string, txHex: string, recipe: any): void {
     let txMap = pendingTxsByConnection.get(connectionId);
     if (!txMap) {
       txMap = new Map();
       pendingTxsByConnection.set(connectionId, txMap);
     }
-    // Start abandon timer — auto-revert if DApp never submits
+    // Start abandon timer — auto-revert if DApp never submits.
     const timer = setTimeout(async () => {
-      const entry = txMap!.get(txHex);
-      if (!entry) return;
       txMap!.delete(txHex);
       if (txMap!.size === 0) pendingTxsByConnection.delete(connectionId);
+      try { await facade.revert(recipe); } catch { /* best-effort */ }
       process.stderr.write(dim(`  abandoned tx reverted (${connectionId})`) + '\n');
-      try { await facade.revertTransaction(entry.tx); } catch { /* best-effort */ }
     }, ABANDONED_TX_TIMEOUT_MS);
-    txMap.set(txHex, { tx: finalizedTx, timer });
+    txMap.set(txHex, { recipe, timer });
   }
 
   function untrackPendingTx(connectionId: string, txHex: string): void {
@@ -122,15 +127,16 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     if (txMap.size === 0) pendingTxsByConnection.delete(connectionId);
   }
 
-  /** Revert all pending (unsubmitted) transactions for a connection. */
+  /** Revert and clean up all pending transactions for a connection (disconnect). */
   async function revertPendingTxs(connectionId: string): Promise<void> {
     const txMap = pendingTxsByConnection.get(connectionId);
     if (!txMap || txMap.size === 0) return;
     pendingTxsByConnection.delete(connectionId);
     for (const [, entry] of txMap) {
       clearTimeout(entry.timer);
-      try { await facade.revertTransaction(entry.tx); } catch { /* best-effort */ }
+      try { await facade.revert(entry.recipe); } catch { /* best-effort */ }
     }
+    process.stderr.write(dim(`  reverted ${txMap.size} pending tx(s) on disconnect`) + '\n');
   }
 
   function createTtl(): Date {
@@ -271,7 +277,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         const msg = String(err?.message ?? err ?? '');
         const isDustError = /no dust tokens/i.test(msg) || /dust.*unavailable/i.test(msg);
         if (!isDustError || attempt === DUST_RETRY_ATTEMPTS) throw err;
-        process.stderr.write(dim(`  dust unavailable, waiting for recovery (${attempt}/${DUST_RETRY_ATTEMPTS})...`) + '\n');
+        process.stderr.write(dim(`  dust unavailable, waiting for recovery (${attempt}/${DUST_RETRY_ATTEMPTS})... [${msg.slice(0, 60)}]`) + '\n');
         // Wait for dust to actually appear in state, not just a blind delay
         const recovered = await waitForDust(DUST_RETRY_DELAY_MS);
         if (!recovered && attempt < DUST_RETRY_ATTEMPTS) {
@@ -406,7 +412,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         payFees,
       }));
       const { hex, finalized } = await processRecipe(recipe, tracker);
-      trackPendingTx(context.connectionId, hex, finalized);
+      trackPendingTx(context.connectionId, hex, recipe);
       context.metadata.phases = tracker.getTimings();
       return { tx: hex };
     },
@@ -417,8 +423,6 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         throw createApiError('InvalidRequest', 'tx is required');
       }
 
-      // Deserialize early so we can revert on rejection
-      const sealedTx = deserializeSealed(txHex);
       const tracker = makeTracker('submitTransaction', context);
 
       // Submit is the irreversible action — always prompt
@@ -428,14 +432,19 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
           { label: 'Tx size', value: formatBytes(txHex.length / 2) },
         ], context);
       } catch (err) {
-        // Rejection — revert the transaction to release pending coins (dust).
-        // Without this, dust consumed during balancing stays "pending" in the
-        // facade's internal state and is unavailable for future transactions.
-        try { await facade.revertTransaction(sealedTx); } catch { /* best-effort */ }
+        // Rejection — revert to release dust coins from pending.
+        // The dust-revert-patch ensures this does NOT destroy the UTXO.
+        const txMap = pendingTxsByConnection.get(context.connectionId);
+        const entry = txMap?.get(txHex);
+        if (entry) {
+          try { await facade.revert(entry.recipe); } catch { /* best-effort */ }
+        }
         untrackPendingTx(context.connectionId, txHex);
         throw err;
       }
 
+      // Deserialize for submission (the chain doesn't need object identity)
+      const sealedTx = deserializeSealed(txHex);
       tracker.start('submitting');
       const txHash = await facade.submitTransaction(sealedTx);
       tracker.complete();
@@ -465,7 +474,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         ttl: createTtl(),
       }));
       const { hex, finalized } = await processRecipe(recipe, tracker);
-      trackPendingTx(context.connectionId, hex, finalized);
+      trackPendingTx(context.connectionId, hex, recipe);
       context.metadata.phases = tracker.getTimings();
       return { tx: hex };
     },
@@ -489,7 +498,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         ttl: createTtl(),
       }));
       const { hex, finalized } = await processRecipe(recipe, tracker);
-      trackPendingTx(context.connectionId, hex, finalized);
+      trackPendingTx(context.connectionId, hex, recipe);
       context.metadata.phases = tracker.getTimings();
       return { tx: hex };
     },
@@ -526,7 +535,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         payFees: intentOptions.payFees ?? true,
       }));
       const { hex, finalized } = await processRecipe(recipe, tracker);
-      trackPendingTx(context.connectionId, hex, finalized);
+      trackPendingTx(context.connectionId, hex, recipe);
       context.metadata.phases = tracker.getTimings();
       return { tx: hex };
     },
@@ -604,5 +613,12 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     pendingTxsByConnection.clear();
   }
 
-  return { handlers, revertPendingTxs, dispose };
+  function hasPendingTxs(): boolean {
+    for (const [, txMap] of pendingTxsByConnection) {
+      if (txMap.size > 0) return true;
+    }
+    return false;
+  }
+
+  return { handlers, revertPendingTxs, hasPendingTxs, dispose };
 }

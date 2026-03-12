@@ -43,10 +43,6 @@ function textResponse(body: string, status = 200): Response {
 
 const MOCK_STATUS: Record<string, unknown> = {
   lastUpdated: '2026-03-12T05:00:00Z',
-  sdkVersions: {
-    stable: { name: 'midnight-sdk-1.0-stable', version: '1.0.0' },
-    experimental: { name: 'midnight-sdk-1.1-experimental', version: '1.1.0-rc.1' },
-  },
   networks: {
     preprod: {
       indexer: { status: 'up', latencyMs: 120, lastChecked: '2026-03-12T05:00:00Z' },
@@ -157,7 +153,7 @@ describe('status command', () => {
     expect(stderr.output).toContain('preprod');
     expect(stderr.output).toContain('Canary:');
     expect(stderr.output).toContain('Live: just now');
-    expect(stderr.output).toContain('SDK Versions');
+    expect(stderr.output).toContain('Dashboard');
   });
 
   it('shows known issues filtered by network', async () => {
@@ -166,14 +162,6 @@ describe('status command', () => {
 
     expect(stderr.output).toContain('aws-waf-vpn');
     expect(stderr.output).toContain('WAF blocks VPN');
-  });
-
-  it('renders SDK versions', async () => {
-    setupMockFetch();
-    await runStatus({ network: 'preprod' });
-
-    expect(stderr.output).toContain('1.0.0');
-    expect(stderr.output).toContain('1.1.0-rc.1');
   });
 
   it('renders dashboard link', async () => {

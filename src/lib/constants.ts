@@ -86,7 +86,7 @@ export function isValidWalletName(name: string): boolean {
 // Dust retry — facade calls that consume dust may fail transiently after
 // a rejection or sync hiccup. Retry with delay gives pending coins time
 // to be released back to available.
-export const DUST_RETRY_ATTEMPTS = 5;
+export const DUST_RETRY_ATTEMPTS = 10;
 export const DUST_RETRY_DELAY_MS = 3_000;
 
 // Abandoned transaction timeout — if a DApp balances a tx but never submits

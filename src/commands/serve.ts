@@ -234,8 +234,10 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     // ── Shutdown ──
 
     process.stderr.write('\n' + dim('  Shutting down...') + '\n');
-    // Save cache on graceful shutdown (captures latest state)
-    if (!noCache) {
+    // Save cache on graceful shutdown — but NOT if transactions are pending.
+    // The SDK drops pendingDustTokens on serialization, so saving while coins
+    // are locked in pending would persist a corrupted state (dust=0).
+    if (!noCache && !connector.hasPendingTxs()) {
       try { await saveWalletCache(config.address, networkName, bundle.facade); } catch { /* best-effort */ }
     }
     try { await server.close(); } catch { /* best-effort */ }

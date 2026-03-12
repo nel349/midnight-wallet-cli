@@ -8,7 +8,7 @@
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { DASHBOARD_BASE_URL } from '../lib/constants.ts';
 import { getNetworkConfig, isValidNetworkName, type NetworkName } from '../lib/network.ts';
-import { header, keyValue, divider } from '../ui/format.ts';
+import { header, divider } from '../ui/format.ts';
 import { bold, dim, teal, green, red, gray } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
@@ -29,10 +29,6 @@ interface ProbeResult {
 
 interface StatusJson {
   lastUpdated: string | null;
-  sdkVersions: {
-    stable: { name: string; version: string };
-    experimental: { name: string; version: string };
-  };
   networks: Record<string, Record<string, ProbeResult>>;
 }
 
@@ -339,12 +335,6 @@ function renderIssues(issues: Issue[], networkFilter?: string): void {
   }
 }
 
-function renderSdkVersions(sdkVersions: StatusJson['sdkVersions']): void {
-  process.stderr.write('\n' + header('SDK Versions') + '\n\n');
-  process.stderr.write(keyValue('Stable', `${sdkVersions.stable.name} ${bold(sdkVersions.stable.version)}`) + '\n');
-  process.stderr.write(keyValue('Experimental', `${sdkVersions.experimental.name} ${bold(sdkVersions.experimental.version)}`) + '\n');
-}
-
 // ── Command ──
 
 export default async function statusCommand(args: ParsedArgs): Promise<void> {
@@ -400,7 +390,6 @@ export default async function statusCommand(args: ParsedArgs): Promise<void> {
   if (jsonMode) {
     const result: Record<string, unknown> = {
       lastUpdated: status?.lastUpdated ?? null,
-      sdkVersions: status?.sdkVersions ?? null,
       dashboard: DASHBOARD_BASE_URL,
       canaryAvailable: status !== null,
       networks: {} as Record<string, unknown>,
@@ -470,11 +459,6 @@ export default async function statusCommand(args: ParsedArgs): Promise<void> {
     if (issues) {
       const networkFilter = showAll ? undefined : targetNetworks[0];
       renderIssues(issues.issues, networkFilter);
-    }
-
-    // SDK versions
-    if (status) {
-      renderSdkVersions(status.sdkVersions);
     }
 
     // Dashboard link

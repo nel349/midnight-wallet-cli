@@ -356,7 +356,6 @@ const COMMAND_SPECS: CommandSpec[] = [
     ],
     jsonFields: {
       lastUpdated: 'ISO 8601 timestamp of last canary run',
-      sdkVersions: 'Stable and experimental SDK version info',
       dashboard: 'Dashboard URL',
       networks: 'Per-network service health (overall + services)',
       issues: 'Known issues filtered by network',
