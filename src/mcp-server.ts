@@ -68,6 +68,7 @@ const handlerLoaders: Record<string, () => Promise<{ default: CommandHandler }>>
   'config':          () => import('./commands/config.ts'),
   'localnet':        () => import('./commands/localnet.ts'),
   'wallet':          () => import('./commands/wallet.ts'),
+  'status':          () => import('./commands/status.ts'),
 };
 
 async function importHandler(name: string) {
@@ -543,6 +544,23 @@ const TOOLS: ToolDef[] = [
         flags: { json: true },
       };
       const handler = await importHandler('localnet');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_status',
+    description: 'Show Midnight network health — runs live probes and overlays canary monitoring data',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        network: { type: 'string', description: 'Network to check: preprod, preview, undeployed', enum: ['preprod', 'preview', 'undeployed'] },
+        all: { type: 'string', description: 'Set to "true" to show all networks' },
+      },
+    },
+    async handler(params) {
+      const args = buildArgs('status', params);
+      if (params.all === 'true' || params.all === true) args.flags.all = true;
+      const handler = await importHandler('status');
       return captureCommand(handler, args);
     },
   },

@@ -116,6 +116,10 @@ async function run(): Promise<void> {
       const { default: handler } = await import('./commands/localnet.ts');
       return handler(args);
     }
+    case 'status': {
+      const { default: handler } = await import('./commands/status.ts');
+      return handler(args);
+    }
     case 'serve': {
       const { default: handler } = await import('./commands/serve.ts');
       return handler(args, signal);

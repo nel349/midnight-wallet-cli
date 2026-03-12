@@ -68,6 +68,7 @@ export const COMMAND_BRIEFS: [name: string, brief: string][] = [
   ['cache',           'Manage wallet cache'],
   ['localnet',        'Manage local network'],
   ['serve',           'DApp Connector server'],
+  ['status',          'Network health status'],
   ['help',            'Show command usage'],
 ];
 

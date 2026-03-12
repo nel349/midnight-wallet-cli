@@ -4,40 +4,47 @@ Full plan: `tasks/status-and-doctor-plan.md`
 
 ---
 
-## Step 1: Canary Tier 1+2 — Infrastructure Probes
+## Step 1: Canary Tier 1+2 — Infrastructure Probes ✅
 
-- [ ] Set up canary script in dashboard repo
-- [ ] Probe 1.1: Indexer HTTP — POST GraphQL query, check for `data` field
-- [ ] Probe 1.2: RPC node — HTTP POST `system_health` JSON-RPC call
-- [ ] Probe 1.3: Faucet — GET, check HTTP 200 (liveness only)
-- [ ] Probe 1.4: Explorer — GET, check 200 + non-empty body
-- [ ] Probe 2.1: Chain liveness — `{ block { height } }`, compare to previous run
-- [ ] Probe 2.2: Dust generation — `dustGenerationStatus` for master wallet stake addresses
-- [ ] Generate `public/status.json` from probe results
-- [ ] Persist `canary-state.json` locally (block heights, timestamps)
-- [ ] Multi-network support (preprod, preview, mainnet when ready)
-- [ ] Run networks in parallel
-- [ ] Auto-purge `canary-history/` files older than 30 days
-- [ ] Add Vercel rewrites for `/api/status`, `/api/compatibility`, `/api/issues`
-- [ ] Set up Claude Code hourly cron
+- [x] Set up canary script in dashboard repo (`dashboard/canary/run.ts`)
+- [x] Probe 1.1: Indexer HTTP — POST GraphQL query, check for `data` field
+- [x] Probe 1.2: RPC node — HTTP POST `system_health` JSON-RPC call
+- [x] Probe 1.3: Faucet — GET, check HTTP 200 (liveness only)
+- [x] Probe 1.4: Explorer — GET, check 200 + non-empty body
+- [x] Probe 2.1: Chain liveness — `{ block { height } }`, compare to previous run
+- [x] Probe 2.2: Dust generation — `dustGenerationStatus` (env-var driven, graceful when not configured)
+- [x] Generate `public/status.json` from probe results
+- [x] Persist `canary-state.json` locally (block heights, timestamps)
+- [x] Multi-network support (preprod + preview, mainnet placeholder)
+- [x] Run networks in parallel (`Promise.all`)
+- [x] Auto-purge `canary-history/` files older than 30 days
+- [x] Add Vercel rewrites for `/api/status`, `/api/compatibility`, `/api/issues`
+- [x] Set up GitHub Actions hourly cron (`.github/workflows/canary.yml`)
+- [x] HTTP 403 WAF handling (reports DEGRADED instead of DOWN)
+- [x] Typecheck script (`npm run typecheck`) covering both `src/` and `canary/`
 
-## Step 2: `mn status` command
+## Step 2: `mn status` command ✅
 
-- [ ] Add `status` to CLI dispatcher (`wallet.ts`)
-- [ ] Fetch `status.json` from dashboard URL (hardcoded constant)
-- [ ] Fetch `issues.json` from dashboard URL
-- [ ] Render infrastructure health table (UP/DOWN/DEGRADED with latency + last-checked)
-- [ ] Render known issues filtered by network
-- [ ] Render SDK versions (stable + experimental)
-- [ ] Render dashboard link
-- [ ] `--network` flag (default: wallet's network or `preprod`)
-- [ ] `--all` flag (all networks side by side)
-- [ ] `--json` flag
-- [ ] `--watch` flag (re-fetch every 30s + live latency probes)
-- [ ] Handle missing services gracefully ("not yet checked")
-- [ ] Exit codes: 0 (all UP), 1 (DEGRADED), 2 (DOWN), 3 (dashboard unreachable)
-- [ ] Add to help command
-- [ ] Tests
+- [x] Add `status` to CLI dispatcher (`wallet.ts`)
+- [x] Fetch `status.json` from dashboard URL (`DASHBOARD_BASE_URL` constant)
+- [x] Fetch `issues.json` from dashboard URL
+- [x] Local Tier 1 probes (indexer, RPC, faucet, explorer) — real-time from user's network
+- [x] Canary data overlay — shows hourly monitoring alongside live probes
+- [x] Render infrastructure health table (UP/DOWN/DEGRADED with latency + last-checked)
+- [x] Render known issues filtered by network
+- [x] Render SDK versions (stable + experimental)
+- [x] Render dashboard link
+- [x] `--network` flag (default: wallet's network or `preprod`)
+- [x] `--all` flag (all networks side by side)
+- [x] `--json` flag
+- [x] `--watch` flag (re-fetch + re-probe every 30s)
+- [x] Handle missing services gracefully (canary-only services show age, unconfigured show `—`)
+- [x] Exit codes: 0 (all UP), 1 (DEGRADED), 2 (DOWN), 3 (dashboard unreachable)
+- [x] Add to help command
+- [x] Add to COMMAND_BRIEFS in art.ts
+- [x] Proper response types (IndexerBlockResponse, SystemHealthResponse)
+- [x] Tests (12 tests — health table, issues, SDK versions, --all, --json, exit codes, probe failures, defaults)
+- [x] Add to MCP server (`midnight_status` tool with network/all params)
 
 ## Step 3: Canary Wallet Setup
 

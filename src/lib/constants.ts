@@ -96,3 +96,6 @@ export const ABANDONED_TX_TIMEOUT_MS = 120_000; // 2 minutes
 
 // DApp Connector server port (99=midnight, 32=ws)
 export const DEFAULT_SERVE_PORT = 9932;
+
+// Dashboard URL — serves canary-verified status.json, compatibility.json, issues.json
+export const DASHBOARD_BASE_URL = 'https://midnight-comp-tracker.vercel.app';
