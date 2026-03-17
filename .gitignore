@@ -9,3 +9,6 @@ demo/videos/
 recipient_wallet.json
 .mcp.json
 demo/audio/
+private/
+wallet-alice.json
+~/.midnight/
