@@ -3,7 +3,8 @@
 
 import * as ledger from '@midnight-ntwrk/ledger-v7';
 
-import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
@@ -47,6 +48,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   });
 
   const noCache = hasFlag(args, 'no-cache');
+  if (isVerbose(args)) enableVerbose();
 
   // Load cached wallet state (unless --no-cache)
   const cache = noCache ? null : loadWalletCache(config.address, networkName);
@@ -111,6 +113,9 @@ async function dustRegister(
           const pct = Math.min(Math.round((applied / highest) * 100), 100);
           spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
         }
+      },
+      onSyncDetail: (detail) => {
+        spinner.update(`Syncing wallet... (waiting on: ${detail})`);
       },
     });
 
@@ -192,6 +197,9 @@ async function dustStatus(
           const pct = Math.min(Math.round((applied / highest) * 100), 100);
           spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
         }
+      },
+      onSyncDetail: (detail) => {
+        spinner.update(`Syncing wallet... (waiting on: ${detail})`);
       },
     });
 

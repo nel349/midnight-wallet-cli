@@ -21,7 +21,9 @@
       "mcp__midnight-wallet__midnight_config_set",
       "mcp__midnight-wallet__midnight_config_get",
       "Bash(npx tsx:*)",
-      "Read(//Users/norman/.midnight/cache/**)"
+      "Read(//Users/norman/.midnight/cache/**)",
+      "Bash(mn dust:*)",
+      "Bash(mn wallet:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

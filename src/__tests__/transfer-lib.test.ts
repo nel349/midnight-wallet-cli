@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { nightToMicro, parseAmount, validateRecipientAddress } from '../lib/transfer.ts';
+import { nightToMicro, parseAmount, validateRecipientAddress, isDustRelatedError } from '../lib/transfer.ts';
 import { getNetworkConfig } from '../lib/network.ts';
 import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
-import { GENESIS_SEED } from '../lib/constants.ts';
+import { GENESIS_SEED, SYNC_ATTEMPT_TIMEOUT_MS, SYNC_ATTEMPT_REMOTE_TIMEOUT_MS } from '../lib/constants.ts';
 
 describe('nightToMicro', () => {
   it('converts whole NIGHT to micro-NIGHT', () => {
@@ -106,5 +106,57 @@ describe('validateRecipientAddress', () => {
   it('rejects an empty string', () => {
     const config = getNetworkConfig('undeployed');
     expect(() => validateRecipientAddress('', config)).toThrow('Invalid recipient address');
+  });
+});
+
+describe('isDustRelatedError', () => {
+  it('matches "not enough dust" errors', () => {
+    expect(isDustRelatedError(new Error('Not enough dust to pay fees'))).toBe(true);
+  });
+
+  it('matches "dust generated" errors', () => {
+    expect(isDustRelatedError(new Error('dust generated capacity insufficient'))).toBe(true);
+  });
+
+  it('matches "insufficient funds" errors', () => {
+    expect(isDustRelatedError(new Error('Insufficient funds: dust wallet sync timed out'))).toBe(true);
+  });
+
+  it('matches "no dust tokens" errors', () => {
+    expect(isDustRelatedError(new Error('No dust tokens found in the wallet state'))).toBe(true);
+  });
+
+  it('matches transaction submission errors', () => {
+    expect(isDustRelatedError(new Error('Transaction submission error'))).toBe(true);
+  });
+
+  it('matches errors with _tag TransactionInvalidError', () => {
+    const err = new Error('fail');
+    (err as any)._tag = 'TransactionInvalidError';
+    expect(isDustRelatedError(err)).toBe(true);
+  });
+
+  it('does not match unrelated errors', () => {
+    expect(isDustRelatedError(new Error('Network timeout'))).toBe(false);
+    expect(isDustRelatedError(new Error('Invalid address format'))).toBe(false);
+  });
+
+  it('handles null/undefined errors', () => {
+    expect(isDustRelatedError(null)).toBe(false);
+    expect(isDustRelatedError(undefined)).toBe(false);
+  });
+});
+
+describe('sync timeout constants', () => {
+  it('remote timeout is longer than local timeout', () => {
+    expect(SYNC_ATTEMPT_REMOTE_TIMEOUT_MS).toBeGreaterThan(SYNC_ATTEMPT_TIMEOUT_MS);
+  });
+
+  it('local timeout is 30 seconds', () => {
+    expect(SYNC_ATTEMPT_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it('remote timeout is 120 seconds', () => {
+    expect(SYNC_ATTEMPT_REMOTE_TIMEOUT_MS).toBe(120_000);
   });
 });

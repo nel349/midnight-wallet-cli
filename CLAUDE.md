@@ -105,10 +105,6 @@ A standalone git-style CLI wallet for the Midnight blockchain.
 - **Colors**: Raw ANSI escape codes — NO chalk, kleur, or similar
 - **Package manager**: npm
 
-## Reference Implementation
-
-Patterns extracted from `/Users/norman/Development/midnight/kuira-verification-test/scripts/`. Read those files for SDK patterns (WalletFacade, HD derivation, dust registration, GraphQL subscriptions). See `DESIGN.md` for architecture and command specs.
-
 ### Technical Context
 
 - Midnight libraries: `/Users/norman/Development/midnight/midnight-libraries`

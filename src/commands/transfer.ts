@@ -1,7 +1,8 @@
 // transfer command — send NIGHT from my wallet to another address
 // Usage: midnight transfer <to> <amount>
 
-import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
@@ -63,6 +64,7 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
   process.stderr.write('\n');
 
   const noCache = hasFlag(args, 'no-cache');
+  if (isVerbose(args)) enableVerbose();
   const spinner = startSpinner('Starting wallet...');
 
   try {
@@ -80,6 +82,9 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
           const pct = Math.min(Math.round((applied / highest) * 100), 100);
           spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
         }
+      },
+      onSyncDetail(detail) {
+        spinner.update(`Syncing wallet... (waiting on: ${detail})`);
       },
       onDust(status) {
         spinner.update(`Dust: ${status}`);
