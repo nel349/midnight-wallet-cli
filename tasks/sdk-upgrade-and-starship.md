@@ -26,42 +26,74 @@ Preview network works fine with wallet-sdk 2.0.0 + ledger-v7. Upgrade to ledger-
 ## Part 2: Starship DApp (separate repo)
 
 ### Phase 1: Scaffold
-- [ ] Create `midnight-starship/` repo with npm workspaces (contract, api, game-ui)
-- [ ] Add `.mcp.json` with midnight-mcp + midnight-wallet MCP servers
-- [ ] Add CLAUDE.md
+- [x] Create `midnight-starship/` repo with npm workspaces (contract, api, game-ui)
+- [x] Add `.mcp.json` with midnight-mcp + midnight-wallet MCP servers
+- [x] Add CLAUDE.md
+- [x] Add `.gitignore` (mirrors bboard — ignores `managed/`, `dist/`, `node_modules/`)
 
 ### Phase 2: Contract
-- [ ] Write `starship.compact` — leaderboard with Maps, selective disclosure
-- [ ] Write `witnesses.ts`
-- [ ] Compile with `compactc`, verify circuit keys generated
+- [x] Write `starship.compact` — leaderboard with Maps, playerHash, selective disclosure
+- [x] Write `witnesses.ts` with educational comments
+- [x] Compile with `compact compile`, verify circuit keys + zkir generated
+- [x] Contract `index.ts` — exports + `compiledStarshipContract` via `CompiledContract.make().pipe()`
 
 ### Phase 3: API Layer
-- [ ] `common-types.ts` — StarshipProviders, StarshipContract types
-- [ ] `StarshipAPI` — deploy, join, submitScore, getLeaderboard, proveElite
-- [ ] Observable derived state from public ledger
+- [x] `common-types.ts` — StarshipProviders, StarshipContract, LeaderboardEntry/State types, full JSDoc
+- [x] `StarshipAPI` — deploy, join, submitScore, proveElite, state$ observable
+- [x] Private constructor + static factory pattern (matches bboard)
+- [x] Extracted `deriveLeaderboardState` and `generatePrivateState` as named internal functions
+- [x] No `as any` casts — clean type flow from `compiledStarshipContract`
+- [x] Code review pass — demo-quality JSDoc, educational comments
 
 ### Phase 4: Provider Wiring
-- [ ] `wallet-connector.ts` — createWalletClient wrapper
-- [ ] `midnight-providers.ts` — 6 MidnightProviders from ConnectedAPI
-- [ ] Verify full flow: connect → deploy → call circuit → read state
+- [x] `wallet-connector.ts` — createWalletClient wrapper with toast notifications
+- [x] `midnight-providers.ts` — 6 MidnightProviders from ConnectedAPI (updated for midnight-js 3.2.0 API)
+- [x] Network mode support — `.env.undeployed`, `.env.preprod`, `.env.preview` + `setNetworkId()`
+- [x] Vite config — WASM, top-level-await, node polyfills, `crypto.timingSafeEqual` shim
+- [x] Contract deploy verified on preview network
 
 ### Phase 5: Game Engine
-- [ ] Adapt Galaga reference (https://github.com/jwilliams219/galaga) to TypeScript + Canvas
-- [ ] Player ship, projectiles, enemies, scoring, health
-- [ ] Game state machine (menu, playing, game over)
+- [x] Adapted Galaga reference to TypeScript + Canvas (320×240 virtual, 3x scale)
+- [x] Player ship, torpedos, 3 enemy types (bee/butterfly/boss), particles, collisions
+- [x] Game state machine (connect → deploying → menu → playing → gameover → submitting → proving → leaderboard)
+- [x] Wave spawning with stage progression
+- [x] Procedural sound effects — shoot, enemy hit, boss hurt/death, player death, diving, level start
+- [x] Theme music — looping 8-bit melody with bass, hi-hat, kick
+- [x] Deploying screen — blocks menu until contract is ready, shows status + loading bar
 
 ### Phase 6: UI Integration
-- [ ] Connect screen (wallet URL input, connect button)
-- [ ] HUD (score, health, wallet connection status)
-- [ ] Game over → "Submit Score?" → contract call
-- [ ] Leaderboard overlay (reads on-chain state)
-- [ ] "Prove Elite" button (selective disclosure demo)
+- [x] Connect screen (wallet connect via `mn serve`, ESC to skip)
+- [x] Deploying screen (status messages during contract deploy/join)
+- [x] HUD (score, lives, stage, wallet connection indicator)
+- [x] Game over → alias input → "Submit Score?" → contract call → submitting screen
+- [x] Alias input — player types callsign on game over (max 12 chars, blinking cursor)
+- [x] Leaderboard overlay (reads on-chain state via `state$`)
+- [x] "Prove Elite" — P key on leaderboard → threshold input prompt → proving screen → ZK proof → toast
+- [x] Proving screen — "Generating zero-knowledge proof..." with educational text about selective disclosure
 
 ### Phase 7: Polish
-- [ ] Error handling for wallet/contract interactions
-- [ ] Loading states during deployment, balancing, proving
+- [x] Error handling for wallet disconnection, contract failures
+- [x] Loading states during deployment (deploying screen)
+- [x] Loading states during score submission (submitting screen)
+- [x] Loading states during ZK proof (proving screen)
+- [x] Removed dead code (`resetScore`)
+- [x] Moved hardcoded provider values to `config.ts` constants
 - [ ] README with setup instructions
 - [ ] Educational disclaimer
+- [ ] Credit jwilliams219/galaga
+
+---
+
+## Remaining Work
+
+### Documentation
+- [ ] README with setup instructions (prerequisites, install, compile contract, run dev server, connect wallet)
+- [ ] Educational disclaimer (demo project, not production)
+- [ ] Credit jwilliams219/galaga for game reference
+
+### Nice-to-have
+- [ ] Visual indicator on leaderboard for players who proved elite status
+- [ ] Favicon for the game
 
 ---
 
@@ -72,3 +104,4 @@ Preview network works fine with wallet-sdk 2.0.0 + ledger-v7. Upgrade to ledger-
 - Preview network endpoints already configured in CLI (`src/lib/network.ts`)
 - Reference game: vanilla JS + Canvas, no framework
 - Contract + connector integration are the priority, game is the vehicle
+- Dependencies aligned to Preview versions: compact-runtime 0.14.0, midnight-js 3.2.0, ledger-v8 8.0.2, dapp-connector-api 4.0.1
