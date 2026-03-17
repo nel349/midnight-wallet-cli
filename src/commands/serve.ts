@@ -189,6 +189,10 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
         if (error) {
           const label = error.code === 'Rejected' ? 'rejected by operator' : error.message;
           process.stderr.write(`  ${red('✗')} ${dim(`${conn.id} ← ${req.method} (${duration})`)} ${red(label)}` + '\n');
+          // Always show the full error message for non-rejection failures
+          if (error.code !== 'Rejected' && error.message) {
+            process.stderr.write(`  ${dim('  error:')} ${error.message}` + '\n');
+          }
         } else {
           // Build timing breakdown from phase metadata
           const phases = metadata?.phases as PhaseTiming[] | undefined;

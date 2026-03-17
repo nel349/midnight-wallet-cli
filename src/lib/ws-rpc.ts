@@ -81,6 +81,34 @@ function isApiError(err: unknown): err is APIError {
   );
 }
 
+/** Walk an error's cause chain and extract structured data for the JSON-RPC error response. */
+function extractErrorData(err: unknown): Record<string, unknown> | undefined {
+  if (!(err instanceof Error) && !(typeof err === 'object' && err !== null && '_tag' in err)) {
+    return undefined;
+  }
+  const causes: string[] = [];
+  let current: unknown = (err as any).cause;
+  const seen = new Set<unknown>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const anyErr = current as any;
+    if (current instanceof Error || (typeof current === 'object' && anyErr._tag)) {
+      const tag = anyErr._tag;
+      const msg = anyErr.message ?? '';
+      causes.push(tag ? `[${tag}] ${msg}` : msg);
+      current = anyErr.cause;
+    } else if (typeof current === 'string') {
+      causes.push(current);
+      break;
+    } else {
+      try { causes.push(JSON.stringify(current)); } catch { causes.push(String(current)); }
+      break;
+    }
+  }
+  if (causes.length === 0) return undefined;
+  return { causes };
+}
+
 // ── BigInt-aware JSON serialization ──
 
 function jsonReplacer(_key: string, value: unknown): unknown {
@@ -178,7 +206,9 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
   const { port, handlers, onConnect, onDisconnect, onRequest, onResponse } = options;
   const connections = new Map<string, RpcConnection>();
 
-  const wss = new WebSocketServer({ port });
+  // Bind to loopback only — prevents remote machines on the network from connecting.
+  // Browser DApps on localhost can still connect via ws://localhost:<port>.
+  const wss = new WebSocketServer({ port, host: '127.0.0.1' });
 
   // Prevent unhandled server-level errors (e.g. port conflict) from crashing
   wss.on('error', (err: Error) => {
@@ -267,7 +297,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
         const message = err instanceof Error ? err.message : 'Internal error';
         const data = isApiError(err)
           ? { type: err.type, code: err.code }
-          : undefined;
+          : extractErrorData(err);
 
         const response: JsonRpcErrorResponse = {
           jsonrpc: '2.0',
