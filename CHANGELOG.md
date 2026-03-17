@@ -4,6 +4,12 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Instant dust recovery after transaction rejection** — Rejecting a `submitTransaction` in `mn serve` no longer breaks the dust wallet. Previously, the SDK's internal revert mechanism (`CoreWallet.applyFailed`) called `processTtls()` which destroyed the dust UTXO entirely, leaving the wallet unable to balance any further write operations until new dust was generated on-chain (2+ minutes on preprod, requiring a cache clear and restart in the worst case). We now snapshot the WASM `DustLocalState` before each dust spend and restore it on revert, giving the coin back instantly. Operators can reject and re-approve transactions as many times as needed without any interruption.
+- **Cache corruption on Ctrl+C** — Shutting down `mn serve` while a transaction was pending (balanced but not yet submitted) would serialize the dust wallet's corrupted state to the cache file, causing subsequent commands like `mn dust status` to report zero dust. The shutdown path now skips the cache save when transactions are still in-flight, preserving the last known-good cache.
+- **Abandoned transaction cleanup** — Pending transactions that are never submitted (DApp disconnects or goes silent) are now automatically reverted after 2 minutes, releasing locked dust coins back to available.
+
 ## [0.2.0] - 2026-03-11
 
 ### Added

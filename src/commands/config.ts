@@ -3,16 +3,16 @@
 // config set <key> <value> → success message on stderr
 
 import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
-import { getConfigValue, setConfigValue, getValidConfigKeys } from '../lib/cli-config.ts';
+import { getConfigValue, setConfigValue, unsetConfigValue, getValidConfigKeys } from '../lib/cli-config.ts';
 import { green } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function configCommand(args: ParsedArgs): Promise<void> {
   const action = args.subcommand;
 
-  if (!action || (action !== 'get' && action !== 'set')) {
+  if (!action || !['get', 'set', 'unset'].includes(action)) {
     throw new Error(
-      `Usage: midnight config <get|set> <key> [value]\n` +
+      `Usage: midnight config <get|set|unset> <key> [value]\n` +
       `Valid keys: ${getValidConfigKeys().join(', ')}`
     );
   }
@@ -32,6 +32,14 @@ export default async function configCommand(args: ParsedArgs): Promise<void> {
       return;
     }
     process.stdout.write(value + '\n');
+  } else if (action === 'unset') {
+    unsetConfigValue(key);
+    const displayValue = key === 'network' ? '(default)' : '(removed)';
+    if (hasFlag(args, 'json')) {
+      writeJsonResult({ action: 'unset', key, value: displayValue });
+      return;
+    }
+    process.stderr.write(green('✓') + ` ${key} ${displayValue}\n`);
   } else {
     const value = args.positionals[1];
     if (value === undefined) {

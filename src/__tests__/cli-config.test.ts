@@ -7,6 +7,7 @@ import {
   saveCliConfig,
   getConfigValue,
   setConfigValue,
+  unsetConfigValue,
   getValidConfigKeys,
 } from '../lib/cli-config.ts';
 
@@ -280,6 +281,61 @@ describe('wallet config key', () => {
     expect(getConfigValue('network', TEST_DIR)).toBe('preprod');
     expect(getConfigValue('wallet', TEST_DIR)).toBe('alice');
     expect(getConfigValue('proof-server', TEST_DIR)).toBe('http://localhost:6300');
+  });
+});
+
+describe('unsetConfigValue', () => {
+  it('resets network to default (undeployed)', () => {
+    setConfigValue('network', 'preprod', TEST_DIR);
+    unsetConfigValue('network', TEST_DIR);
+    expect(getConfigValue('network', TEST_DIR)).toBe('undeployed');
+  });
+
+  it('removes endpoint key (proof-server)', () => {
+    setConfigValue('proof-server', 'http://localhost:6300', TEST_DIR);
+    unsetConfigValue('proof-server', TEST_DIR);
+    expect(getConfigValue('proof-server', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('removes endpoint key (node)', () => {
+    setConfigValue('node', 'ws://localhost:9944', TEST_DIR);
+    unsetConfigValue('node', TEST_DIR);
+    expect(getConfigValue('node', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('removes endpoint key (indexer-ws)', () => {
+    setConfigValue('indexer-ws', 'wss://indexer.example.com/ws', TEST_DIR);
+    unsetConfigValue('indexer-ws', TEST_DIR);
+    expect(getConfigValue('indexer-ws', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('removes wallet key', () => {
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    unsetConfigValue('wallet', TEST_DIR);
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('throws for unknown key', () => {
+    expect(() => unsetConfigValue('unknown', TEST_DIR)).toThrow('Unknown config key');
+  });
+
+  it('round-trip: set → unset → get returns default/not-set', () => {
+    setConfigValue('network', 'preprod', TEST_DIR);
+    setConfigValue('proof-server', 'http://localhost:6300', TEST_DIR);
+    unsetConfigValue('network', TEST_DIR);
+    unsetConfigValue('proof-server', TEST_DIR);
+    expect(getConfigValue('network', TEST_DIR)).toBe('undeployed');
+    expect(getConfigValue('proof-server', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('does not corrupt other keys', () => {
+    setConfigValue('network', 'preprod', TEST_DIR);
+    setConfigValue('proof-server', 'http://localhost:6300', TEST_DIR);
+    setConfigValue('wallet', 'alice', TEST_DIR);
+    unsetConfigValue('proof-server', TEST_DIR);
+    expect(getConfigValue('network', TEST_DIR)).toBe('preprod');
+    expect(getConfigValue('wallet', TEST_DIR)).toBe('alice');
+    expect(getConfigValue('proof-server', TEST_DIR)).toBe('(not set)');
   });
 });
 

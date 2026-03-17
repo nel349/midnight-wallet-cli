@@ -96,6 +96,10 @@ async function run(): Promise<void> {
       const { default: handler } = await import('./commands/config.ts');
       return handler(args);
     }
+    case 'cache': {
+      const { default: handler } = await import('./commands/cache.ts');
+      return handler(args);
+    }
     case 'airdrop': {
       const { default: handler } = await import('./commands/airdrop.ts');
       return handler(args, signal);
@@ -110,6 +114,10 @@ async function run(): Promise<void> {
     }
     case 'localnet': {
       const { default: handler } = await import('./commands/localnet.ts');
+      return handler(args);
+    }
+    case 'status': {
+      const { default: handler } = await import('./commands/status.ts');
       return handler(args);
     }
     case 'serve': {

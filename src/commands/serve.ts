@@ -6,10 +6,11 @@ import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors } from '../lib/facade.ts';
+import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../lib/facade.ts';
 import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
-import { createDAppConnector } from '../lib/dapp-connector.ts';
+import { createDAppConnector, type DAppConnectorCallbacks } from '../lib/dapp-connector.ts';
+import type { PhaseTiming } from '../lib/phase-tracker.ts';
 import { createRpcServer, type RpcServer } from '../lib/ws-rpc.ts';
 import { DEFAULT_SERVE_PORT } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
@@ -99,6 +100,13 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     });
     spinner.stop('Wallet synced');
 
+    // Wait for dust coins to actually be available before accepting write requests.
+    // On preprod this can take 10-30s after sync completes.
+    const dustSpinner = startSpinner('Waiting for dust...');
+    const dustState = await waitForDustAvailable(bundle);
+    const hasDust = (dustState.dust as any)?.availableCoins?.length > 0;
+    dustSpinner.stop(hasDust ? 'Dust ready' : 'Dust not yet available (writes may fail)');
+
     // Save cache after successful sync
     if (!noCache) {
       try { await saveWalletCache(config.address, networkName, bundle.facade); } catch { /* best-effort */ }
@@ -108,10 +116,45 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
     // ── Create DApp Connector ──
 
+    // Phase labels for human-readable spinner messages
+    const PHASE_LABELS: Record<string, string> = {
+      approve: 'Waiting for approval...',
+      building: 'Building transaction...',
+      signing: 'Signing...',
+      proving: 'Proving (ZK)...',
+      submitting: 'Submitting...',
+    };
+
+    // Track per-connection spinners for write operations
+    let activeSpinner: ReturnType<typeof startSpinner> | undefined;
+
+    const phaseCallbacks: DAppConnectorCallbacks = {
+      onPhaseStart: (_connId, _method, phase) => {
+        // The 'approve' phase uses the interactive approval prompt — no spinner
+        if (phase === 'approve') return;
+        const label = PHASE_LABELS[phase] ?? `${phase}...`;
+        if (activeSpinner) {
+          activeSpinner.update(label);
+        } else {
+          activeSpinner = startSpinner(label);
+        }
+      },
+      onPhaseComplete: (_connId, _method, phase, durationMs) => {
+        // No spinner was started for approve — skip
+        if (phase === 'approve') return;
+        // Stop spinner after the final phase (proving or submitting)
+        if (phase === 'proving' || phase === 'submitting') {
+          activeSpinner?.stop(`${phase} ${formatDuration(durationMs)}`);
+          activeSpinner = undefined;
+        }
+      },
+    };
+
     connector = createDAppConnector({
       bundle,
       networkConfig,
       approvalOptions: { approveAll, autoApproveReads },
+      callbacks: phaseCallbacks,
     });
 
     // ── Start WebSocket server ──
@@ -124,16 +167,30 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       },
       onDisconnect: (conn) => {
         process.stderr.write(dim(`  [${timestamp()}] `) + red('disconnected') + dim(` ${conn.id}`) + '\n');
+        // Revert any unsubmitted transactions to release pending coins (dust)
+        connector?.revertPendingTxs(conn.id).catch(() => { /* best-effort */ });
       },
       onRequest: (conn, req) => {
         process.stderr.write(dim(`  [${timestamp()}] ${conn.id} #${conn.requestCount} → ${req.method}`) + '\n');
       },
-      onResponse: (conn, req, durationMs, result, error) => {
+      onResponse: (conn, req, durationMs, result, error, metadata) => {
+        // Clean up any lingering spinner from an error path
+        if (error && activeSpinner) {
+          activeSpinner.stop('Failed');
+          activeSpinner = undefined;
+        }
+
         const duration = formatDuration(durationMs);
         if (error) {
-          process.stderr.write(`  ${red('✗')} ${dim(`${conn.id} ← ${req.method} (${duration})`)} ${red(error)}` + '\n');
+          const label = error.code === 'Rejected' ? 'rejected by operator' : error.message;
+          process.stderr.write(`  ${red('✗')} ${dim(`${conn.id} ← ${req.method} (${duration})`)} ${red(label)}` + '\n');
         } else {
-          process.stderr.write(`  ${green('✓')} ${dim(`${conn.id} ← ${req.method} (${duration})`)}` + '\n');
+          // Build timing breakdown from phase metadata
+          const phases = metadata?.phases as PhaseTiming[] | undefined;
+          const timingStr = phases && phases.length > 0
+            ? ': ' + phases.map(p => `${p.phase} ${formatDuration(p.durationMs)}`).join(', ')
+            : '';
+          process.stderr.write(`  ${green('✓')} ${dim(`${conn.id} ← ${req.method} (${duration}${timingStr})`)}` + '\n');
           // Log tx hash after successful submit
           const txHash = (result as any)?.txHash;
           if (req.method === 'submitTransaction' && txHash) {
@@ -177,8 +234,10 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     // ── Shutdown ──
 
     process.stderr.write('\n' + dim('  Shutting down...') + '\n');
-    // Save cache on graceful shutdown (captures latest state)
-    if (!noCache) {
+    // Save cache on graceful shutdown — but NOT if transactions are pending.
+    // The SDK drops pendingDustTokens on serialization, so saving while coins
+    // are locked in pending would persist a corrupted state (dust=0).
+    if (!noCache && !connector.hasPendingTxs()) {
       try { await saveWalletCache(config.address, networkName, bundle.facade); } catch { /* best-effort */ }
     }
     try { await server.close(); } catch { /* best-effort */ }
