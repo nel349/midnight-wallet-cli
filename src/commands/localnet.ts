@@ -30,7 +30,9 @@ function formatServiceTable(services: ReturnType<typeof getServiceStatus>): stri
     const stateColor = svc.state === 'running' ? green : red;
     const healthStr = svc.health ? ` (${svc.health})` : '';
     const portStr = svc.port ? `:${svc.port}` : '';
+    const imageStr = svc.image ? `  ${dim(svc.image)}` : '';
     lines.push(`  ${svc.name.padEnd(16)}${stateColor(svc.state)}${dim(healthStr)}${dim(portStr)}`);
+    if (imageStr) lines.push(imageStr);
   }
   return lines.join('\n');
 }
@@ -81,7 +83,7 @@ async function handleUp(jsonMode: boolean): Promise<void> {
   if (jsonMode) {
     writeJsonResult({
       subcommand: 'up',
-      services: services.map(s => ({ name: s.name, state: s.state, port: s.port, health: s.health })),
+      services: services.map(s => ({ name: s.name, state: s.state, port: s.port, health: s.health, image: s.image })),
     });
     return;
   }
@@ -136,7 +138,7 @@ async function handleStatus(jsonMode: boolean): Promise<void> {
   if (jsonMode) {
     writeJsonResult({
       subcommand: 'status',
-      services: services.map(s => ({ name: s.name, state: s.state, port: s.port, health: s.health })),
+      services: services.map(s => ({ name: s.name, state: s.state, port: s.port, health: s.health, image: s.image })),
     });
     return;
   }
