@@ -16,7 +16,7 @@ import { createRpcServer, type RpcServer } from '../lib/ws-rpc.ts';
 import { DEFAULT_SERVE_PORT } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, dim, teal, green, red } from '../ui/colors.ts';
-import { start as startSpinner } from '../ui/spinner.ts';
+import { start as startSpinner, getActiveSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function serveCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
@@ -64,7 +64,9 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   // ── Suppress SDK noise ──
 
   const unsuppress = suppressSdkTransientErrors((_tag, msg) => {
-    process.stderr.write(dim(`  SDK: ${msg}`) + '\n');
+    const s = getActiveSpinner();
+    if (s) { s.log(dim(`  SDK: ${msg}`)); }
+    else { process.stderr.write(dim(`  SDK: ${msg}`) + '\n'); }
   });
   const restoreRpc = suppressRpcNoise();
 

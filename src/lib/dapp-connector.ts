@@ -14,6 +14,7 @@ import { promptApproval } from './approval.ts';
 import { createApiError, type RpcHandler, type RpcHandlerContext } from './ws-rpc.ts';
 import { createPhaseTracker, type PhaseTracker } from './phase-tracker.ts';
 import { serializeTx, deserializeUnsealed, deserializeSealed, fromHex } from './tx-serde.ts';
+import { inspectTxHex } from './tx-inspect.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
 // Apply SDK workaround: patches CoreWallet.revertTransaction to not destroy dust UTXOs.
@@ -21,15 +22,6 @@ import { dim } from '../ui/colors.ts';
 import './dust-revert-patch.ts';
 
 // ── Helpers ──
-
-/** Format a byte count as a human-readable string (e.g. "1.2 KB") */
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(1)} MB`;
-}
 
 // ── Network ID mapping ──
 
@@ -476,9 +468,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       // Submit is the irreversible action — always prompt
       tracker.start('approve');
       try {
-        await requireApproval('submitTransaction', [
-          { label: 'Tx size', value: formatBytes(txHex.length / 2) },
-        ], context);
+        await requireApproval('submitTransaction', inspectTxHex(txHex, 'sealed'), context);
       } catch (err) {
         // Rejection — revert to release dust coins from pending.
         // The dust-revert-patch ensures this does NOT destroy the UTXO.
@@ -528,9 +518,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       const tracker = makeTracker('balanceUnsealedTransaction', context);
 
       tracker.start('approve');
-      await requireApproval('balanceUnsealedTransaction', [
-        { label: 'Tx size', value: formatBytes(txHex.length / 2) },
-      ], context);
+      await requireApproval('balanceUnsealedTransaction', inspectTxHex(txHex, 'unsealed'), context);
 
       tracker.start('building');
       const unsealedTx = deserializeUnsealed(txHex);
@@ -552,9 +540,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       const tracker = makeTracker('balanceSealedTransaction', context);
 
       tracker.start('approve');
-      await requireApproval('balanceSealedTransaction', [
-        { label: 'Tx size', value: formatBytes(txHex.length / 2) },
-      ], context);
+      await requireApproval('balanceSealedTransaction', inspectTxHex(txHex, 'sealed'), context);
 
       tracker.start('building');
       const sealedTx = deserializeSealed(txHex);

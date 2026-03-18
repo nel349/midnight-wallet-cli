@@ -1,5 +1,8 @@
-// WalletClient factory — connects to `midnight serve` over WebSocket JSON-RPC
-// Returns an object implementing all 18 ConnectedAPI methods
+// WalletClient factory — connects to a Midnight wallet
+//
+// Two modes, chosen automatically:
+//   1. WebSocket (url provided)  → connects to `midnight serve` via JSON-RPC
+//   2. Browser extension (no url) → discovers Lace via window.midnight
 
 import { createTransport, type RpcTransport } from './transport.ts';
 import { reviveBalanceRecord, reviveDustBalance } from './bigint.ts';
@@ -19,8 +22,8 @@ import type {
 // ── Options ──
 
 export interface WalletClientOptions {
-  /** WebSocket URL, e.g. ws://localhost:9932 */
-  url: string;
+  /** WebSocket URL (e.g. ws://localhost:9932). If omitted, uses the Lace browser extension. */
+  url?: string;
   /** Network to connect to: 'Undeployed', 'PreProd', 'Preview' */
   networkId: string;
   /** Per-call timeout in ms (default: 300_000 = 5 minutes) */
@@ -34,7 +37,7 @@ export interface WalletClientOptions {
 // ── WalletClient interface ──
 
 export interface WalletClient extends ConnectedAPI {
-  /** Close the WebSocket connection */
+  /** Close the connection (WebSocket) or no-op (extension) */
   disconnect(): void;
   /** Register a callback for when the connection drops */
   onDisconnect(handler: () => void): void;
@@ -43,6 +46,15 @@ export interface WalletClient extends ConnectedAPI {
 // ── Factory ──
 
 export async function createWalletClient(options: WalletClientOptions): Promise<WalletClient> {
+  if (options.url) {
+    return createWebSocketClient(options as WalletClientOptions & { url: string });
+  }
+  return createExtensionClient(options);
+}
+
+// ── WebSocket mode (midnight serve) ──
+
+async function createWebSocketClient(options: WalletClientOptions & { url: string }): Promise<WalletClient> {
   const { url, networkId, timeout, onApprovalPending, onApprovalResolved } = options;
 
   const disconnectHandlers: Array<() => void> = [];
@@ -64,14 +76,9 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
     },
   });
 
-  // Perform handshake — validates network match
   await transport.call('connect', { networkId });
 
-  // ── Build the client object ──
-
   const client: WalletClient = {
-    // ── Balance methods (bigint conversion) ──
-
     async getUnshieldedBalances() {
       const result = await transport.call('getUnshieldedBalances') as Record<string, string>;
       return reviveBalanceRecord(result);
@@ -86,8 +93,6 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
       const result = await transport.call('getDustBalance') as { cap: string; balance: string };
       return reviveDustBalance(result);
     },
-
-    // ── Address methods (pass-through) ──
 
     async getUnshieldedAddress() {
       return await transport.call('getUnshieldedAddress') as { unshieldedAddress: string };
@@ -105,13 +110,9 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
       return await transport.call('getDustAddress') as { dustAddress: string };
     },
 
-    // ── History ──
-
     async getTxHistory(pageNumber: number, pageSize: number) {
       return await transport.call('getTxHistory', { pageNumber, pageSize }) as HistoryEntry[];
     },
-
-    // ── Transaction methods ──
 
     async balanceUnsealedTransaction(tx: string, options?: { payFees?: boolean }) {
       return await transport.call('balanceUnsealedTransaction', { tx, options }) as { tx: string };
@@ -140,8 +141,6 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
       }) as { tx: string };
     },
 
-    // ── Signing & submission ──
-
     async signData(data: string, options: SignDataOptions) {
       return await transport.call('signData', { data, options }) as Signature;
     },
@@ -150,12 +149,7 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
       await transport.call('submitTransaction', { tx });
     },
 
-    // ── Proving provider ──
-
     async getProvingProvider(_keyMaterialProvider: KeyMaterialProvider): Promise<WalletProvingProvider> {
-      // The CLI server returns { provingProvider: 'ready', proverServerUri }
-      // Real proving over JSON-RPC requires bidirectional RPC (future).
-      // For now, return a stub that delegates to the proof server.
       const result = await transport.call('getProvingProvider') as {
         provingProvider: string;
         proverServerUri: string;
@@ -172,8 +166,6 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
       };
     },
 
-    // ── Configuration ──
-
     async getConfiguration() {
       return await transport.call('getConfiguration') as Configuration;
     },
@@ -182,13 +174,9 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
       return await transport.call('getConnectionStatus') as ConnectionStatus;
     },
 
-    // ── Hints ──
-
     async hintUsage(methodNames) {
       await transport.call('hintUsage', { methodNames });
     },
-
-    // ── Client-only methods ──
 
     disconnect() {
       transport.close();
@@ -200,4 +188,57 @@ export async function createWalletClient(options: WalletClientOptions): Promise<
   };
 
   return client;
+}
+
+// ── Browser extension mode (Lace) ──
+
+interface InitialAPI {
+  apiVersion: string;
+  connect: (networkId: string) => Promise<ConnectedAPI>;
+}
+
+async function createExtensionClient(options: WalletClientOptions): Promise<WalletClient> {
+  const { networkId } = options;
+
+  const connectedAPI = await discoverExtension(networkId);
+  const disconnectHandlers: Array<() => void> = [];
+
+  return {
+    ...connectedAPI,
+    disconnect() { /* no-op for extension */ },
+    onDisconnect(handler: () => void) {
+      disconnectHandlers.push(handler);
+    },
+  };
+}
+
+function discoverExtension(networkId: string, timeoutMs = 5000): Promise<ConnectedAPI> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+
+    const poll = setInterval(() => {
+      const midnight = (globalThis as any).midnight;
+      if (!midnight) {
+        if (Date.now() - start > timeoutMs) {
+          clearInterval(poll);
+          reject(new Error('Midnight wallet extension not found. Is it installed?'));
+        }
+        return;
+      }
+
+      // Pick the first available provider (mnLace or any future wallet)
+      const key = Object.keys(midnight)[0];
+      const initialAPI: InitialAPI | undefined = midnight[key];
+      if (!initialAPI) {
+        if (Date.now() - start > timeoutMs) {
+          clearInterval(poll);
+          reject(new Error('No wallet provider found under window.midnight'));
+        }
+        return;
+      }
+
+      clearInterval(poll);
+      initialAPI.connect(networkId).then(resolve).catch(reject);
+    }, 100);
+  });
 }
