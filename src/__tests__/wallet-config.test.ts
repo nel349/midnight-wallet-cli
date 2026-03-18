@@ -4,13 +4,16 @@ import * as path from 'path';
 import * as os from 'os';
 import { loadWalletConfig, saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
 import { DIR_MODE, FILE_MODE } from '../lib/constants.ts';
+import { deriveAllAddresses } from '../lib/derive-address.ts';
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-wallet-test-${process.pid}`);
 
+const VALID_SEED = 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233';
+const VALID_ADDRESSES = deriveAllAddresses(Buffer.from(VALID_SEED, 'hex'));
+
 const VALID_CONFIG: WalletConfig = {
-  seed: 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233',
-  network: 'preprod',
-  address: 'mn_addr_preprod1qqqqqqtest',
+  seed: VALID_SEED,
+  addresses: VALID_ADDRESSES,
   createdAt: '2025-01-01T00:00:00.000Z',
 };
 
@@ -35,8 +38,7 @@ describe('saveWalletConfig', () => {
     saveWalletConfig(VALID_CONFIG, filePath);
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
     expect(parsed.seed).toBe(VALID_CONFIG.seed);
-    expect(parsed.network).toBe(VALID_CONFIG.network);
-    expect(parsed.address).toBe(VALID_CONFIG.address);
+    expect(parsed.addresses).toEqual(VALID_CONFIG.addresses);
     expect(parsed.createdAt).toBe(VALID_CONFIG.createdAt);
   });
 
@@ -67,18 +69,18 @@ describe('saveWalletConfig', () => {
     const filePath = path.join(TEST_DIR, 'wallet.json');
     saveWalletConfig(VALID_CONFIG, filePath);
 
+    const otherSeed = '1111111111111111111111111111111111111111111111111111111111111111';
+    const otherAddresses = deriveAllAddresses(Buffer.from(otherSeed, 'hex'));
     const updated: WalletConfig = {
-      seed: '1111111111111111111111111111111111111111111111111111111111111111',
-      network: 'preview',
-      address: 'mn_addr_preview1newaddress',
+      seed: otherSeed,
+      addresses: otherAddresses,
       createdAt: '2026-02-26T00:00:00.000Z',
     };
     saveWalletConfig(updated, filePath);
 
     const loaded = loadWalletConfig(filePath);
     expect(loaded.seed).toBe(updated.seed);
-    expect(loaded.network).toBe(updated.network);
-    expect(loaded.address).toBe(updated.address);
+    expect(loaded.addresses).toEqual(updated.addresses);
     expect(loaded.createdAt).toBe(updated.createdAt);
     // Ensure old data is gone
     expect(loaded.seed).not.toBe(VALID_CONFIG.seed);
@@ -91,8 +93,7 @@ describe('loadWalletConfig', () => {
     saveWalletConfig(VALID_CONFIG, filePath);
     const loaded = loadWalletConfig(filePath);
     expect(loaded.seed).toBe(VALID_CONFIG.seed);
-    expect(loaded.network).toBe(VALID_CONFIG.network);
-    expect(loaded.address).toBe(VALID_CONFIG.address);
+    expect(loaded.addresses).toEqual(VALID_CONFIG.addresses);
     expect(loaded.createdAt).toBe(VALID_CONFIG.createdAt);
   });
 
@@ -120,28 +121,16 @@ describe('loadWalletConfig', () => {
   it('throws when seed is missing', () => {
     const filePath = path.join(TEST_DIR, 'incomplete.json');
     fs.writeFileSync(filePath, JSON.stringify({
-      network: 'preprod',
-      address: 'mn_addr_preprod1test',
+      addresses: VALID_ADDRESSES,
       createdAt: '2025-01-01T00:00:00.000Z',
     }));
     expect(() => loadWalletConfig(filePath)).toThrow('seed');
   });
 
-  it('throws when network is missing', () => {
+  it('throws when address and addresses are both missing', () => {
     const filePath = path.join(TEST_DIR, 'incomplete.json');
     fs.writeFileSync(filePath, JSON.stringify({
-      seed: 'aabb',
-      address: 'mn_addr_preprod1test',
-      createdAt: '2025-01-01T00:00:00.000Z',
-    }));
-    expect(() => loadWalletConfig(filePath)).toThrow('network');
-  });
-
-  it('throws when address is missing', () => {
-    const filePath = path.join(TEST_DIR, 'incomplete.json');
-    fs.writeFileSync(filePath, JSON.stringify({
-      seed: 'aabb',
-      network: 'preprod',
+      seed: VALID_SEED,
       createdAt: '2025-01-01T00:00:00.000Z',
     }));
     expect(() => loadWalletConfig(filePath)).toThrow('address');
@@ -151,8 +140,7 @@ describe('loadWalletConfig', () => {
     const filePath = path.join(TEST_DIR, 'incomplete.json');
     fs.writeFileSync(filePath, JSON.stringify({
       seed: 'aabb00',
-      network: 'preprod',
-      address: 'mn_addr_preprod1test',
+      addresses: VALID_ADDRESSES,
     }));
     expect(() => loadWalletConfig(filePath)).toThrow('createdAt');
   });
@@ -161,23 +149,25 @@ describe('loadWalletConfig', () => {
     const filePath = path.join(TEST_DIR, 'badseed.json');
     fs.writeFileSync(filePath, JSON.stringify({
       seed: 'not-a-hex-string!',
-      network: 'preprod',
-      address: 'mn_addr_preprod1test',
+      addresses: VALID_ADDRESSES,
       createdAt: '2025-01-01T00:00:00.000Z',
     }));
     expect(() => loadWalletConfig(filePath)).toThrow('Invalid seed format');
   });
 
-  it('throws on invalid network name', () => {
-    const filePath = path.join(TEST_DIR, 'badnetwork.json');
+  it('auto-migrates old format with address and network fields', () => {
+    const filePath = path.join(TEST_DIR, 'old-format.json');
     fs.writeFileSync(filePath, JSON.stringify({
-      seed: 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233',
-      network: 'mainnet',
-      address: 'mn_addr_preprod1test',
+      seed: VALID_SEED,
+      network: 'preprod',
+      address: 'mn_addr_preprod1oldaddress',
       createdAt: '2025-01-01T00:00:00.000Z',
     }));
-    expect(() => loadWalletConfig(filePath)).toThrow('Invalid network');
-    expect(() => loadWalletConfig(filePath)).toThrow('mainnet');
+    const loaded = loadWalletConfig(filePath);
+    // Should have derived all addresses from the seed
+    expect(loaded.addresses).toEqual(VALID_ADDRESSES);
+    expect((loaded as any).network).toBeUndefined();
+    expect((loaded as any).address).toBeUndefined();
   });
 
   it('accepts config without optional mnemonic', () => {
@@ -199,11 +189,12 @@ describe('loadWalletConfig', () => {
 describe('round-trip', () => {
   it('save then load preserves all fields including mnemonic', () => {
     const filePath = path.join(TEST_DIR, 'roundtrip.json');
+    const seed = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const addresses = deriveAllAddresses(Buffer.from(seed, 'hex'));
     const original: WalletConfig = {
-      seed: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      seed,
       mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
-      network: 'undeployed',
-      address: 'mn_addr_undeployed1qqqqqqtest',
+      addresses,
       createdAt: '2026-02-26T12:00:00.000Z',
     };
     saveWalletConfig(original, filePath);

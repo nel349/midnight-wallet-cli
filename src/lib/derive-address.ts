@@ -4,7 +4,7 @@
 import { HDWallet, Roles } from '@midnight-ntwrk/wallet-sdk-hd';
 import { createKeystore, PublicKey } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
 import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
-import { type NetworkName } from './network.ts';
+import { type NetworkName, getValidNetworkNames } from './network.ts';
 
 const NETWORK_ID_MAP: Record<NetworkName, NetworkId.NetworkId> = {
   preprod: NetworkId.NetworkId.PreProd,
@@ -42,4 +42,19 @@ export function deriveUnshieldedAddress(
   const keystore = createKeystore(derivation.key, networkId);
   const publicKey = PublicKey.fromKeyStore(keystore);
   return publicKey.address;
+}
+
+/**
+ * Derive unshielded addresses for all supported networks from a single seed.
+ * Returns a map of network name → bech32m address string.
+ */
+export function deriveAllAddresses(
+  seedBuffer: Buffer,
+  keyIndex: number = 0,
+): Record<NetworkName, string> {
+  const addresses = {} as Record<NetworkName, string>;
+  for (const name of getValidNetworkNames()) {
+    addresses[name as NetworkName] = deriveUnshieldedAddress(seedBuffer, name as NetworkName, keyIndex);
+  }
+  return addresses;
 }

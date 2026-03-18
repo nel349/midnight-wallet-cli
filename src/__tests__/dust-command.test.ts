@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import dustCommand from '../commands/dust.ts';
 import { parseArgs } from '../lib/argv.ts';
 import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
-import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
+import { deriveAllAddresses } from '../lib/derive-address.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -30,8 +30,7 @@ describe('dust command — subcommand validation', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'undeployed',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'undeployed'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);
@@ -44,8 +43,7 @@ describe('dust command — subcommand validation', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'undeployed',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'undeployed'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);
@@ -58,8 +56,7 @@ describe('dust command — subcommand validation', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'undeployed',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'undeployed'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);

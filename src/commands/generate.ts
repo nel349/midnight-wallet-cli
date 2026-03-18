@@ -9,7 +9,7 @@ import { homedir } from 'os';
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
-import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
+import { deriveAllAddresses } from '../lib/derive-address.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
 import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
 import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME } from '../lib/constants.ts';
@@ -64,12 +64,12 @@ export default async function generateCommand(args: ParsedArgs): Promise<void> {
     seedBuffer = Buffer.from(mnemonicToSeedSync(mnemonic).slice(0, 32));
   }
 
-  const address = deriveUnshieldedAddress(seedBuffer, networkName);
+  const addresses = deriveAllAddresses(seedBuffer);
+  const activeAddress = addresses[networkName];
 
   const config: WalletConfig = {
     seed: seedBuffer.toString('hex'),
-    network: networkName,
-    address,
+    addresses,
     createdAt: new Date().toISOString(),
   };
 
@@ -82,8 +82,9 @@ export default async function generateCommand(args: ParsedArgs): Promise<void> {
   // JSON mode
   if (hasFlag(args, 'json')) {
     const result: Record<string, unknown> = {
-      address,
-      network: networkName,
+      addresses,
+      activeAddress,
+      activeNetwork: networkName,
       seed: seedBuffer.toString('hex'),
       file: savedPath,
       createdAt: config.createdAt,
@@ -93,13 +94,13 @@ export default async function generateCommand(args: ParsedArgs): Promise<void> {
     return;
   }
 
-  // Address to stdout (pipeable)
-  process.stdout.write(address + '\n');
+  // Active address to stdout (pipeable)
+  process.stdout.write(activeAddress + '\n');
 
   // Details to stderr
   process.stderr.write('\n' + header('Wallet Generated') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
-  process.stderr.write(keyValue('Address', formatAddress(address)) + '\n');
+  process.stderr.write(keyValue('Address', formatAddress(activeAddress)) + '\n');
   process.stderr.write(keyValue('File', savedPath) + '\n');
   process.stderr.write('\n');
 

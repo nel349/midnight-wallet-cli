@@ -36,20 +36,10 @@ describe('resolveNetworkName', () => {
       expect(resolveNetworkName(ctx)).toBe('preprod');
     });
 
-    it('--network flag overrides wallet network', () => {
-      const ctx = makeCtx({
-        args: makeArgs(['--network', 'preview']),
-        walletNetwork: 'preprod',
-      });
-      expect(resolveNetworkName(ctx)).toBe('preview');
-    });
-
-    it('--network flag overrides address detection', () => {
-      const ctx = makeCtx({
-        args: makeArgs(['--network', 'undeployed']),
-        address: 'mn_addr_preprod1abc',
-      });
-      expect(resolveNetworkName(ctx)).toBe('undeployed');
+    it('--network flag overrides config file default', () => {
+      saveCliConfig({ network: 'preview' }, TEST_DIR);
+      const ctx = makeCtx({ args: makeArgs(['--network', 'preprod']) });
+      expect(resolveNetworkName(ctx)).toBe('preprod');
     });
 
     it('throws for invalid --network flag with valid network list', () => {
@@ -62,83 +52,24 @@ describe('resolveNetworkName', () => {
     });
   });
 
-  describe('step 2: wallet network', () => {
-    it('uses wallet network when no --network flag', () => {
-      const ctx = makeCtx({ walletNetwork: 'preview' });
-      expect(resolveNetworkName(ctx)).toBe('preview');
-    });
-
-    it('skips invalid wallet network', () => {
-      const ctx = makeCtx({ walletNetwork: 'bogus' });
-      // Falls through to step 5 (fallback) since no other sources
-      expect(resolveNetworkName(ctx)).toBe('undeployed');
-    });
-  });
-
-  describe('step 3: address prefix detection', () => {
-    it('detects network from preprod address', () => {
-      const ctx = makeCtx({ address: 'mn_addr_preprod1qqqqqqtest' });
-      expect(resolveNetworkName(ctx)).toBe('preprod');
-    });
-
-    it('detects network from preview address', () => {
-      const ctx = makeCtx({ address: 'mn_addr_preview1qqqqqqtest' });
-      expect(resolveNetworkName(ctx)).toBe('preview');
-    });
-
-    it('detects network from undeployed address', () => {
-      const ctx = makeCtx({ address: 'mn_addr_undeployed1qqqqqqtest' });
-      expect(resolveNetworkName(ctx)).toBe('undeployed');
-    });
-
-    it('skips unrecognized address prefix', () => {
-      const ctx = makeCtx({ address: 'mn_addr_mainnet1abc' });
-      // Falls through to fallback
-      expect(resolveNetworkName(ctx)).toBe('undeployed');
-    });
-  });
-
-  describe('step 4: config file default', () => {
-    it('uses network from config file when no flag, wallet, or address', () => {
+  describe('step 2: config file default', () => {
+    it('uses network from config file when no --network flag', () => {
       saveCliConfig({ network: 'preprod' }, TEST_DIR);
       const ctx = makeCtx();
       expect(resolveNetworkName(ctx)).toBe('preprod');
     });
 
-    it('config file is lower priority than address detection', () => {
+    it('config file is lower priority than --network flag', () => {
       saveCliConfig({ network: 'preview' }, TEST_DIR);
-      const ctx = makeCtx({ address: 'mn_addr_preprod1abc' });
-      expect(resolveNetworkName(ctx)).toBe('preprod');
-    });
-
-    it('config file is lower priority than wallet network', () => {
-      saveCliConfig({ network: 'preview' }, TEST_DIR);
-      const ctx = makeCtx({ walletNetwork: 'preprod' });
+      const ctx = makeCtx({ args: makeArgs(['--network', 'preprod']) });
       expect(resolveNetworkName(ctx)).toBe('preprod');
     });
   });
 
-  describe('step 5: fallback', () => {
+  describe('step 3: fallback', () => {
     it('returns undeployed when nothing matches', () => {
       const ctx = makeCtx();
       expect(resolveNetworkName(ctx)).toBe('undeployed');
-    });
-  });
-
-  describe('priority ordering', () => {
-    it('wallet network overrides address detection', () => {
-      const ctx = makeCtx({
-        walletNetwork: 'preview',
-        address: 'mn_addr_preprod1abc',
-      });
-      expect(resolveNetworkName(ctx)).toBe('preview');
-    });
-
-    it('address detection is used when wallet network is absent', () => {
-      const ctx = makeCtx({
-        address: 'mn_addr_preprod1abc',
-      });
-      expect(resolveNetworkName(ctx)).toBe('preprod');
     });
   });
 });

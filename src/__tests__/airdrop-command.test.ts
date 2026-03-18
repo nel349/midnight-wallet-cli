@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import airdropCommand from '../commands/airdrop.ts';
 import { parseArgs } from '../lib/argv.ts';
 import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
-import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
+import { deriveAllAddresses } from '../lib/derive-address.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
 import * as fs from 'fs';
@@ -31,8 +31,7 @@ describe('airdrop command — argument validation', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'undeployed',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'undeployed'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);
@@ -45,8 +44,7 @@ describe('airdrop command — argument validation', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'undeployed',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'undeployed'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);
@@ -59,8 +57,7 @@ describe('airdrop command — argument validation', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'undeployed',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'undeployed'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);
@@ -75,8 +72,7 @@ describe('airdrop command — argument validation', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'undeployed',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'undeployed'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);
@@ -96,13 +92,12 @@ describe('airdrop command — network restriction', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'preprod',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'preprod'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);
 
-    const args = parseArgs(['airdrop', '100', '--wallet', walletFile]);
+    const args = parseArgs(['airdrop', '100', '--wallet', walletFile, '--network', 'preprod']);
     await expect(airdropCommand(args)).rejects.toThrow('only available on the "undeployed" network');
   });
 
@@ -110,13 +105,12 @@ describe('airdrop command — network restriction', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'preview',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'preview'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);
 
-    const args = parseArgs(['airdrop', '100', '--wallet', walletFile]);
+    const args = parseArgs(['airdrop', '100', '--wallet', walletFile, '--network', 'preview']);
     await expect(airdropCommand(args)).rejects.toThrow('only available on the "undeployed" network');
   });
 
@@ -124,13 +118,12 @@ describe('airdrop command — network restriction', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
-      network: 'preprod',
-      address: deriveUnshieldedAddress(Buffer.from(TEST_SEED, 'hex'), 'preprod'),
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
       createdAt: new Date().toISOString(),
     };
     saveWalletConfig(config, walletFile);
 
-    const args = parseArgs(['airdrop', '100', '--wallet', walletFile]);
+    const args = parseArgs(['airdrop', '100', '--wallet', walletFile, '--network', 'preprod']);
     await expect(airdropCommand(args)).rejects.toThrow('"preprod"');
   });
 });

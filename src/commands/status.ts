@@ -139,13 +139,16 @@ async function tryDetectNetwork(args: ParsedArgs): Promise<string | undefined> {
   const flagNetwork = getFlag(args, 'network');
   if (flagNetwork) return flagNetwork;
 
+  // Check config file for default network
   try {
-    const { loadWalletConfig, resolveWalletPath } = await import('../lib/wallet-config.ts');
-    const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
-    return config.network;
+    const { loadCliConfig } = await import('../lib/cli-config.ts');
+    const config = loadCliConfig();
+    if (config.network && isValidNetworkName(config.network)) return config.network;
   } catch {
-    return undefined;
+    // fall through
   }
+
+  return undefined;
 }
 
 // ── Local Tier 1 probes ──

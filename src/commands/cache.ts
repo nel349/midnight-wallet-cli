@@ -25,12 +25,9 @@ export default async function cacheCommand(args: ParsedArgs): Promise<void> {
     // Clear cache for a specific wallet
     const walletPath = resolveWalletPath(walletFlag);
     const config = loadWalletConfig(walletPath);
-    const { name: networkName } = resolveNetwork({
-      args,
-      walletNetwork: config.network,
-      address: config.address,
-    });
-    clearWalletCache(config.address, networkName);
+    const { name: networkName } = resolveNetwork({ args });
+    const address = config.addresses[networkName];
+    clearWalletCache(address, networkName);
     if (jsonMode) {
       writeJsonResult({ action: 'clear', scope: 'wallet', wallet: walletFlag, network: networkName });
       return;

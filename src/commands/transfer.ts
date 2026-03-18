@@ -42,11 +42,8 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   // Resolve network
-  const { name: networkName, config: networkConfig } = resolveNetwork({
-    args,
-    walletNetwork: config.network,
-    address: config.address,
-  });
+  const { name: networkName, config: networkConfig } = resolveNetwork({ args });
+  const address = config.addresses[networkName];
 
   // Apply endpoint overrides: --flag > config > network default
   applyEndpointOverrides(networkConfig, {
@@ -58,7 +55,7 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
   // Show header on stderr
   process.stderr.write('\n' + header('Transfer') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
-  process.stderr.write(keyValue('From', formatAddress(config.address, true)) + '\n');
+  process.stderr.write(keyValue('From', formatAddress(address, true)) + '\n');
   process.stderr.write(keyValue('To', formatAddress(recipientAddress, true)) + '\n');
   process.stderr.write(keyValue('Amount', bold(amountNight + ' NIGHT')) + '\n');
   process.stderr.write('\n');
@@ -75,7 +72,7 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
       amountNight,
       signal,
       noCache,
-      walletAddress: config.address,
+      walletAddress: address,
       networkName,
       onSync(applied, highest) {
         if (highest > 0) {

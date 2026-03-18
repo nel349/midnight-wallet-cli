@@ -12,14 +12,15 @@ import addressCommand from '../commands/address.ts';
 import genesisAddressCommand from '../commands/genesis-address.ts';
 import inspectCostCommand from '../commands/inspect-cost.ts';
 import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
+import { deriveAllAddresses } from '../lib/derive-address.ts';
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-run-cmd-test-${process.pid}`);
 const TEST_SEED = '0000000000000000000000000000000000000000000000000000000000000002';
 
+const TEST_CONFIG_SEED = 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233';
 const TEST_CONFIG: WalletConfig = {
-  seed: 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233',
-  network: 'preprod',
-  address: 'mn_addr_preprod1qqqqqqtest',
+  seed: TEST_CONFIG_SEED,
+  addresses: deriveAllAddresses(Buffer.from(TEST_CONFIG_SEED, 'hex')),
   createdAt: '2026-01-15T10:30:00.000Z',
 };
 
@@ -43,9 +44,10 @@ describe('captureCommand', () => {
     const args = parseArgs(['generate', '--network', 'undeployed', '--output', walletFile]);
     const result = await captureCommand(generateCommand, args);
 
-    expect(result.address).toBeDefined();
-    expect((result.address as string).startsWith('mn_addr_undeployed1')).toBe(true);
-    expect(result.network).toBe('undeployed');
+    expect(result.addresses).toBeDefined();
+    const addrs = result.addresses as Record<string, string>;
+    expect(addrs.undeployed.startsWith('mn_addr_undeployed1')).toBe(true);
+    expect(result.activeNetwork).toBe('undeployed');
     expect(result.seed).toBeDefined();
   });
 
@@ -56,8 +58,9 @@ describe('captureCommand', () => {
     const args = parseArgs(['info', '--wallet', walletFile]);
     const result = await captureCommand(infoCommand, args);
 
-    expect(result.address).toBe('mn_addr_preprod1qqqqqqtest');
-    expect(result.network).toBe('preprod');
+    expect(result.addresses).toBeDefined();
+    expect(result.activeNetwork).toBe('undeployed'); // fallback since no --network flag
+    expect(result.activeAddress).toBe(TEST_CONFIG.addresses.undeployed);
     expect(result.createdAt).toBe('2026-01-15T10:30:00.000Z');
   });
 

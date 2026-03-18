@@ -12,8 +12,10 @@ import { start as startSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function balanceCommand(args: ParsedArgs): Promise<void> {
+  // Resolve network first (no wallet dependency)
+  const { name: networkName, config: networkConfig } = resolveNetwork({ args });
+
   let address: string | undefined;
-  let walletNetwork: string | undefined;
 
   // Address from positional arg (subcommand position) or wallet file
   if (args.subcommand) {
@@ -21,20 +23,12 @@ export default async function balanceCommand(args: ParsedArgs): Promise<void> {
   } else {
     // Load from wallet file
     const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
-    address = config.address;
-    walletNetwork = config.network;
+    address = config.addresses[networkName];
   }
 
   if (!address) {
     throw new Error('No address provided and no wallet file found.');
   }
-
-  // Resolve network using address for auto-detection
-  const { name: networkName, config: networkConfig } = resolveNetwork({
-    args,
-    walletNetwork,
-    address,
-  });
 
   // Apply endpoint overrides: --flag > config > network default
   applyEndpointOverrides(networkConfig, {

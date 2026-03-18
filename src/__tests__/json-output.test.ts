@@ -16,15 +16,16 @@ import inspectCostCommand from '../commands/inspect-cost.ts';
 import configCommand from '../commands/config.ts';
 import helpCommand from '../commands/help.ts';
 import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
+import { deriveAllAddresses } from '../lib/derive-address.ts';
 import { loadCliConfig } from '../lib/cli-config.ts';
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-json-test-${process.pid}`);
 const TEST_SEED = '0000000000000000000000000000000000000000000000000000000000000002';
 
+const TEST_CONFIG_SEED = 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233';
 const TEST_CONFIG: WalletConfig = {
-  seed: 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233',
-  network: 'preprod',
-  address: 'mn_addr_preprod1qqqqqqtest',
+  seed: TEST_CONFIG_SEED,
+  addresses: deriveAllAddresses(Buffer.from(TEST_CONFIG_SEED, 'hex')),
   createdAt: '2026-01-15T10:30:00.000Z',
 };
 
@@ -176,9 +177,13 @@ describe('generate --json', () => {
     await generateCommand(args);
     const data = parseJsonOutput();
 
-    expect(data.address).toBeDefined();
-    expect((data.address as string).startsWith('mn_addr_undeployed1')).toBe(true);
-    expect(data.network).toBe('undeployed');
+    expect(data.addresses).toBeDefined();
+    const addrs = data.addresses as Record<string, string>;
+    expect(addrs.undeployed.startsWith('mn_addr_undeployed1')).toBe(true);
+    expect(addrs.preprod.startsWith('mn_addr_preprod1')).toBe(true);
+    expect(addrs.preview.startsWith('mn_addr_preview1')).toBe(true);
+    expect(data.activeNetwork).toBe('undeployed');
+    expect(data.activeAddress).toBe(addrs.undeployed);
     expect(data.seed).toBeDefined();
     expect((data.seed as string).length).toBe(64);
     expect(data.mnemonic).toBeDefined();
@@ -215,8 +220,9 @@ describe('info --json', () => {
     await infoCommand(args);
     const data = parseJsonOutput();
 
-    expect(data.address).toBe('mn_addr_preprod1qqqqqqtest');
-    expect(data.network).toBe('preprod');
+    expect(data.addresses).toBeDefined();
+    expect(data.activeNetwork).toBe('undeployed'); // fallback since no --network flag
+    expect(data.activeAddress).toBe(TEST_CONFIG.addresses.undeployed);
     expect(data.createdAt).toBe('2026-01-15T10:30:00.000Z');
     expect(data.file).toContain(walletFile);
   });
