@@ -55,7 +55,7 @@ describe.skipIf(!HAS_INDEXER)('balance command — reads address from wallet fil
     };
     saveWalletConfig(config, walletFile);
 
-    const args = parseArgs(['balance', '--wallet', walletFile]);
+    const args = parseArgs(['balance', '--wallet', walletFile, '--network', 'undeployed']);
     await balanceCommand(args);
 
     const err = io.stderr();
@@ -80,9 +80,8 @@ describe.skipIf(!HAS_INDEXER)('balance command — positional address with local
     expect(err).toContain('Transactions');
   });
 
-  it('auto-detects undeployed network from address prefix', async () => {
-    // No --network flag — should detect 'undeployed' from the address prefix
-    const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS]);
+  it('uses explicit --network flag for address lookup', async () => {
+    const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'undeployed']);
     await balanceCommand(args);
 
     const err = io.stderr();

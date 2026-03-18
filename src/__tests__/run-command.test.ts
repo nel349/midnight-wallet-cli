@@ -55,11 +55,11 @@ describe('captureCommand', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     saveWalletConfig(TEST_CONFIG, walletFile);
 
-    const args = parseArgs(['info', '--wallet', walletFile]);
+    const args = parseArgs(['info', '--wallet', walletFile, '--network', 'undeployed']);
     const result = await captureCommand(infoCommand, args);
 
     expect(result.addresses).toBeDefined();
-    expect(result.activeNetwork).toBe('undeployed'); // fallback since no --network flag
+    expect(result.activeNetwork).toBe('undeployed');
     expect(result.activeAddress).toBe(TEST_CONFIG.addresses.undeployed);
     expect(result.createdAt).toBe('2026-01-15T10:30:00.000Z');
   });

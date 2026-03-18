@@ -216,12 +216,12 @@ describe('info --json', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     saveWalletConfig(TEST_CONFIG, walletFile);
 
-    const args = parseArgs(['info', '--wallet', walletFile, '--json']);
+    const args = parseArgs(['info', '--wallet', walletFile, '--network', 'undeployed', '--json']);
     await infoCommand(args);
     const data = parseJsonOutput();
 
     expect(data.addresses).toBeDefined();
-    expect(data.activeNetwork).toBe('undeployed'); // fallback since no --network flag
+    expect(data.activeNetwork).toBe('undeployed');
     expect(data.activeAddress).toBe(TEST_CONFIG.addresses.undeployed);
     expect(data.createdAt).toBe('2026-01-15T10:30:00.000Z');
     expect(data.file).toContain(walletFile);

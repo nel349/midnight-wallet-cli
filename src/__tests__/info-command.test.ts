@@ -38,7 +38,7 @@ describe('info command — stdout (pipeable data)', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     saveWalletConfig(TEST_CONFIG, walletFile);
 
-    const args = parseArgs(['info', '--wallet', walletFile]);
+    const args = parseArgs(['info', '--wallet', walletFile, '--network', 'undeployed']);
     await infoCommand(args);
     const out = io.stdout().trim();
     expect(out).toBe(TEST_ADDRESSES.undeployed);

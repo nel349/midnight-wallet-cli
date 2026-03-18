@@ -73,10 +73,42 @@ midnight transfer mn_addr_undeployed1... 100
 
 | Network | Description |
 |---------|-------------|
-| `preprod` | Midnight pre-production testnet |
 | `undeployed` | Local network via Docker (`midnight localnet up`) |
+| `preprod` | Midnight pre-production testnet |
+| `preview` | Midnight preview testnet |
 
-Use `--network <name>` to select a network, or persist it with `midnight config set network preprod`.
+Wallets are network-agnostic — one seed derives addresses for all three networks. Use `--network <name>` on any command, or persist it with `midnight config set network preview`.
+
+## DApp Connector
+
+`midnight serve` starts a WebSocket JSON-RPC server that implements the same `ConnectedAPI` interface as the Lace browser wallet. Any DApp can connect to it — no browser extension needed.
+
+```bash
+# Start the connector server
+midnight serve --network preview
+
+# Or auto-approve all requests (dev only)
+midnight serve --network preview --approve-all
+```
+
+To connect from your DApp, install the connector package:
+
+```bash
+npm install midnight-wallet-connector
+```
+
+```typescript
+import { createWalletClient } from 'midnight-wallet-connector';
+
+const wallet = await createWalletClient({
+  url: 'ws://localhost:9932',
+  networkId: 'Preview',
+});
+
+const balances = await wallet.getUnshieldedBalances();
+```
+
+See the [midnight-wallet-connector](https://www.npmjs.com/package/midnight-wallet-connector) package for the full API, and [midnight-starship](https://github.com/nel349/midnight-starship) for a working example DApp.
 
 ## JSON Output for Automation
 
