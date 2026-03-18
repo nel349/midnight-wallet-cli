@@ -14,6 +14,7 @@ import { promptApproval } from './approval.ts';
 import { createApiError, type RpcHandler, type RpcHandlerContext } from './ws-rpc.ts';
 import { createPhaseTracker, type PhaseTracker } from './phase-tracker.ts';
 import { serializeTx, deserializeUnsealed, deserializeSealed, fromHex } from './tx-serde.ts';
+import { inspectTxHex } from './tx-inspect.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
 // Apply SDK workaround: patches CoreWallet.revertTransaction to not destroy dust UTXOs.
@@ -21,15 +22,6 @@ import { dim } from '../ui/colors.ts';
 import './dust-revert-patch.ts';
 
 // ── Helpers ──
-
-/** Format a byte count as a human-readable string (e.g. "1.2 KB") */
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(1)} MB`;
-}
 
 // ── Network ID mapping ──
 
@@ -63,6 +55,54 @@ export interface DAppConnector {
 }
 
 // ── Factory ──
+
+/** Extract a human-readable detail string from an SDK/chain error.
+ *  Walks nested cause chains including Effect Data.TaggedError objects. */
+function extractErrorDetail(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+  const seen = new Set<unknown>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const anyErr = current as any;
+    // Effect Data.TaggedError or standard Error
+    if (current instanceof Error || (typeof current === 'object' && anyErr._tag)) {
+      const tag = anyErr._tag;
+      const msg = anyErr.message ?? '';
+      if (tag && msg) {
+        parts.push(`[${tag}] ${msg}`);
+      } else if (msg) {
+        parts.push(msg);
+      } else if (tag) {
+        parts.push(`[${tag}]`);
+      }
+      // Effect errors may have structured data
+      if (anyErr.data && typeof anyErr.data === 'object') {
+        try { parts.push(`data=${JSON.stringify(anyErr.data)}`); } catch { /* skip */ }
+      }
+      // Walk the cause chain (works for both Error.cause and Effect's cause field)
+      current = anyErr.cause;
+    } else if (typeof current === 'string') {
+      parts.push(current);
+      break;
+    } else {
+      try {
+        const str = JSON.stringify(current);
+        if (str && str !== '{}') parts.push(str);
+        else parts.push(String(current));
+      } catch { parts.push(String(current)); }
+      break;
+    }
+  }
+  // Deduplicate identical consecutive messages (SDK wraps same message at multiple levels)
+  const deduped: string[] = [];
+  for (const p of parts) {
+    if (deduped.length === 0 || deduped[deduped.length - 1] !== p) {
+      deduped.push(p);
+    }
+  }
+  return deduped.join(' → ') || 'Unknown error';
+}
 
 export function createDAppConnector(options: DAppConnectorOptions): DAppConnector {
   const { bundle, networkConfig, approvalOptions, callbacks } = options;
@@ -428,9 +468,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       // Submit is the irreversible action — always prompt
       tracker.start('approve');
       try {
-        await requireApproval('submitTransaction', [
-          { label: 'Tx size', value: formatBytes(txHex.length / 2) },
-        ], context);
+        await requireApproval('submitTransaction', inspectTxHex(txHex, 'sealed'), context);
       } catch (err) {
         // Rejection — revert to release dust coins from pending.
         // The dust-revert-patch ensures this does NOT destroy the UTXO.
@@ -446,13 +484,29 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       // Deserialize for submission (the chain doesn't need object identity)
       const sealedTx = deserializeSealed(txHex);
       tracker.start('submitting');
-      const txHash = await facade.submitTransaction(sealedTx);
-      tracker.complete();
-      // Tx submitted successfully — untrack (coins are now spent, not pending)
-      untrackPendingTx(context.connectionId, txHex);
-      context.metadata.phases = tracker.getTimings();
-      // Return txHash for server logging (onResponse can read it from result)
-      return { txHash };
+      try {
+        const txHash = await facade.submitTransaction(sealedTx);
+        tracker.complete();
+        // Tx submitted successfully — untrack (coins are now spent, not pending)
+        untrackPendingTx(context.connectionId, txHex);
+        context.metadata.phases = tracker.getTimings();
+        // Return txHash for server logging (onResponse can read it from result)
+        return { txHash };
+      } catch (submitErr: unknown) {
+        tracker.complete();
+        // Revert pending tx to release locked dust coins
+        const txMap = pendingTxsByConnection.get(context.connectionId);
+        const entry = txMap?.get(txHex);
+        if (entry) {
+          try { await facade.revert(entry.recipe); } catch { /* best-effort */ }
+        }
+        untrackPendingTx(context.connectionId, txHex);
+        // Re-throw with full detail so the RPC layer can forward it
+        const detail = extractErrorDetail(submitErr);
+        const enriched = new Error(`Transaction submission failed: ${detail}`);
+        enriched.cause = submitErr;
+        throw enriched;
+      }
     },
 
     balanceUnsealedTransaction: async (params, context) => {
@@ -464,9 +518,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       const tracker = makeTracker('balanceUnsealedTransaction', context);
 
       tracker.start('approve');
-      await requireApproval('balanceUnsealedTransaction', [
-        { label: 'Tx size', value: formatBytes(txHex.length / 2) },
-      ], context);
+      await requireApproval('balanceUnsealedTransaction', inspectTxHex(txHex, 'unsealed'), context);
 
       tracker.start('building');
       const unsealedTx = deserializeUnsealed(txHex);
@@ -488,9 +540,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       const tracker = makeTracker('balanceSealedTransaction', context);
 
       tracker.start('approve');
-      await requireApproval('balanceSealedTransaction', [
-        { label: 'Tx size', value: formatBytes(txHex.length / 2) },
-      ], context);
+      await requireApproval('balanceSealedTransaction', inspectTxHex(txHex, 'sealed'), context);
 
       tracker.start('building');
       const sealedTx = deserializeSealed(txHex);

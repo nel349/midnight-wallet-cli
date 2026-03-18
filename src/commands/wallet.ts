@@ -7,7 +7,7 @@ import { homedir } from 'os';
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
-import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
+import { deriveUnshieldedAddress, deriveAllAddresses } from '../lib/derive-address.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
 import {
   saveWalletConfig,
@@ -17,8 +17,10 @@ import {
   removeWallet,
   resolveWalletPath,
   getActiveWalletName,
+  getAddress,
   type WalletConfig,
 } from '../lib/wallet-config.ts';
+import type { NetworkName } from '../lib/network.ts';
 import { WALLETS_DIR_NAME, MIDNIGHT_DIR, DIR_MODE, isValidWalletName } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, yellow, dim, green, teal } from '../ui/colors.ts';
@@ -102,12 +104,12 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
     seedBuffer = Buffer.from(mnemonicToSeedSync(mnemonic).slice(0, 32));
   }
 
-  const address = deriveUnshieldedAddress(seedBuffer, networkName);
+  const addresses = deriveAllAddresses(seedBuffer);
+  const activeAddress = addresses[networkName];
 
   const config: WalletConfig = {
     seed: seedBuffer.toString('hex'),
-    network: networkName,
-    address,
+    addresses,
     createdAt: new Date().toISOString(),
   };
 
@@ -124,8 +126,9 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
   if (hasFlag(args, 'json')) {
     const result: Record<string, unknown> = {
       name,
-      address,
-      network: networkName,
+      addresses,
+      activeAddress,
+      activeNetwork: networkName,
       seed: seedBuffer.toString('hex'),
       file: savedPath,
       createdAt: config.createdAt,
@@ -136,14 +139,14 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
     return;
   }
 
-  // Address to stdout (pipeable)
-  process.stdout.write(address + '\n');
+  // Active address to stdout (pipeable)
+  process.stdout.write(activeAddress + '\n');
 
   // Details to stderr
   process.stderr.write('\n' + header('Wallet Generated') + '\n\n');
   process.stderr.write(keyValue('Name', name) + '\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
-  process.stderr.write(keyValue('Address', formatAddress(address)) + '\n');
+  process.stderr.write(keyValue('Address', formatAddress(activeAddress)) + '\n');
   process.stderr.write(keyValue('File', savedPath) + '\n');
   process.stderr.write(keyValue('Active', 'yes') + '\n');
   process.stderr.write('\n');
@@ -175,16 +178,20 @@ async function walletList(args: ParsedArgs): Promise<void> {
     return;
   }
 
+  // Resolve current network for display
+  const networkName = resolveNetworkName({ args });
+
   process.stderr.write('\n' + header('Wallets') + '\n\n');
 
   for (const w of wallets) {
     const marker = w.isActive ? green(' ●') : '  ';
     const paddedName = w.name.padEnd(16);
     const nameStr = w.isActive ? bold(teal(paddedName)) : teal(paddedName);
-    const addrTrunc = w.address.length > 30
-      ? w.address.slice(0, 20) + '...' + w.address.slice(-8)
-      : w.address;
-    process.stderr.write(`${marker} ${nameStr} ${addrTrunc.padEnd(35)} ${dim(w.network)}\n`);
+    const addr = w.addresses[networkName] ?? '(unknown)';
+    const addrTrunc = addr.length > 30
+      ? addr.slice(0, 20) + '...' + addr.slice(-8)
+      : addr;
+    process.stderr.write(`${marker} ${nameStr} ${addrTrunc.padEnd(35)} ${dim(networkName)}\n`);
   }
 
   process.stderr.write('\n' + divider() + '\n');
@@ -214,12 +221,15 @@ async function walletInfo(args: ParsedArgs): Promise<void> {
   const walletPath = resolveWalletPath(name);
   const config = loadWalletConfig(walletPath);
   const isActive = name === getActiveWalletName();
+  const networkName = resolveNetworkName({ args });
+  const activeAddress = config.addresses[networkName];
 
   if (hasFlag(args, 'json')) {
     writeJsonResult({
       name,
-      address: config.address,
-      network: config.network,
+      addresses: config.addresses,
+      activeAddress,
+      activeNetwork: networkName,
       createdAt: config.createdAt,
       file: walletPath,
       active: isActive,
@@ -227,16 +237,24 @@ async function walletInfo(args: ParsedArgs): Promise<void> {
     return;
   }
 
-  // Bare address to stdout (pipeable)
-  process.stdout.write(config.address + '\n');
+  // Bare active address to stdout (pipeable)
+  process.stdout.write(activeAddress + '\n');
 
   process.stderr.write('\n' + header('Wallet Info') + '\n\n');
   process.stderr.write(keyValue('Name', name) + '\n');
-  process.stderr.write(keyValue('Address', formatAddress(config.address)) + '\n');
-  process.stderr.write(keyValue('Network', config.network) + '\n');
+
+  // Show all addresses, highlighting active network
+  for (const [network, addr] of Object.entries(config.addresses)) {
+    const isActiveNet = network === networkName;
+    const label = isActiveNet ? bold(network) : network;
+    const marker = isActiveNet ? ' *' : '';
+    process.stderr.write(keyValue(label + marker, formatAddress(addr as string)) + '\n');
+  }
+
   process.stderr.write(keyValue('Created', config.createdAt) + '\n');
   process.stderr.write(keyValue('File', walletPath) + '\n');
   process.stderr.write(keyValue('Active', isActive ? 'yes' : 'no') + '\n');
+  process.stderr.write(dim('  * = active network') + '\n');
   process.stderr.write('\n' + divider() + '\n\n');
 }
 

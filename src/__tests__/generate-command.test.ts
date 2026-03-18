@@ -32,10 +32,10 @@ describe('generate command — random mode', () => {
 
     expect(fs.existsSync(walletFile)).toBe(true);
     const config = loadWalletConfig(walletFile);
-    expect(config.network).toBe('undeployed');
+    expect(config.addresses.undeployed).toBeDefined();
     expect(config.mnemonic).toBeDefined();
     expect(config.mnemonic!.split(' ').length).toBe(24);
-    expect(config.address.startsWith('mn_addr_undeployed1')).toBe(true);
+    expect(config.addresses.undeployed.startsWith('mn_addr_undeployed1')).toBe(true);
     expect(config.seed.length).toBe(64);
     expect(config.createdAt).toBeDefined();
   });
@@ -71,9 +71,9 @@ describe('generate command — seed mode', () => {
 
     const config = loadWalletConfig(walletFile);
     expect(config.seed).toBe(TEST_SEED);
-    expect(config.network).toBe('preprod');
+    expect(config.addresses.preprod).toBeDefined();
     expect(config.mnemonic).toBeUndefined();
-    expect(config.address.startsWith('mn_addr_preprod1')).toBe(true);
+    expect(config.addresses.preprod.startsWith('mn_addr_preprod1')).toBe(true);
   });
 
   it('produces deterministic address from same seed', async () => {
@@ -86,7 +86,7 @@ describe('generate command — seed mode', () => {
 
     const config1 = loadWalletConfig(file1);
     const config2 = loadWalletConfig(file2);
-    expect(config1.address).toBe(config2.address);
+    expect(config1.addresses.preprod).toBe(config2.addresses.preprod);
     expect(config1.seed).toBe(config2.seed);
   });
 
@@ -117,9 +117,9 @@ describe('generate command — mnemonic mode', () => {
     await generateCommand(args);
 
     const config = loadWalletConfig(walletFile);
-    expect(config.network).toBe('preview');
+    expect(config.addresses.preview).toBeDefined();
     expect(config.mnemonic).toBe(VALID_MNEMONIC);
-    expect(config.address.startsWith('mn_addr_preview1')).toBe(true);
+    expect(config.addresses.preview.startsWith('mn_addr_preview1')).toBe(true);
   });
 
   it('produces deterministic address from same mnemonic', async () => {
@@ -131,7 +131,7 @@ describe('generate command — mnemonic mode', () => {
 
     const config1 = loadWalletConfig(file1);
     const config2 = loadWalletConfig(file2);
-    expect(config1.address).toBe(config2.address);
+    expect(config1.addresses.preview).toBe(config2.addresses.preview);
     expect(config1.seed).toBe(config2.seed);
   });
 });

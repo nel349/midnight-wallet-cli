@@ -4,12 +4,13 @@
 import * as ledger from '@midnight-ntwrk/ledger-v7';
 import { MidnightBech32m, UnshieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
-import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
+import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
 import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
 import { type FacadeBundle, buildFacade, startAndSyncFacade, quickSync, stopFacade, suppressSdkTransientErrors } from './facade.ts';
 import { loadWalletCache, saveWalletCache } from './wallet-cache.ts';
+import { verbose } from './verbose.ts';
 import {
   NATIVE_TOKEN_TYPE,
   TOKEN_MULTIPLIER,
@@ -21,6 +22,7 @@ import {
   DUST_REGISTRATION_TIMEOUT_MS,
   DUST_REGISTRATION_RETRY_DELAY_MS,
   SYNC_ATTEMPT_TIMEOUT_MS,
+  SYNC_ATTEMPT_REMOTE_TIMEOUT_MS,
   DUST_COST_OVERHEAD,
   MIN_DUST_FOR_TRANSFER,
 } from './constants.ts';
@@ -409,6 +411,7 @@ async function buildAndSubmitTransfer(
 
       const ttl = new Date(Date.now() + TX_TTL_MINUTES * 60 * 1000);
 
+      verbose('transfer', 'Building transfer transaction...');
       const unprovenRecipe = await bundle.facade.transferTransaction(
         [
           {
@@ -426,10 +429,12 @@ async function buildAndSubmitTransfer(
         { ttl, payFees: true },
       );
 
+      verbose('transfer', 'Signing recipe...');
       const signedRecipe = await bundle.facade.signRecipe(unprovenRecipe, (payload) =>
         bundle.keystore.signData(payload)
       );
 
+      verbose('transfer', 'Generating ZK proof...');
       onProving?.();
       const finalizedTx = await Promise.race([
         bundle.facade.finalizeRecipe(signedRecipe),
@@ -438,8 +443,10 @@ async function buildAndSubmitTransfer(
         }),
       ]);
 
+      verbose('transfer', 'Submitting transaction to node...');
       onSubmitting?.();
       const txHash = await bundle.facade.submitTransaction(finalizedTx);
+      verbose('transfer', `Transaction submitted: ${txHash}`);
       return txHash;
     } catch (err: any) {
       lastError = err;
@@ -530,6 +537,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
   const cache = useCache ? loadWalletCache(walletAddress, networkName) : null;
 
   // Build facade — may be rebuilt on sync retry
+  verbose('transfer', 'Building facade...');
   let bundle = await buildFacade(seedBuffer, networkConfig, cache);
   let shutdownComplete = false;
 
@@ -549,23 +557,35 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
   signal?.addEventListener('abort', onAbort, { once: true });
 
   try {
-    // Start & sync with retry — dust wallet can hang intermittently.
-    // On timeout, tear down and rebuild the facade (same as user Ctrl+C + retry).
+    // Start & sync with retry — dust wallet can take many events to catch up
+    // on remote networks (preview/preprod). On timeout, save partial progress
+    // to cache so the next attempt resumes where it left off.
+    const isRemote = networkConfig.networkId !== 'Undeployed';
+    const syncTimeoutMs = isRemote ? SYNC_ATTEMPT_REMOTE_TIMEOUT_MS : SYNC_ATTEMPT_TIMEOUT_MS;
     const MAX_SYNC_ATTEMPTS = 3;
     let syncedState!: any;
+
+    verbose('transfer', `Sync timeout: ${syncTimeoutMs / 1000}s (${isRemote ? 'remote' : 'local'} network)`);
 
     for (let attempt = 1; attempt <= MAX_SYNC_ATTEMPTS; attempt++) {
       try {
         syncedState = await startAndSyncFacade(bundle, {
           onProgress: onSync,
           onSyncDetail,
-          timeoutMs: SYNC_ATTEMPT_TIMEOUT_MS,
+          timeoutMs: syncTimeoutMs,
           syncMode: 'lite',
         });
         break;
       } catch (err: any) {
         if (signal?.aborted) throw new Error('Operation cancelled');
         if (attempt < MAX_SYNC_ATTEMPTS && String(err?.message).includes('timed out')) {
+          // Save partial sync progress to cache before retrying
+          if (useCache) {
+            try {
+              verbose('transfer', 'Saving partial sync progress to cache...');
+              await saveWalletCache(walletAddress, networkName, bundle.facade);
+            } catch { /* best-effort */ }
+          }
           onDust?.(`Sync timed out, retrying (attempt ${attempt + 1}/${MAX_SYNC_ATTEMPTS})...`);
           await stopFacade(bundle).catch(() => {});
           const retryCache = useCache ? loadWalletCache(walletAddress, networkName) : null;
@@ -579,7 +599,9 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     if (signal?.aborted) throw new Error('Operation cancelled');
 
     // Check balance
+    verbose('transfer', 'Sync complete, checking balance...');
     const unshieldedBalance = syncedState.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
+    verbose('transfer', `Balance: ${Number(unshieldedBalance) / TOKEN_MULTIPLIER} NIGHT`);
     if (unshieldedBalance < amount) {
       const haveNight = Number(unshieldedBalance) / TOKEN_MULTIPLIER;
       throw new Error(
@@ -591,7 +613,9 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     if (signal?.aborted) throw new Error('Operation cancelled');
 
     // Ensure dust — pass syncedState to avoid shareReplay stale-read
+    verbose('transfer', 'Ensuring dust availability...');
     await ensureDust(bundle, onDust, syncedState);
+    verbose('transfer', 'Dust available');
 
     // Pre-flight: fail fast if dust exists but is below the minimum for a transfer.
     // The actual fee = feesWithMargin(tx, params, 5) + DUST_COST_OVERHEAD (~0.5 DUST total).
@@ -611,6 +635,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     if (signal?.aborted) throw new Error('Operation cancelled');
 
     // Build, sign, prove, submit (re-ensures dust on retry)
+    verbose('transfer', 'Building and submitting transaction...');
     const txHash = await buildAndSubmitTransfer(
       bundle,
       decodedAddress,

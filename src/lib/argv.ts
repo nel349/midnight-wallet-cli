@@ -74,6 +74,14 @@ export function hasFlag(args: ParsedArgs, name: string): boolean {
 }
 
 /**
+ * Check if --verbose flag is present.
+ * Note: -v is reserved for --version, so only --verbose enables verbose mode.
+ */
+export function isVerbose(args: ParsedArgs): boolean {
+  return hasFlag(args, 'verbose');
+}
+
+/**
  * Require a flag value — throws a descriptive error if missing.
  */
 export function requireFlag(args: ParsedArgs, name: string, description: string): string {

@@ -2,22 +2,28 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
 import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME, WALLETS_DIR_NAME, DEFAULT_WALLET_NAME, DIR_MODE, FILE_MODE, isValidWalletName } from './constants.ts';
-import { isValidNetworkName } from './network.ts';
+import { isValidNetworkName, type NetworkName } from './network.ts';
 import { loadCliConfig, saveCliConfig } from './cli-config.ts';
+import { deriveAllAddresses } from './derive-address.ts';
 
 export interface WalletConfig {
   seed: string;
   mnemonic?: string;
-  network: string;
-  address: string;
+  addresses: Record<NetworkName, string>;
   createdAt: string;
 }
 
 export interface WalletInfo {
   name: string;
-  address: string;
-  network: string;
+  addresses: Record<NetworkName, string>;
   isActive: boolean;
+}
+
+/**
+ * Get the address for a specific network from a wallet config.
+ */
+export function getAddress(config: WalletConfig, network: NetworkName): string {
+  return config.addresses[network];
 }
 
 function getMidnightDir(): string {
@@ -123,17 +129,30 @@ export function listWallets(): WalletInfo[] {
     const filePath = path.join(walletsDir, file);
     try {
       const content = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      // Support both old format (address/network) and new format (addresses)
+      let addresses: Record<NetworkName, string>;
+      if (content.addresses) {
+        addresses = content.addresses;
+      } else if (content.address && content.seed) {
+        // Old format — derive all addresses from seed
+        try {
+          const seedBuffer = Buffer.from(content.seed, 'hex');
+          addresses = deriveAllAddresses(seedBuffer);
+        } catch {
+          addresses = { undeployed: content.address, preprod: '(unknown)', preview: '(unknown)' } as Record<NetworkName, string>;
+        }
+      } else {
+        addresses = { undeployed: '(unknown)', preprod: '(unknown)', preview: '(unknown)' } as Record<NetworkName, string>;
+      }
       return {
         name,
-        address: content.address ?? '(unknown)',
-        network: content.network ?? '(unknown)',
+        addresses,
         isActive: name === activeName,
       };
     } catch {
       return {
         name,
-        address: '(invalid)',
-        network: '(invalid)',
+        addresses: { undeployed: '(invalid)', preprod: '(invalid)', preview: '(invalid)' } as Record<NetworkName, string>,
         isActive: name === activeName,
       };
     }
@@ -233,34 +252,72 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
     throw new Error(`Failed to read wallet file: ${resolvedPath}\n${err.message}`);
   }
 
-  let config: WalletConfig;
+  let raw: any;
   try {
-    config = JSON.parse(content);
+    raw = JSON.parse(content);
   } catch {
     throw new Error(`Invalid JSON in wallet file: ${resolvedPath}`);
   }
 
-  if (!config.seed || !config.network || !config.address || !config.createdAt) {
-    const missing = ['seed', 'network', 'address', 'createdAt'].filter(
-      (f) => !config[f as keyof WalletConfig],
-    );
-    throw new Error(
-      `Wallet file is missing required fields (${missing.join(', ')}): ${resolvedPath}`
-    );
+  // Check required fields (seed + createdAt are always required)
+  if (!raw.seed || !raw.createdAt) {
+    // Check for old-format fields too
+    const requiredOld = ['seed', 'createdAt'];
+    if (!raw.addresses) {
+      requiredOld.push('address');
+    }
+    const missing = requiredOld.filter((f) => !raw[f]);
+    if (missing.length > 0) {
+      throw new Error(
+        `Wallet file is missing required fields (${missing.join(', ')}): ${resolvedPath}`
+      );
+    }
   }
 
-  if (!/^[0-9a-fA-F]+$/.test(config.seed)) {
+  if (!/^[0-9a-fA-F]+$/.test(raw.seed)) {
     throw new Error(
       `Invalid seed format in wallet file (expected hex string): ${resolvedPath}`
     );
   }
 
-  if (!isValidNetworkName(config.network)) {
+  // Auto-migrate old format: { address, network } → { addresses }
+  if (!raw.addresses) {
+    if (!raw.address) {
+      throw new Error(
+        `Wallet file is missing required fields (address): ${resolvedPath}`
+      );
+    }
+    // Old format — derive all addresses from seed
+    const seedBuffer = Buffer.from(raw.seed, 'hex');
+    const addresses = deriveAllAddresses(seedBuffer);
+
+    const config: WalletConfig = {
+      seed: raw.seed,
+      addresses,
+      createdAt: raw.createdAt,
+    };
+    if (raw.mnemonic) config.mnemonic = raw.mnemonic;
+
+    // Write back migrated format (keep old fields for backwards compat)
+    const migrated = { ...raw, addresses };
+    fs.writeFileSync(resolvedPath, JSON.stringify(migrated, null, 2) + '\n', { mode: FILE_MODE });
+
+    return config;
+  }
+
+  // New format — validate addresses map
+  if (typeof raw.addresses !== 'object') {
     throw new Error(
-      `Invalid network "${config.network}" in wallet file: ${resolvedPath}\n` +
-      `Valid networks: preprod, preview, undeployed`
+      `Wallet file has invalid addresses field: ${resolvedPath}`
     );
   }
+
+  const config: WalletConfig = {
+    seed: raw.seed,
+    addresses: raw.addresses,
+    createdAt: raw.createdAt,
+  };
+  if (raw.mnemonic) config.mnemonic = raw.mnemonic;
 
   return config;
 }

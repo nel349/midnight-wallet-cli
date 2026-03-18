@@ -1,7 +1,8 @@
 // transfer command — send NIGHT from my wallet to another address
 // Usage: midnight transfer <to> <amount>
 
-import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
@@ -41,11 +42,8 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   // Resolve network
-  const { name: networkName, config: networkConfig } = resolveNetwork({
-    args,
-    walletNetwork: config.network,
-    address: config.address,
-  });
+  const { name: networkName, config: networkConfig } = resolveNetwork({ args });
+  const address = config.addresses[networkName];
 
   // Apply endpoint overrides: --flag > config > network default
   applyEndpointOverrides(networkConfig, {
@@ -57,12 +55,13 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
   // Show header on stderr
   process.stderr.write('\n' + header('Transfer') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
-  process.stderr.write(keyValue('From', formatAddress(config.address, true)) + '\n');
+  process.stderr.write(keyValue('From', formatAddress(address, true)) + '\n');
   process.stderr.write(keyValue('To', formatAddress(recipientAddress, true)) + '\n');
   process.stderr.write(keyValue('Amount', bold(amountNight + ' NIGHT')) + '\n');
   process.stderr.write('\n');
 
   const noCache = hasFlag(args, 'no-cache');
+  if (isVerbose(args)) enableVerbose();
   const spinner = startSpinner('Starting wallet...');
 
   try {
@@ -73,13 +72,16 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
       amountNight,
       signal,
       noCache,
-      walletAddress: config.address,
+      walletAddress: address,
       networkName,
       onSync(applied, highest) {
         if (highest > 0) {
           const pct = Math.min(Math.round((applied / highest) * 100), 100);
           spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
         }
+      },
+      onSyncDetail(detail) {
+        spinner.update(`Syncing wallet... (waiting on: ${detail})`);
       },
       onDust(status) {
         spinner.update(`Dust: ${status}`);

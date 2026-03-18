@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import infoCommand from '../commands/info.ts';
 import { parseArgs } from '../lib/argv.ts';
 import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
+import { deriveAllAddresses } from '../lib/derive-address.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -9,10 +10,12 @@ import * as os from 'os';
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-info-cmd-test-${process.pid}`);
 
+const TEST_SEED = 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233';
+const TEST_ADDRESSES = deriveAllAddresses(Buffer.from(TEST_SEED, 'hex'));
+
 const TEST_CONFIG: WalletConfig = {
-  seed: 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233',
-  network: 'preprod',
-  address: 'mn_addr_preprod1qqqqqqtest',
+  seed: TEST_SEED,
+  addresses: TEST_ADDRESSES,
   createdAt: '2026-01-15T10:30:00.000Z',
 };
 
@@ -38,7 +41,7 @@ describe('info command — stdout (pipeable data)', () => {
     const args = parseArgs(['info', '--wallet', walletFile]);
     await infoCommand(args);
     const out = io.stdout().trim();
-    expect(out).toBe('mn_addr_preprod1qqqqqqtest');
+    expect(out).toBe(TEST_ADDRESSES.undeployed);
   });
 });
 
@@ -50,17 +53,18 @@ describe('info command — stderr (formatted details)', () => {
     const args = parseArgs(['info', '--wallet', walletFile]);
     await infoCommand(args);
     const err = io.stderr();
-    expect(err).toContain('mn_addr_preprod1qqqqqqtest');
+    expect(err).toContain(TEST_ADDRESSES.undeployed);
   });
 
-  it('displays wallet network', async () => {
+  it('displays active network', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     saveWalletConfig(TEST_CONFIG, walletFile);
 
     const args = parseArgs(['info', '--wallet', walletFile]);
     await infoCommand(args);
     const err = io.stderr();
-    expect(err).toContain('preprod');
+    expect(err).toContain('Active Network');
+    expect(err).toContain('undeployed');
   });
 
   it('displays creation date', async () => {

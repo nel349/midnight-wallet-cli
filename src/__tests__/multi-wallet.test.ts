@@ -27,6 +27,7 @@ import {
   FILE_MODE,
   isValidWalletName,
 } from '../lib/constants.ts';
+import { deriveAllAddresses } from '../lib/derive-address.ts';
 
 // Use a temp dir that simulates ~/.midnight
 const TEST_HOME = path.join(os.tmpdir(), `midnight-multi-wallet-test-${process.pid}`);
@@ -34,17 +35,18 @@ const TEST_MIDNIGHT_DIR = path.join(TEST_HOME, MIDNIGHT_DIR);
 const TEST_WALLETS_DIR = path.join(TEST_MIDNIGHT_DIR, WALLETS_DIR_NAME);
 const TEST_CONFIG_PATH = path.join(TEST_MIDNIGHT_DIR, 'config.json');
 
+const SEED_1 = 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233';
+const SEED_2 = '1111111111111111111111111111111111111111111111111111111111111111';
+
 const VALID_WALLET: WalletConfig = {
-  seed: 'aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233',
-  network: 'preprod',
-  address: 'mn_addr_preprod1qqqqqqtest',
+  seed: SEED_1,
+  addresses: deriveAllAddresses(Buffer.from(SEED_1, 'hex')),
   createdAt: '2025-01-01T00:00:00.000Z',
 };
 
 const VALID_WALLET_2: WalletConfig = {
-  seed: '1111111111111111111111111111111111111111111111111111111111111111',
-  network: 'undeployed',
-  address: 'mn_addr_undeployed1qqqqqqtest2',
+  seed: SEED_2,
+  addresses: deriveAllAddresses(Buffer.from(SEED_2, 'hex')),
   createdAt: '2025-02-01T00:00:00.000Z',
 };
 
@@ -256,7 +258,6 @@ describe('wallet config round-trip with named wallets', () => {
     saveWalletConfig(VALID_WALLET, walletPath);
     const loaded = loadWalletConfig(walletPath);
     expect(loaded.seed).toBe(VALID_WALLET.seed);
-    expect(loaded.address).toBe(VALID_WALLET.address);
-    expect(loaded.network).toBe(VALID_WALLET.network);
+    expect(loaded.addresses).toEqual(VALID_WALLET.addresses);
   });
 });

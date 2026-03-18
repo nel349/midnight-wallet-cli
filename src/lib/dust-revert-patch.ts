@@ -1,6 +1,6 @@
 // SDK workaround: patch CoreWallet to allow safe dust revert after rejection.
 //
-// SDK BUG (wallet-sdk-dust-wallet 2.0.0-rc.5):
+// SDK BUG (wallet-sdk-dust-wallet 2.0.0):
 //   1. DustLocalState.spend() (WASM) consumes the UTXO from state.utxos during
 //      balancing — the coin is removed from local state before the tx hits the chain.
 //   2. CoreWallet.applyFailed() calls state.processTtls(ctime + gracePeriod) which
@@ -13,18 +13,18 @@
 // Fix: We patch three CoreWallet methods:
 //   1. spendCoins — saves a serialized snapshot of DustLocalState BEFORE the spend
 //   2. revertTransaction — restores the pre-spend DustLocalState from the snapshot,
-//      giving the UTXO back, and clears pendingDustTokens. Coin is immediately available.
+//      giving the UTXO back, and clears pendingDust. Coin is immediately available.
 //   3. applyEvents — cleans up snapshots when coins are confirmed on-chain.
 //
 // ON SDK UPGRADE: verify that CoreWallet still exports spendCoins, revertTransaction,
-// applyFailed, applyEvents, and pendingDustTokensToMap with the same signatures.
+// applyFailed, applyEvents, and pendingDustToMap with the same signatures.
 // Test: reject a submitTransaction in `mn serve`, then immediately balance again.
 // If dust recovers without this patch, the SDK bug is fixed and this file can be removed.
 //
 // This patch is applied once at import time and affects all facade operations.
 
 import { DustLocalState } from '@midnight-ntwrk/ledger-v7';
-import { CoreWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
+import { CoreWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
 
 // Map from nullifier → serialized DustLocalState bytes (pre-spend snapshot).
 // Cleaned up on revert (rejection) and on applyEvents (successful on-chain confirmation).
@@ -40,9 +40,9 @@ CoreWallet.applyEvents = function patchedApplyEvents(
   const result = _originalApplyEvents.call(CoreWallet, wallet, secretKey, events, currentTime);
 
   // After applying events, pending entries for confirmed txs are filtered out.
-  // Clean up any snapshots whose nullifiers are no longer in pendingDustTokens.
-  if (preSpendSnapshots.size > 0 && result?.pendingDustTokens) {
-    const stillPending = new Set(result.pendingDustTokens.map((t: any) => t.nullifier));
+  // Clean up any snapshots whose nullifiers are no longer in pendingDust.
+  if (preSpendSnapshots.size > 0 && result?.pendingDust) {
+    const stillPending = new Set(result.pendingDust.map((t: any) => t.nullifier));
     for (const nullifier of preSpendSnapshots.keys()) {
       if (!stillPending.has(nullifier)) {
         preSpendSnapshots.delete(nullifier);
@@ -69,9 +69,9 @@ CoreWallet.spendCoins = function patchedSpendCoins(
 
   // result = [dustSpends[], updatedWallet]
   const updatedWallet = result[1] ?? result;
-  if (snapshot && updatedWallet?.pendingDustTokens) {
+  if (snapshot && updatedWallet?.pendingDust) {
     // Save snapshot for each NEW pending entry (the ones just added)
-    for (const pending of updatedWallet.pendingDustTokens) {
+    for (const pending of updatedWallet.pendingDust) {
       if (!preSpendSnapshots.has(pending.nullifier)) {
         preSpendSnapshots.set(pending.nullifier, snapshot);
       }
@@ -87,7 +87,7 @@ const _originalRevert = CoreWallet.revertTransaction;
 
 CoreWallet.revertTransaction = function safeRevertTransaction(wallet: any, tx: any): any {
   // Extract nullifiers of dust spends from the transaction
-  const pendingSpendsMap = CoreWallet.pendingDustTokensToMap(wallet.pendingDustTokens);
+  const pendingSpendsMap = CoreWallet.pendingDustToMap(wallet.pendingDust);
   const removedNullifiers: any[] = [];
 
   const intents = tx.intents;
@@ -118,7 +118,7 @@ CoreWallet.revertTransaction = function safeRevertTransaction(wallet: any, tx: a
   return {
     ...wallet,
     state: restoredState,
-    pendingDustTokens: wallet.pendingDustTokens.filter(
+    pendingDust: wallet.pendingDust.filter(
       (token: any) => !removedNullifiers.includes(token.nullifier),
     ),
   };

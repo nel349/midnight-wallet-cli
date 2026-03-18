@@ -24,7 +24,8 @@ export const MIN_DUST_FOR_TRANSFER = 800_000_000_000_000n;
 
 // Timeouts (milliseconds)
 export const SYNC_TIMEOUT_MS = 300_000;       // 5 minutes — full wallet sync (used by dust/balance commands)
-export const SYNC_ATTEMPT_TIMEOUT_MS = 30_000; // 30 seconds — per sync attempt (transfer retries on timeout)
+export const SYNC_ATTEMPT_TIMEOUT_MS = 30_000;        // 30 seconds — per sync attempt on localnet
+export const SYNC_ATTEMPT_REMOTE_TIMEOUT_MS = 120_000; // 120 seconds — per sync attempt on remote networks (preview/preprod)
 export const PRE_SEND_SYNC_TIMEOUT_MS = 10_000; // 10 seconds — quick sync before tx
 export const DUST_TIMEOUT_MS = 120_000;        // 2 minutes — wait for dust generation
 export const PROOF_TIMEOUT_MS = 300_000;       // 5 minutes — ZK proof generation

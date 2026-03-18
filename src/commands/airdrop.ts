@@ -30,11 +30,7 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
   const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
 
   // Resolve network — must be undeployed
-  const { name: networkName, config: networkConfig } = resolveNetwork({
-    args,
-    walletNetwork: config.network,
-    address: config.address,
-  });
+  const { name: networkName, config: networkConfig } = resolveNetwork({ args });
 
   // Apply endpoint overrides: --flag > config > network default
   applyEndpointOverrides(networkConfig, {
@@ -52,7 +48,7 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
   }
 
   const noCache = hasFlag(args, 'no-cache');
-  const recipientAddress = config.address;
+  const recipientAddress = config.addresses[networkName];
   const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
   const genesisAddress = deriveUnshieldedAddress(genesisSeedBuffer, networkName);
 

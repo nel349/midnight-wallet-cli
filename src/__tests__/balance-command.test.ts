@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import balanceCommand from '../commands/balance.ts';
 import { parseArgs } from '../lib/argv.ts';
 import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
-import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
+import { deriveUnshieldedAddress, deriveAllAddresses } from '../lib/derive-address.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
 import { detectTestcontainerPorts } from '../lib/network.ts';
@@ -50,8 +50,7 @@ describe.skipIf(!HAS_INDEXER)('balance command — reads address from wallet fil
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: GENESIS_SEED,
-      network: 'undeployed',
-      address: GENESIS_UNDEPLOYED_ADDRESS,
+      addresses: deriveAllAddresses(genesisSeedBuffer),
       createdAt: '2026-01-01T00:00:00.000Z',
     };
     saveWalletConfig(config, walletFile);

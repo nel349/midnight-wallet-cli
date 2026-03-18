@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseArgs, getFlag, hasFlag, requireFlag, type ParsedArgs } from '../lib/argv.ts';
+import { parseArgs, getFlag, hasFlag, isVerbose, requireFlag, type ParsedArgs } from '../lib/argv.ts';
 
 describe('parseArgs', () => {
   it('parses command from first positional', () => {
@@ -147,5 +147,27 @@ describe('requireFlag', () => {
 
   it('throws for a boolean-only flag (no value)', () => {
     expect(() => requireFlag(args, 'verbose', 'level')).toThrow('Missing required flag');
+  });
+});
+
+describe('isVerbose', () => {
+  it('returns true when --verbose is present', () => {
+    const args = parseArgs(['transfer', '--verbose']);
+    expect(isVerbose(args)).toBe(true);
+  });
+
+  it('returns false when --verbose is absent', () => {
+    const args = parseArgs(['transfer']);
+    expect(isVerbose(args)).toBe(false);
+  });
+
+  it('does not match -v (reserved for --version)', () => {
+    const args = parseArgs(['-v']);
+    expect(isVerbose(args)).toBe(false);
+  });
+
+  it('works with other flags present', () => {
+    const args = parseArgs(['transfer', '--network', 'preview', '--verbose', '--no-cache']);
+    expect(isVerbose(args)).toBe(true);
   });
 });

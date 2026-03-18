@@ -1,5 +1,5 @@
 // Braille spinner for stderr — in-place updates via \r
-// Degrades to static text when NO_COLOR is set
+// Supports interleaved log lines without breaking the animation
 
 import { teal, isColorEnabled } from './colors.ts';
 
@@ -9,21 +9,45 @@ const FRAME_INTERVAL_MS = 80;
 export interface Spinner {
   update(message: string): void;
   stop(finalMessage?: string): void;
+  /** Write a log line without breaking the spinner animation. */
+  log(line: string): void;
+}
+
+let active: Spinner | null = null;
+
+export function getActiveSpinner(): Spinner | null {
+  return active;
+}
+
+/** Strip ANSI escape codes for accurate visible-length measurement. */
+function stripAnsi(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
 export function start(message: string): Spinner {
+  let stopped = false;
+
   if (!isColorEnabled()) {
-    // Static fallback — print once
-    process.stderr.write(`⠋ ${message}`);
-    return {
+    let currentMessage = message;
+    process.stderr.write(`⠋ ${currentMessage}`);
+    const spinner: Spinner = {
       update(msg: string) {
-        process.stderr.write(`\r⠋ ${msg}`);
+        currentMessage = msg;
+        process.stderr.write(`\r⠋ ${currentMessage}\x1b[K`);
       },
       stop(finalMessage?: string) {
-        const final = finalMessage ?? message;
-        process.stderr.write(`\r✓ ${final}\n`);
+        if (stopped) return;
+        stopped = true;
+        active = null;
+        process.stderr.write(`\r✓ ${finalMessage ?? currentMessage}\x1b[K\n`);
+      },
+      log(line: string) {
+        process.stderr.write(`\r\x1b[K${line}\n`);
+        process.stderr.write(`⠋ ${currentMessage}`);
       },
     };
+    active = spinner;
+    return spinner;
   }
 
   let frameIndex = 0;
@@ -31,26 +55,44 @@ export function start(message: string): Spinner {
 
   const render = () => {
     const frame = teal(BRAILLE_FRAMES[frameIndex]!);
-    process.stderr.write(`\r${frame} ${currentMessage}\x1b[K`);
+    // Truncate by visible length to prevent line wrapping (breaks \r)
+    const cols = process.stderr.columns || 80;
+    const maxVisible = cols - 4; // "⠋ " prefix + safety margin
+    let text = currentMessage;
+    if (stripAnsi(text).length > maxVisible) {
+      // Truncate the raw message (before any ANSI), then let callers re-apply color
+      const plain = stripAnsi(text);
+      text = plain.slice(0, maxVisible);
+    }
+    process.stderr.write(`\r${frame} ${text}\x1b[K`);
     frameIndex = (frameIndex + 1) % BRAILLE_FRAMES.length;
   };
 
   render();
   const timer = setInterval(render, FRAME_INTERVAL_MS);
 
-  return {
+  const spinner: Spinner = {
     update(msg: string) {
       currentMessage = msg;
     },
     stop(finalMessage?: string) {
+      if (stopped) return;
+      stopped = true;
       clearInterval(timer);
+      active = null;
       const final = finalMessage ?? currentMessage;
       process.stderr.write(`\r\x1b[32m✓\x1b[0m ${final}\x1b[K\n`);
     },
+    log(line: string) {
+      process.stderr.write(`\r\x1b[K${line}\n`);
+      render();
+    },
   };
+
+  active = spinner;
+  return spinner;
 }
 
-// Convenience wrapper: run async fn with spinner, auto-cleanup on success or error
 export async function withSpinner<T>(message: string, fn: () => Promise<T>): Promise<T> {
   const spinner = start(message);
   try {

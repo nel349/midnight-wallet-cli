@@ -20,6 +20,7 @@ import {
   SYNC_TIMEOUT_MS,
   PRE_SEND_SYNC_TIMEOUT_MS,
 } from './constants.ts';
+import { verbose } from './verbose.ts';
 
 const NETWORK_ID_MAP: Record<string, NetworkId.NetworkId> = {
   PreProd: NetworkId.NetworkId.PreProd,
@@ -57,6 +58,11 @@ export async function buildFacade(
   if (networkId === undefined) {
     throw new Error(`Unknown networkId: ${networkConfig.networkId}`);
   }
+
+  verbose('facade', `Building facade for network ${networkConfig.networkId}`);
+  verbose('facade', `Node: ${networkConfig.node}`);
+  verbose('facade', `Indexer: ${networkConfig.indexerWS}`);
+  verbose('facade', `Proof server: ${networkConfig.proofServer}`);
 
   const shieldedSeed = deriveShieldedSeed(seedBuffer);
   const unshieldedSeed = deriveUnshieldedSeed(seedBuffer);
@@ -99,6 +105,7 @@ export async function buildFacade(
   let facade: WalletFacade;
 
   if (cache) {
+    verbose('facade', 'Restoring from cache...');
     try {
       facade = await WalletFacade.init({
         configuration,
@@ -107,11 +114,14 @@ export async function buildFacade(
         dust: (cfg) => DustWallet(cfg).restore(cache.dust),
       });
       restoredFromCache = true;
+      verbose('facade', 'Cache restore successful');
     } catch (err) {
+      verbose('facade', `Cache restore failed: ${(err as Error).message}`);
       process.stderr.write(`  Cache restore failed, building from scratch: ${(err as Error).message}\n`);
       facade = await initFresh();
     }
   } else {
+    verbose('facade', 'No cache, building fresh');
     facade = await initFresh();
   }
 
@@ -192,18 +202,44 @@ export async function startAndSyncFacade(
   const { onProgress, onSyncDetail, timeoutMs, syncMode = 'full' } = options;
   const { facade, zswapSecretKeys, dustSecretKey } = bundle;
 
+  verbose('sync', 'Starting facade (connecting to node and indexer)...');
   await facade.start(zswapSecretKeys, dustSecretKey);
+  verbose('sync', 'Facade started, subscribing to state...');
+
+  const effectiveTimeout = timeoutMs ?? SYNC_TIMEOUT_MS;
+  verbose('sync', `Sync timeout: ${effectiveTimeout / 1000}s, mode: ${syncMode}`);
 
   return new Promise<FacadeState>((resolve, reject) => {
     let resolved = false;
+    let emissionCount = 0;
+    let lastPendingKey = '';
+
+    let lastState: FacadeState | null = null;
 
     const timeout = setTimeout(() => {
-      if (!resolved) reject(new Error('Wallet sync timed out'));
-    }, timeoutMs ?? SYNC_TIMEOUT_MS);
+      if (!resolved) {
+        verbose('sync', `Sync timed out after ${effectiveTimeout / 1000}s (${emissionCount} emissions)`);
+        if (lastState) {
+          try {
+            const up = lastState.unshielded?.progress;
+            verbose('sync', `  unshielded: applied=${up?.appliedId} highest=${up?.highestTransactionId} complete=${up?.isStrictlyComplete()}`);
+            const dp = lastState.dust?.state?.progress as any;
+            verbose('sync', `  dust: applied=${dp?.appliedIndex} highest=${dp?.highestRelevantWalletIndex} complete=${dp?.isStrictlyComplete?.()} connected=${dp?.isConnected}`);
+            if (syncMode === 'full') {
+              const sp = lastState.shielded?.state?.progress;
+              verbose('sync', `  shielded: complete=${sp?.isStrictlyComplete()}`);
+            }
+          } catch { /* best-effort */ }
+        }
+        reject(new Error('Wallet sync timed out'));
+      }
+    }, effectiveTimeout);
 
     bundle.keepAlive = facade.state().subscribe({
       next: (state) => {
         if (resolved) return;
+        emissionCount++;
+        lastState = state;
 
         // Report unshielded progress
         if (onProgress) {
@@ -215,15 +251,22 @@ export async function startAndSyncFacade(
           }
         }
 
-        // Report which wallets are still syncing (diagnostic)
-        if (onSyncDetail) {
-          try {
-            const pending: string[] = [];
-            if (syncMode === 'full' && !state.shielded?.state?.progress?.isStrictlyComplete()) pending.push('shielded');
-            if (isDustSyncPending(state)) pending.push('dust');
-            if (!state.unshielded?.progress?.isStrictlyComplete()) pending.push('unshielded');
-            if (pending.length > 0) onSyncDetail(pending.join(', '));
-          } catch { /* best-effort diagnostic */ }
+        // Report which wallets are still syncing
+        const pending: string[] = [];
+        try {
+          if (syncMode === 'full' && !state.shielded?.state?.progress?.isStrictlyComplete()) pending.push('shielded');
+          if (isDustSyncPending(state)) pending.push('dust');
+          if (!state.unshielded?.progress?.isStrictlyComplete()) pending.push('unshielded');
+        } catch { /* best-effort */ }
+
+        if (pending.length > 0) {
+          onSyncDetail?.(pending.join(', '));
+          // Only log verbose on first emission, when pending wallets change, or every 100th
+          const pendingKey = pending.join(',');
+          if (emissionCount === 1 || pendingKey !== lastPendingKey || emissionCount % 100 === 0) {
+            verbose('sync', `Waiting on: ${pending.join(', ')} (emission #${emissionCount})`);
+            lastPendingKey = pendingKey;
+          }
         }
 
         // Resolve when synced (uses custom predicate to work around
@@ -231,11 +274,13 @@ export async function startAndSyncFacade(
         if (isFacadeSynced(state, syncMode)) {
           resolved = true;
           clearTimeout(timeout);
+          verbose('sync', `Sync complete after ${emissionCount} emissions`);
           resolve(state);
         }
       },
       error: (err) => {
         if (!resolved) {
+          verbose('sync', `Sync error: ${(err as Error).message}`);
           clearTimeout(timeout);
           reject(err);
         }

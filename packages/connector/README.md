@@ -39,8 +39,8 @@ wallet.disconnect();
 Start the wallet server first:
 
 ```bash
-mn serve            # interactive terminal approval
-mn serve --yes      # auto-approve all requests (dev only)
+mn serve                # interactive terminal approval
+mn serve --approve-all  # auto-approve all requests (dev only)
 ```
 
 ## API Reference
@@ -225,7 +225,7 @@ This is the pattern used by the [bboard-ui example](https://github.com/midnight-
 
 ## Approval Notifications
 
-When `mn serve` is running in interactive mode (without `--yes`), write operations pause for terminal approval. Use the callbacks to show a loading state in your UI:
+When `mn serve` is running in interactive mode (without `--approve-all`), write operations pause for terminal approval. Use the callbacks to show a loading state in your UI:
 
 ```typescript
 const wallet = await createWalletClient({

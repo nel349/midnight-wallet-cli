@@ -4,6 +4,19 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`mn cache clear` command** — Clear wallet sync state cache. Supports `--network` to clear a specific network and `--wallet` to clear a specific wallet. Available as MCP tool (`midnight_cache_clear`).
+- **`mn config unset` command** — Reset a config key to its default value (e.g. `mn config unset proof-server`).
+- **`mn status` command** — Network health check showing indexer, node, and proof server connectivity with latency. Available as MCP tool (`midnight_status`).
+- **Preview network support** — Connect to the Midnight preview testnet with `--network preview`.
+- **Phase-based progress logging in `mn serve`** — Long operations (sync, prove, balance, submit) now show timed phases in the terminal (e.g. `▸ Proving [2.3s]`). DApp clients receive structured progress notifications.
+- **Spinner for long-running SDK calls** — Terminal feedback during wallet sync and proof generation.
+
+### Changed
+
+- **SDK upgraded to stable 2.0.0** — wallet-sdk packages moved from RC to stable releases (wallet-sdk 2.0.0, wallet-sdk-hd 3.0.1, wallet-sdk-address-format 3.0.1). Imports updated from `wallet-sdk-dust-wallet` to `wallet-sdk-dust-wallet/v1`.
+
 ### Fixed
 
 - **Instant dust recovery after transaction rejection** — Rejecting a `submitTransaction` in `mn serve` no longer breaks the dust wallet. Previously, the SDK's internal revert mechanism (`CoreWallet.applyFailed`) called `processTtls()` which destroyed the dust UTXO entirely, leaving the wallet unable to balance any further write operations until new dust was generated on-chain (2+ minutes on preprod, requiring a cache clear and restart in the worst case). We now snapshot the WASM `DustLocalState` before each dust spend and restore it on revert, giving the coin back instantly. Operators can reject and re-approve transactions as many times as needed without any interruption.

@@ -3,7 +3,8 @@
 
 import * as ledger from '@midnight-ntwrk/ledger-v7';
 
-import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
@@ -33,11 +34,8 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   // Resolve network
-  const { name: networkName, config: networkConfig } = resolveNetwork({
-    args,
-    walletNetwork: config.network,
-    address: config.address,
-  });
+  const { name: networkName, config: networkConfig } = resolveNetwork({ args });
+  const address = config.addresses[networkName];
 
   // Apply endpoint overrides: --flag > config > network default
   applyEndpointOverrides(networkConfig, {
@@ -47,9 +45,10 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   });
 
   const noCache = hasFlag(args, 'no-cache');
+  if (isVerbose(args)) enableVerbose();
 
   // Load cached wallet state (unless --no-cache)
-  const cache = noCache ? null : loadWalletCache(config.address, networkName);
+  const cache = noCache ? null : loadWalletCache(address, networkName);
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
 
   const cleanup = async () => {
@@ -72,9 +71,9 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
 
   try {
     if (subcommand === 'register') {
-      await dustRegister(bundle, networkName, config.address, noCache, isJson, signal, warningRef);
+      await dustRegister(bundle, networkName, address, noCache, isJson, signal, warningRef);
     } else {
-      await dustStatus(bundle, networkName, config.address, noCache, isJson, signal, warningRef);
+      await dustStatus(bundle, networkName, address, noCache, isJson, signal, warningRef);
     }
   } finally {
     signal?.removeEventListener('abort', onAbort);
@@ -111,6 +110,9 @@ async function dustRegister(
           const pct = Math.min(Math.round((applied / highest) * 100), 100);
           spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
         }
+      },
+      onSyncDetail: (detail) => {
+        spinner.update(`Syncing wallet... (waiting on: ${detail})`);
       },
     });
 
@@ -192,6 +194,9 @@ async function dustStatus(
           const pct = Math.min(Math.round((applied / highest) * 100), 100);
           spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
         }
+      },
+      onSyncDetail: (detail) => {
+        spinner.update(`Syncing wallet... (waiting on: ${detail})`);
       },
     });
 

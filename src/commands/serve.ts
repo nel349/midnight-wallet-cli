@@ -2,7 +2,8 @@
 // Usage: midnight serve [--port 9932] [--wallet path] [--network name]
 //                       [--approve-all] [--no-auto-approve-reads] [--json]
 
-import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
@@ -15,7 +16,7 @@ import { createRpcServer, type RpcServer } from '../lib/ws-rpc.ts';
 import { DEFAULT_SERVE_PORT } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, dim, teal, green, red } from '../ui/colors.ts';
-import { start as startSpinner } from '../ui/spinner.ts';
+import { start as startSpinner, getActiveSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function serveCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
@@ -37,11 +38,8 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
-  const { name: networkName, config: networkConfig } = resolveNetwork({
-    args,
-    walletNetwork: config.network,
-    address: config.address,
-  });
+  const { name: networkName, config: networkConfig } = resolveNetwork({ args });
+  const address = config.addresses[networkName];
 
   // Apply endpoint overrides: --flag > config > network default
   applyEndpointOverrides(networkConfig, {
@@ -54,7 +52,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
   process.stderr.write('\n' + header('DApp Connector Server') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
-  process.stderr.write(keyValue('Address', formatAddress(config.address, true)) + '\n');
+  process.stderr.write(keyValue('Address', formatAddress(address, true)) + '\n');
   process.stderr.write(keyValue('Port', String(port)) + '\n');
   process.stderr.write(keyValue('Auto-approve reads', approveAll || autoApproveReads ? 'yes' : 'no') + '\n');
   process.stderr.write(keyValue('Auto-approve writes', approveAll ? 'yes' : 'no') + '\n');
@@ -63,16 +61,19 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   // ── Suppress SDK noise ──
 
   const unsuppress = suppressSdkTransientErrors((_tag, msg) => {
-    process.stderr.write(dim(`  SDK: ${msg}`) + '\n');
+    const s = getActiveSpinner();
+    if (s) { s.log(dim(`  SDK: ${msg}`)); }
+    else { process.stderr.write(dim(`  SDK: ${msg}`) + '\n'); }
   });
   const restoreRpc = suppressRpcNoise();
 
   const noCache = hasFlag(args, 'no-cache');
+  if (isVerbose(args)) enableVerbose();
 
   // ── Build & sync facade ──
 
   const spinner = startSpinner('Building wallet facade...');
-  const cache = noCache ? null : loadWalletCache(config.address, networkName);
+  const cache = noCache ? null : loadWalletCache(address, networkName);
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
   if (bundle.restoredFromCache) {
     spinner.update('Restoring from cache...');
@@ -97,6 +98,9 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
           spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
         }
       },
+      onSyncDetail: (detail) => {
+        spinner.update(`Syncing wallet... (waiting on: ${detail})`);
+      },
     });
     spinner.stop('Wallet synced');
 
@@ -109,7 +113,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
     // Save cache after successful sync
     if (!noCache) {
-      try { await saveWalletCache(config.address, networkName, bundle.facade); } catch { /* best-effort */ }
+      try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
     }
 
     if (signal?.aborted) throw new Error('Operation cancelled');
@@ -184,6 +188,10 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
         if (error) {
           const label = error.code === 'Rejected' ? 'rejected by operator' : error.message;
           process.stderr.write(`  ${red('✗')} ${dim(`${conn.id} ← ${req.method} (${duration})`)} ${red(label)}` + '\n');
+          // Always show the full error message for non-rejection failures
+          if (error.code !== 'Rejected' && error.message) {
+            process.stderr.write(`  ${dim('  error:')} ${error.message}` + '\n');
+          }
         } else {
           // Build timing breakdown from phase metadata
           const phases = metadata?.phases as PhaseTiming[] | undefined;
@@ -210,7 +218,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       writeJsonResult({
         port,
         network: networkName,
-        address: config.address,
+        address,
         status: 'listening',
       });
     }
@@ -238,7 +246,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     // The SDK drops pendingDustTokens on serialization, so saving while coins
     // are locked in pending would persist a corrupted state (dust=0).
     if (!noCache && !connector.hasPendingTxs()) {
-      try { await saveWalletCache(config.address, networkName, bundle.facade); } catch { /* best-effort */ }
+      try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
     }
     try { await server.close(); } catch { /* best-effort */ }
     connector.dispose();

@@ -126,6 +126,7 @@ export interface ServiceStatus {
   state: string;
   health: string;
   port: string;
+  image: string;
 }
 
 const PORT_MAP: Record<string, string> = {
@@ -150,13 +151,14 @@ export function getServiceStatus(): ServiceStatus[] {
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
-        const obj = JSON.parse(line) as { Service?: string; State?: string; Health?: string; Publishers?: Array<{ PublishedPort?: number }> };
+        const obj = JSON.parse(line) as { Service?: string; State?: string; Health?: string; Image?: string; Publishers?: Array<{ PublishedPort?: number }> };
         const name = obj.Service ?? 'unknown';
         services.push({
           name,
           state: obj.State ?? 'unknown',
           health: obj.Health ?? '',
           port: PORT_MAP[name] ?? '',
+          image: obj.Image ?? '',
         });
       } catch {
         // skip unparseable lines
