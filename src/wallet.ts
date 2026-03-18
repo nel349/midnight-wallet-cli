@@ -116,10 +116,8 @@ async function run(): Promise<void> {
       const { default: handler } = await import('./commands/localnet.ts');
       return handler(args);
     }
-    case 'status': {
-      const { default: handler } = await import('./commands/status.ts');
-      return handler(args);
-    }
+    case 'status':
+      throw new Error('The "status" command is currently being reworked. Check back soon.');
     case 'serve': {
       const { default: handler } = await import('./commands/serve.ts');
       return handler(args, signal);

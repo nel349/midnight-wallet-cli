@@ -338,29 +338,30 @@ const COMMAND_SPECS: CommandSpec[] = [
       removed: 'Array of removed container names (clean only)',
     },
   },
-  {
-    name: 'status',
-    description: 'Show Midnight network health (from canary monitoring)',
-    usage: 'midnight status [--network <name>] [--all] [--json] [--watch]',
-    flags: [
-      '--network <name>    Show status for a specific network (default: wallet network or preprod)',
-      '--all               Show all networks side by side',
-      '--watch             Refresh every 30s',
-    ],
-    examples: [
-      'midnight status',
-      'midnight status --network preview',
-      'midnight status --all',
-      'midnight status --json',
-      'midnight status --watch',
-    ],
-    jsonFields: {
-      lastUpdated: 'ISO 8601 timestamp of last canary run',
-      dashboard: 'Dashboard URL',
-      networks: 'Per-network service health (overall + services)',
-      issues: 'Known issues filtered by network',
-    },
-  },
+  // {
+  //   name: 'status',
+  //   description: 'Show Midnight network health (from canary monitoring)',
+  //   usage: 'midnight status [--network <name>] [--all] [--json] [--watch]',
+  //   flags: [
+  //     '--network <name>    Show status for a specific network (default: wallet network or preprod)',
+  //     '--all               Show all networks side by side',
+  //     '--watch             Refresh every 30s',
+  //   ],
+  //   examples: [
+  //     'midnight status',
+  //     'midnight status --network preview',
+  //     'midnight status --all',
+  //     'midnight status --json',
+  //     'midnight status --watch',
+  //   ],
+  //   jsonFields: {
+  //     lastUpdated: 'ISO 8601 timestamp of last canary run',
+  //     dashboard: 'Dashboard URL',
+  //     networks: 'Per-network service health (overall + services)',
+  //     issues: 'Known issues filtered by network',
+  //   },
+  // },
+  // status command disabled — currently being reworked
   {
     name: 'help',
     description: 'Show usage for all commands or a specific command',
