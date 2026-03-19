@@ -1,7 +1,8 @@
 // airdrop command — fund wallet from genesis wallet (seed 0x01)
 // Only works on undeployed network (local devnet)
 
-import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
@@ -48,6 +49,7 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
   }
 
   const noCache = hasFlag(args, 'no-cache');
+  if (isVerbose(args)) enableVerbose();
   const recipientAddress = config.addresses[networkName];
   const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
   const genesisAddress = deriveUnshieldedAddress(genesisSeedBuffer, networkName);

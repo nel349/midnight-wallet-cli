@@ -44,32 +44,43 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 
 ## Quick Start
 
-### Preprod (testnet)
+### Local development (undeployed)
 
 ```bash
-# Generate a wallet
-midnight wallet generate alice --network preprod
-
-# Check balance
-midnight balance
-```
-
-### Local development
-
-```bash
-# Start local network
+# 1. Start local network (node, indexer, proof server)
 midnight localnet up
 
-# Generate a wallet
-midnight wallet generate dev --network undeployed
+# 2. Create a wallet and set the network
+midnight wallet generate alice
+midnight config set network undeployed
 
-# Airdrop tokens and register dust
+# 3. Fund your wallet and register dust (needed for fees)
 midnight airdrop 1000
 midnight dust register
 
-# Check balance and transfer
+# 4. Check balance and transfer
 midnight balance
 midnight transfer mn_addr_undeployed1... 100
+```
+
+### Preprod / Preview (testnet)
+
+```bash
+# 1. Create a wallet and set the network
+midnight wallet generate alice
+midnight config set network preprod   # or: preview
+
+# 2. Get test tokens from the faucet
+#    preprod: https://faucet.preprod.midnight.network/
+#    preview: https://faucet.preview.midnight.network/
+#    Paste your address from: midnight wallet info alice
+
+# 3. Register dust (needed for fees)
+midnight dust register
+
+# 4. Check balance and transfer
+midnight balance
+midnight transfer mn_addr_preprod1... 100
 ```
 
 ## Supported Networks
