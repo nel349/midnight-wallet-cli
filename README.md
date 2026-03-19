@@ -1,5 +1,7 @@
 # midnight-wallet-cli
 
+![midnight-wallet-cli demo](https://raw.githubusercontent.com/nel349/midnight-wallet-cli-hub/main/docs/midnight-cli-gif.gif)
+
 [![npm version](https://badge.fury.io/js/midnight-wallet-cli.svg)](https://www.npmjs.com/package/midnight-wallet-cli)
 [![npm downloads](https://img.shields.io/npm/dm/midnight-wallet-cli)](https://npm-stat.com/charts.html?package=midnight-wallet-cli)
 [![License](https://img.shields.io/npm/l/midnight-wallet-cli)](https://www.apache.org/licenses/LICENSE-2.0)
@@ -36,6 +38,7 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 | `midnight inspect-cost` | Display current block cost limits |
 | `midnight serve` | Start DApp Connector server (WebSocket JSON-RPC) |
 | `midnight config get/set` | Manage persistent config (network, wallet, endpoints) |
+| `midnight cache clear` | Clear wallet state cache |
 | `midnight localnet up/stop/down/status` | Manage a local Midnight network via Docker |
 | `midnight help [command]` | Show usage for all or a specific command |
 
@@ -44,7 +47,7 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 ### Preprod (testnet)
 
 ```bash
-# Generate a wallet on preprod
+# Generate a wallet
 midnight wallet generate alice --network preprod
 
 # Check balance
@@ -208,7 +211,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 ### Available MCP Tools
 
-Once connected, your AI agent gets access to 22 tools:
+Once connected, your AI agent gets access to 24 tools:
 
 | Tool | Description |
 |------|-------------|
@@ -229,6 +232,8 @@ Once connected, your AI agent gets access to 22 tools:
 | `midnight_dust_status` | Check dust status |
 | `midnight_config_get` | Read config value |
 | `midnight_config_set` | Write config value |
+| `midnight_config_unset` | Remove config value |
+| `midnight_cache_clear` | Clear wallet state cache |
 | `midnight_localnet_up` | Start local network |
 | `midnight_localnet_stop` | Stop local network |
 | `midnight_localnet_down` | Remove local network |
