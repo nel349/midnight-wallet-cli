@@ -1,5 +1,7 @@
 # midnight-wallet-connector
 
+![midnight-wallet-connector demo](https://raw.githubusercontent.com/nel349/midnight-wallet-cli-hub/main/docs/demo-github-connector.gif)
+
 [![npm version](https://badge.fury.io/js/midnight-wallet-connector.svg)](https://www.npmjs.com/package/midnight-wallet-connector)
 [![npm downloads](https://img.shields.io/npm/dm/midnight-wallet-connector)](https://npm-stat.com/charts.html?package=midnight-wallet-connector)
 [![License](https://img.shields.io/npm/l/midnight-wallet-connector)](https://www.apache.org/licenses/LICENSE-2.0)

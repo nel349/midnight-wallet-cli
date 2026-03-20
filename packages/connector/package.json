@@ -1,6 +1,6 @@
 {
   "name": "midnight-wallet-connector",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "type": "module",
   "description": "Client library for connecting DApps to the Midnight CLI wallet over WebSocket JSON-RPC",
   "license": "Apache-2.0",
