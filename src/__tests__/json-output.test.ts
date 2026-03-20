@@ -185,7 +185,7 @@ describe('generate --json', () => {
     expect(data.activeNetwork).toBe('undeployed');
     expect(data.activeAddress).toBe(addrs.undeployed);
     expect(data.seed).toBeDefined();
-    expect((data.seed as string).length).toBe(64);
+    expect((data.seed as string).length).toBe(128); // 64 bytes from mnemonicToSeedSync (Lace-compatible)
     expect(data.mnemonic).toBeDefined();
     expect((data.mnemonic as string).split(' ').length).toBe(24);
     expect(data.file).toBe(walletFile);

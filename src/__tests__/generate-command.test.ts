@@ -36,7 +36,7 @@ describe('generate command — random mode', () => {
     expect(config.mnemonic).toBeDefined();
     expect(config.mnemonic!.split(' ').length).toBe(24);
     expect(config.addresses.undeployed.startsWith('mn_addr_undeployed1')).toBe(true);
-    expect(config.seed.length).toBe(64);
+    expect(config.seed.length).toBe(128); // 64 bytes from mnemonicToSeedSync (Lace-compatible)
     expect(config.createdAt).toBeDefined();
   });
 

@@ -57,11 +57,11 @@ export default async function generateCommand(args: ParsedArgs): Promise<void> {
       throw new Error('Invalid BIP-39 mnemonic. Expected 12 or 24 words from the English wordlist.');
     }
     mnemonic = mnemonicStr;
-    seedBuffer = Buffer.from(mnemonicToSeedSync(mnemonic).slice(0, 32));
+    seedBuffer = Buffer.from(mnemonicToSeedSync(mnemonic));
   } else {
     // Mode: random (default)
     mnemonic = generateMnemonic(wordlist, 256); // 24 words
-    seedBuffer = Buffer.from(mnemonicToSeedSync(mnemonic).slice(0, 32));
+    seedBuffer = Buffer.from(mnemonicToSeedSync(mnemonic));
   }
 
   const addresses = deriveAllAddresses(seedBuffer);
