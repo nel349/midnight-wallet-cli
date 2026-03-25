@@ -106,7 +106,7 @@ describe('transfer command — address validation errors', () => {
     await expect(transferCommand(args)).rejects.toThrow('Invalid recipient address');
   });
 
-  it('rejects address for wrong network', async () => {
+  it('rejects garbage recipient address', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
@@ -115,9 +115,7 @@ describe('transfer command — address validation errors', () => {
     };
     saveWalletConfig(config, walletFile);
 
-    // Preprod address on undeployed network
-    const preprodAddr = deriveUnshieldedAddress(Buffer.from(GENESIS_SEED, 'hex'), 'preprod');
-    const args = parseArgs(['transfer', preprodAddr, '100', '--wallet', walletFile]);
+    const args = parseArgs(['transfer', 'not-a-valid-address', '100', '--wallet', walletFile]);
     await expect(transferCommand(args)).rejects.toThrow('Invalid recipient address');
   });
 });

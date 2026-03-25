@@ -23,7 +23,20 @@
       "Bash(npx tsx:*)",
       "Read(//Users/norman/.midnight/cache/**)",
       "Bash(mn dust:*)",
-      "Bash(mn wallet:*)"
+      "Bash(mn wallet:*)",
+      "Bash(gh pr:*)",
+      "Bash(npm view:*)",
+      "Bash(mn info:*)",
+      "Bash(mn genesis-address:*)",
+      "Bash(mn inspect-cost:*)",
+      "Bash(mn config:*)",
+      "Bash(mn airdrop:*)",
+      "mcp__midnight-wallet__midnight_genesis_address",
+      "mcp__midnight-wallet__midnight_inspect_cost",
+      "mcp__midnight-wallet__midnight_address",
+      "mcp__midnight-wallet__midnight_cache_clear",
+      "Bash(mn balance:*)",
+      "Bash(mn transfer:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

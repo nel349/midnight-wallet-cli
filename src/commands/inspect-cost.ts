@@ -2,7 +2,7 @@
 // Uses the probeDimension technique from reference implementation
 
 import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { header, keyValue, divider } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
