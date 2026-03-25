@@ -85,15 +85,13 @@
 `midnight serve` — DApp Connector API v4.0.1 over local WebSocket JSON-RPC.
 Full plan: `tasks/pillar2-dapp-connector-plan.md`
 
-- [ ] Add reverse RPC to ws-rpc.ts
-- [ ] Create dapp-connector.ts (18 API methods)
-- [ ] Create serve.ts command
-- [ ] Wire into CLI (wallet.ts, help.ts, art.ts)
-- [ ] Tests + verification
+- [X] Add reverse RPC to ws-rpc.ts
+- [X] Create dapp-connector.ts (18 API methods)
+- [X] Create serve.ts command
+- [X] Wire into CLI (wallet.ts, help.ts, art.ts)
+- [X] Tests + verification
 
 ## Future (not in scope now)
-- [ ] Shielded balance display
-- [ ] WalletFacade-based balance (full sync, shows dust)
-- [ ] `wallet list` — show all wallets in ~/.midnight/
-- [ ] `wallet switch` — change active wallet
-- [ ] `--watch` flag for balance command
+- [X] Shielded balance display
+- [X] WalletFacade-based balance (full sync, shows dust)
+- [X] `wallet list` — show all wallets in ~/.midnight/
