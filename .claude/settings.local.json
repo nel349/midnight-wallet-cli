@@ -36,7 +36,10 @@
       "mcp__midnight-wallet__midnight_address",
       "mcp__midnight-wallet__midnight_cache_clear",
       "Bash(mn balance:*)",
-      "Bash(mn transfer:*)"
+      "Bash(mn transfer:*)",
+      "Bash(npx vitest:*)",
+      "Bash(mn shield:*)",
+      "Bash(npm list:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

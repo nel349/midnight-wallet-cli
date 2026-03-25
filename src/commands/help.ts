@@ -96,24 +96,23 @@ const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'balance',
-    description: 'Check unshielded balance via GraphQL subscription',
+    description: 'Check unshielded + shielded balance (full wallet sync)',
     usage: 'midnight balance [address] [--network <name>] [--indexer-ws <url>]',
     flags: [
-      '<address>           Address to check (or reads from wallet file)',
-      '--network <name>    Override network detection',
+      '<address>           Check a specific address (unshielded only, no wallet sync)',
+      '--network <name>    Override network',
       '--indexer-ws <url>  Custom indexer WebSocket URL',
     ],
     examples: [
       'midnight balance',
       'midnight balance mn_addr_preprod1...',
-      'midnight balance --network preprod',
     ],
     jsonFields: {
-      address: 'Checked address (bech32m)',
+      address: 'Unshielded address (bech32m)',
+      shieldedAddress: 'Shielded address',
       network: 'Network name',
-      balances: 'Object mapping token type to balance string',
-      utxoCount: 'Number of UTXOs',
-      txCount: 'Number of transactions synced',
+      unshielded: '{ NIGHT, utxoCount }',
+      shielded: '{ NIGHT, availableCoins, pendingCoins }',
     },
   },
   {
@@ -170,30 +169,33 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'airdrop',
     description: 'Fund your wallet from the genesis wallet (undeployed network only)',
-    usage: 'midnight airdrop <amount> [--wallet <name|file>] [--no-cache]',
+    usage: 'midnight airdrop <amount> [--shielded] [--wallet <name|file>] [--no-cache]',
     flags: [
       '<amount>            Amount in NIGHT to airdrop',
+      '--shielded          Airdrop shielded NIGHT (from genesis shielded balance)',
       '--wallet <name|file> Wallet name or path',
       '--no-cache          Bypass wallet state cache',
     ],
     examples: [
       'midnight airdrop 1000',
-      'midnight airdrop 0.5 --wallet my-wallet.json',
+      'midnight airdrop 100 --shielded',
     ],
     jsonFields: {
       txHash: 'Transaction hash',
       amount: 'Amount airdropped (NIGHT string)',
-      recipient: 'Recipient address (bech32m)',
+      recipient: 'Recipient address (unshielded airdrop)',
+      shieldedAddress: 'Shielded address (--shielded airdrop)',
       network: 'Network name',
     },
   },
   {
     name: 'transfer',
-    description: 'Send NIGHT tokens to another address',
-    usage: 'midnight transfer <to> <amount> [--wallet <name|file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache]',
+    description: 'Send NIGHT tokens to another address (unshielded or --shielded)',
+    usage: 'midnight transfer <to> <amount> [--shielded] [--wallet <name|file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache]',
     flags: [
-      '<to>                Recipient bech32m address',
+      '<to>                Recipient bech32m address (unshielded or shielded)',
       '<amount>            Amount in NIGHT to send',
+      '--shielded          Send from shielded balance to a shielded address',
       '--wallet <name|file> Wallet name or path',
       '--proof-server <url>  Override proof server URL',
       '--node <url>          Override substrate node RPC URL',
@@ -202,7 +204,7 @@ const COMMAND_SPECS: CommandSpec[] = [
     ],
     examples: [
       'midnight transfer mn_addr_undeployed1... 100',
-      'midnight transfer mn_addr_preprod1... 50 --wallet my-wallet.json',
+      'midnight transfer mn_shield-addr_undeployed1... 50 --shielded',
     ],
     jsonFields: {
       txHash: 'Transaction hash',

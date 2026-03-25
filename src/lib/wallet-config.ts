@@ -10,13 +10,29 @@ export interface WalletConfig {
   seed: string;
   mnemonic?: string;
   addresses: Record<NetworkName, string>;
+  shieldedAddress?: string;
   createdAt: string;
 }
 
 export interface WalletInfo {
   name: string;
   addresses: Record<NetworkName, string>;
+  shieldedAddress?: string;
   isActive: boolean;
+}
+
+/**
+ * Save shielded address to an existing wallet file.
+ * Reads the file, adds shieldedAddress, writes back.
+ */
+export function saveShieldedAddress(walletPath: string, shieldedAddress: string): void {
+  const resolvedPath = path.resolve(walletPath);
+  if (!fs.existsSync(resolvedPath)) return;
+  try {
+    const raw = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8'));
+    raw.shieldedAddress = shieldedAddress;
+    fs.writeFileSync(resolvedPath, JSON.stringify(raw, null, 2) + '\n', { mode: FILE_MODE });
+  } catch { /* best-effort */ }
 }
 
 /**
@@ -147,6 +163,7 @@ export function listWallets(): WalletInfo[] {
       return {
         name,
         addresses,
+        shieldedAddress: content.shieldedAddress as string | undefined,
         isActive: name === activeName,
       };
     } catch {
@@ -297,6 +314,7 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
       createdAt: raw.createdAt,
     };
     if (raw.mnemonic) config.mnemonic = raw.mnemonic;
+    if (raw.shieldedAddress) config.shieldedAddress = raw.shieldedAddress;
 
     // Write back migrated format (keep old fields for backwards compat)
     const migrated = { ...raw, addresses };
@@ -318,6 +336,7 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
     createdAt: raw.createdAt,
   };
   if (raw.mnemonic) config.mnemonic = raw.mnemonic;
+  if (raw.shieldedAddress) config.shieldedAddress = raw.shieldedAddress;
 
   return config;
 }

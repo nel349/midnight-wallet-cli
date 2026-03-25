@@ -1,5 +1,5 @@
 // info command — display wallet metadata (no secrets)
-// Shows addresses for all networks, creation date, file path
+// Shows addresses for all networks + shielded, creation date, file path
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
@@ -17,13 +17,15 @@ export default async function infoCommand(args: ParsedArgs): Promise<void> {
 
   // JSON mode
   if (hasFlag(args, 'json')) {
-    writeJsonResult({
+    const result: Record<string, unknown> = {
       addresses: config.addresses,
       activeNetwork,
       activeAddress,
       createdAt: config.createdAt,
       file: resolvedPath,
-    });
+    };
+    if (config.shieldedAddress) result.shieldedAddress = config.shieldedAddress;
+    writeJsonResult(result);
     return;
   }
 
@@ -39,6 +41,13 @@ export default async function infoCommand(args: ParsedArgs): Promise<void> {
     const label = isActive ? bold(network) : network;
     const marker = isActive ? ' *' : '';
     process.stderr.write(keyValue(label + marker, formatAddress(addr)) + '\n');
+  }
+
+  // Shielded address (network-independent)
+  if (config.shieldedAddress) {
+    process.stderr.write(keyValue('shielded', formatAddress(config.shieldedAddress)) + '\n');
+  } else {
+    process.stderr.write(keyValue('shielded', dim('(run balance --shielded to populate)')) + '\n');
   }
 
   process.stderr.write('\n');

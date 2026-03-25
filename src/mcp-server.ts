@@ -223,7 +223,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_balance',
-    description: 'Check unshielded balance via indexer subscription',
+    description: 'Check unshielded + shielded NIGHT balance (full wallet sync when no address given)',
     inputSchema: {
       type: 'object',
       properties: {

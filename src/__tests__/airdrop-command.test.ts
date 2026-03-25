@@ -127,3 +127,31 @@ describe('airdrop command — network restriction', () => {
     await expect(airdropCommand(args)).rejects.toThrow('"preprod"');
   });
 });
+
+describe('airdrop command — shielded flag', () => {
+  it('rejects shielded airdrop on preprod', async () => {
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    const config: WalletConfig = {
+      seed: TEST_SEED,
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
+      createdAt: new Date().toISOString(),
+    };
+    saveWalletConfig(config, walletFile);
+
+    const args = parseArgs(['airdrop', '100', '--shielded', '--wallet', walletFile, '--network', 'preprod']);
+    await expect(airdropCommand(args)).rejects.toThrow('only available on the "undeployed" network');
+  });
+
+  it('throws when no amount given with --shielded', async () => {
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    const config: WalletConfig = {
+      seed: TEST_SEED,
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
+      createdAt: new Date().toISOString(),
+    };
+    saveWalletConfig(config, walletFile);
+
+    const args = parseArgs(['airdrop', '--shielded', '--wallet', walletFile]);
+    await expect(airdropCommand(args)).rejects.toThrow('Missing amount');
+  });
+});

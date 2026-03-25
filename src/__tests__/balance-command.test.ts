@@ -45,8 +45,15 @@ describe('balance command — address resolution errors', () => {
   });
 });
 
+describe('balance command — shielded flag errors', () => {
+  it('throws when --shielded used without wallet file', async () => {
+    const args = parseArgs(['balance', '--shielded', '--wallet', path.join(TEST_DIR, 'nonexistent.json')]);
+    await expect(balanceCommand(args)).rejects.toThrow('Wallet file not found');
+  });
+});
+
 describe.skipIf(!HAS_INDEXER)('balance command — reads address from wallet file', () => {
-  it('loads address from wallet file and queries local indexer', async () => {
+  it('loads address from wallet file and syncs full wallet', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: GENESIS_SEED,
@@ -62,8 +69,8 @@ describe.skipIf(!HAS_INDEXER)('balance command — reads address from wallet fil
     expect(err).toContain('Balance');
     expect(err).toContain(GENESIS_UNDEPLOYED_ADDRESS);
     expect(err).toContain('undeployed');
-    expect(err).toContain('UTXOs');
-    expect(err).toContain('Transactions');
+    expect(err).toContain('Unshielded');
+    expect(err).toContain('Shielded');
   });
 });
 
