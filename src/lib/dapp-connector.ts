@@ -2,7 +2,7 @@
 // Factory function returns a handler map for ws-rpc.ts to dispatch
 
 import * as rx from 'rxjs';
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m, UnshieldedAddress, ShieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
 import type { FacadeState } from '@midnight-ntwrk/wallet-sdk-facade';

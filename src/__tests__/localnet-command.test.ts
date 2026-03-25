@@ -59,15 +59,15 @@ describe('localnet command — argument validation', () => {
 
 describe('COMPOSE_YAML content', () => {
   it('contains the node service with correct image', () => {
-    expect(COMPOSE_YAML).toContain('midnightntwrk/midnight-node:0.22.0-rc.4');
+    expect(COMPOSE_YAML).toContain('midnightntwrk/midnight-node:0.22.3');
   });
 
   it('contains the indexer service with correct image', () => {
-    expect(COMPOSE_YAML).toContain('midnightntwrk/indexer-standalone:4.0.0-rc.3');
+    expect(COMPOSE_YAML).toContain('midnightntwrk/indexer-standalone:4.0.0');
   });
 
   it('contains the proof-server service with correct image', () => {
-    expect(COMPOSE_YAML).toContain('midnightntwrk/proof-server:8.0.0-rc.5');
+    expect(COMPOSE_YAML).toContain('midnightntwrk/proof-server:8.0.3');
   });
 
   it('exposes node port 9944', () => {

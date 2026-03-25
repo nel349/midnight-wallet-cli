@@ -1,7 +1,7 @@
 // Transaction inspection — extracts human-readable details from serialized transactions
 // Used by the DApp Connector approval prompt to show Lace-style transaction summaries
 
-import { Transaction } from '@midnight-ntwrk/ledger-v7';
+import { Transaction } from '@midnight-ntwrk/ledger-v8';
 import type { ApprovalDetail } from './approval.ts';
 
 /**

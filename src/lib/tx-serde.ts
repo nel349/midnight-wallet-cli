@@ -1,14 +1,14 @@
 // Transaction hex serialization/deserialization helpers
 // Used by the DApp Connector to pass transactions as hex strings over JSON-RPC
 
-import { Transaction } from '@midnight-ntwrk/ledger-v7';
+import { Transaction } from '@midnight-ntwrk/ledger-v8';
 import type {
   SignatureEnabled,
   Proof,
   PreProof,
   Binding,
   PreBinding,
-} from '@midnight-ntwrk/ledger-v7';
+} from '@midnight-ntwrk/ledger-v8';
 
 // ── Type aliases matching DApp Connector terminology ──
 

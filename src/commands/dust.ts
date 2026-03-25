@@ -1,7 +1,7 @@
 // dust command — register UTXOs for dust generation and check status
 // Usage: midnight dust register | midnight dust status
 
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 
 import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';

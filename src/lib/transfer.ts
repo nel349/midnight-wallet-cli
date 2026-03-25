@@ -1,7 +1,7 @@
 // Shared transfer execution — used by both airdrop and transfer commands
 // Handles: facade lifecycle, sync, balance check, dust, tx build/sign/prove/submit, retries
 
-import * as ledger from '@midnight-ntwrk/ledger-v7';
+import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m, UnshieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
 import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
