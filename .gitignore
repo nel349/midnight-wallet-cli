@@ -12,3 +12,4 @@ demo/audio/
 private/
 wallet-alice.json
 ~/.midnight/
+.claude/settings.local.json
