@@ -183,15 +183,21 @@ async function walletList(args: ParsedArgs): Promise<void> {
 
   process.stderr.write('\n' + header('Wallets') + '\n\n');
 
-  for (const w of wallets) {
-    const marker = w.isActive ? green(' ●') : '  ';
-    const paddedName = w.name.padEnd(16);
-    const nameStr = w.isActive ? bold(teal(paddedName)) : teal(paddedName);
+  for (let i = 0; i < wallets.length; i++) {
+    const w = wallets[i];
+    const marker = w.isActive ? green('●') : ' ';
+    const nameStr = w.isActive ? bold(teal(w.name)) : teal(w.name);
     const addr = w.addresses[networkName] ?? '(unknown)';
-    const addrTrunc = addr.length > 30
-      ? addr.slice(0, 20) + '...' + addr.slice(-8)
-      : addr;
-    process.stderr.write(`${marker} ${nameStr} ${addrTrunc.padEnd(35)} ${dim(networkName)}\n`);
+
+    process.stderr.write(`  ${marker} ${nameStr}\n`);
+    process.stderr.write(`    ${dim(networkName + ':')}  ${formatAddress(addr)}\n`);
+    if (w.shieldedAddress) {
+      process.stderr.write(`    ${dim('shielded:')} ${formatAddress(w.shieldedAddress)}\n`);
+    }
+
+    if (i < wallets.length - 1) {
+      process.stderr.write(dim('    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─') + '\n');
+    }
   }
 
   process.stderr.write('\n' + divider() + '\n');
@@ -225,7 +231,7 @@ async function walletInfo(args: ParsedArgs): Promise<void> {
   const activeAddress = config.addresses[networkName];
 
   if (hasFlag(args, 'json')) {
-    writeJsonResult({
+    const result: Record<string, unknown> = {
       name,
       addresses: config.addresses,
       activeAddress,
@@ -233,7 +239,9 @@ async function walletInfo(args: ParsedArgs): Promise<void> {
       createdAt: config.createdAt,
       file: walletPath,
       active: isActive,
-    });
+    };
+    if (config.shieldedAddress) result.shieldedAddress = config.shieldedAddress;
+    writeJsonResult(result);
     return;
   }
 
@@ -249,6 +257,13 @@ async function walletInfo(args: ParsedArgs): Promise<void> {
     const label = isActiveNet ? bold(network) : network;
     const marker = isActiveNet ? ' *' : '';
     process.stderr.write(keyValue(label + marker, formatAddress(addr as string)) + '\n');
+  }
+
+  // Shielded address (network-independent)
+  if (config.shieldedAddress) {
+    process.stderr.write(keyValue('shielded', formatAddress(config.shieldedAddress)) + '\n');
+  } else {
+    process.stderr.write(keyValue('shielded', dim('(run balance --shielded to populate)')) + '\n');
   }
 
   process.stderr.write(keyValue('Created', config.createdAt) + '\n');

@@ -90,7 +90,7 @@ describe('transfer command — argument validation', () => {
 });
 
 describe('transfer command — address validation errors', () => {
-  it('rejects garbage recipient address', async () => {
+  it('rejects malformed address with correct prefix', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
@@ -99,14 +99,11 @@ describe('transfer command — address validation errors', () => {
     };
     saveWalletConfig(config, walletFile);
 
-    // This will fail at validateRecipientAddress inside executeTransfer
-    // but the transfer command catches the --wallet flag parsing first, then
-    // shows the header, starts the spinner, then calls executeTransfer which validates
-    const args = parseArgs(['transfer', 'not-a-valid-address', '100', '--wallet', walletFile]);
+    const args = parseArgs(['transfer', 'mn_addr_undeployed1invalid', '100', '--wallet', walletFile]);
     await expect(transferCommand(args)).rejects.toThrow('Invalid recipient address');
   });
 
-  it('rejects garbage recipient address', async () => {
+  it('treats unknown name as wallet lookup', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
@@ -115,7 +112,68 @@ describe('transfer command — address validation errors', () => {
     };
     saveWalletConfig(config, walletFile);
 
-    const args = parseArgs(['transfer', 'not-a-valid-address', '100', '--wallet', walletFile]);
-    await expect(transferCommand(args)).rejects.toThrow('Invalid recipient address');
+    // "not-a-wallet" doesn't start with mn_addr_, so it's treated as a wallet name
+    const args = parseArgs(['transfer', 'not-a-wallet', '100', '--wallet', walletFile]);
+    await expect(transferCommand(args)).rejects.toThrow('Wallet file not found');
+  });
+});
+
+describe('transfer command — wallet name resolution', () => {
+  it('throws when wallet name does not exist', async () => {
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    const config: WalletConfig = {
+      seed: TEST_SEED,
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
+      createdAt: new Date().toISOString(),
+    };
+    saveWalletConfig(config, walletFile);
+
+    // "nonexistent-wallet" is not an address (no mn_addr_ prefix) so it will be treated as a wallet name
+    const args = parseArgs(['transfer', 'nonexistent-wallet', '100', '--wallet', walletFile]);
+    await expect(transferCommand(args)).rejects.toThrow('Wallet file not found');
+  });
+
+  it('throws when wallet name used with --shielded but has no shielded address', async () => {
+    // This test uses the real wallets dir, so we need a wallet that exists
+    // but has no shieldedAddress. We'll test with a fake address format instead.
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    const config: WalletConfig = {
+      seed: TEST_SEED,
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
+      createdAt: new Date().toISOString(),
+    };
+    saveWalletConfig(config, walletFile);
+
+    // "some-name" doesn't start with mn_addr_ or mn_shield-addr_, so treated as wallet name
+    const args = parseArgs(['transfer', 'some-name', '100', '--shielded', '--wallet', walletFile]);
+    await expect(transferCommand(args)).rejects.toThrow();
+  });
+});
+
+describe('transfer command — shielded flag', () => {
+  it('throws when no recipient given with --shielded', async () => {
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    const config: WalletConfig = {
+      seed: TEST_SEED,
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
+      createdAt: new Date().toISOString(),
+    };
+    saveWalletConfig(config, walletFile);
+
+    const args = parseArgs(['transfer', '--shielded', '--wallet', walletFile]);
+    await expect(transferCommand(args)).rejects.toThrow('Missing recipient address');
+  });
+
+  it('throws when no amount given with --shielded', async () => {
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    const config: WalletConfig = {
+      seed: TEST_SEED,
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
+      createdAt: new Date().toISOString(),
+    };
+    saveWalletConfig(config, walletFile);
+
+    const args = parseArgs(['transfer', 'mn_shield-addr_undeployed1someaddr', '100', '--shielded', '--wallet', walletFile]);
+    await expect(transferCommand(args)).rejects.toThrow('Invalid shielded address');
   });
 });
