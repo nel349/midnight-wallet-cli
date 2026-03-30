@@ -122,6 +122,10 @@ async function run(): Promise<void> {
       const { default: handler } = await import('./commands/serve.ts');
       return handler(args, signal);
     }
+    case 'test': {
+      const { default: handler } = await import('./commands/test.ts');
+      return handler(args, signal);
+    }
     default:
       throw new Error(
         `Unknown command: "${command}"\n` +
@@ -132,7 +136,7 @@ async function run(): Promise<void> {
 
 // Commands that start a WalletFacade leave WebSocket connections in the event loop.
 // facade.stop() doesn't fully drain them, so we must exit explicitly.
-const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve']);
+const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve', 'test']);
 
 run().then(() => {
   if (FACADE_COMMANDS.has(command)) {

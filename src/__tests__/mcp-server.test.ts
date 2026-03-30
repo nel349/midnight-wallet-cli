@@ -38,7 +38,7 @@ describe('MCP tool coverage', () => {
   it('every CLI command has at least one MCP tool', () => {
     // CLI commands that should have MCP tools
     // serve is a long-running server — no MCP tool equivalent
-    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'serve');
+    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'serve' && n !== 'test');
 
     for (const cmd of cliCommands) {
       // Normalize: dust → midnight_dust_register, midnight_dust_status
@@ -56,8 +56,8 @@ describe('MCP tool coverage', () => {
   });
 
   it('every COMMAND_SPEC with jsonFields is covered', () => {
-    // serve is a long-running server — no MCP tool equivalent
-    const commandsWithJson = COMMAND_SPECS.filter(s => s.jsonFields && s.name !== 'help' && s.name !== 'serve');
+    // serve and test are long-running commands — no MCP tool equivalent (yet)
+    const commandsWithJson = COMMAND_SPECS.filter(s => s.jsonFields && s.name !== 'help' && s.name !== 'serve' && s.name !== 'test');
     // Should have at least one tool per command
     expect(commandsWithJson.length).toBeGreaterThan(0);
     for (const spec of commandsWithJson) {
