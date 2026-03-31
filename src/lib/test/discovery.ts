@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import type { DappTestConfig, TestSuite, TestAssertions, NetworkName, PrepStepId } from './types.ts';
+import type { DappTestConfig, TestSuite, TestAssertions, NetworkName, PrepStepId, BrowserMode } from './types.ts';
 
 const CONFIG_FILENAME = 'dapp.test.json';
 const SUITES_DIR = 'tests/suites';
@@ -113,6 +113,7 @@ export function loadPrompt(suiteDir: string): string | null {
 
 const VALID_NETWORKS: NetworkName[] = ['undeployed', 'preprod', 'preview'];
 const VALID_STRATEGIES = ['browser', 'cli', 'hybrid'] as const;
+const VALID_BROWSER_MODES: BrowserMode[] = ['dom', 'script', 'vision', 'auto'];
 
 const PREP_STEP_PATTERN = /^(cache-clear|localnet-up|balance:\d+|dust-register|dust-wait|mn-serve|build-and-serve)$/;
 
@@ -195,10 +196,15 @@ function validateTestSuite(raw: unknown, path: string): TestSuite {
     throw new Error(`${path}: "timeout" must be a positive number (seconds)`);
   }
 
+  if (obj.browserMode !== undefined && !VALID_BROWSER_MODES.includes(obj.browserMode as BrowserMode)) {
+    throw new Error(`${path}: "browserMode" must be one of: ${VALID_BROWSER_MODES.join(', ')}`);
+  }
+
   return {
     name: obj.name,
     description: obj.description,
     strategy: obj.strategy as TestSuite['strategy'],
+    browserMode: obj.browserMode as BrowserMode | undefined,
     model: obj.model as string | undefined,
     effort: obj.effort as string | undefined,
     timeout: obj.timeout as number | undefined,

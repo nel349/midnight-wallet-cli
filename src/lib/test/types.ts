@@ -31,6 +31,7 @@ export interface TestSuite {
   name: string;
   description: string;
   strategy: TestStrategy;
+  browserMode?: BrowserMode;
   model?: string;
   effort?: string;
   timeout?: number;
@@ -38,6 +39,7 @@ export interface TestSuite {
 }
 
 export type TestStrategy = 'browser' | 'cli' | 'hybrid';
+export type BrowserMode = 'dom' | 'script' | 'vision' | 'auto';
 
 // ── Actions (tests/suites/<name>/actions.json) — CLI/hybrid only ──
 

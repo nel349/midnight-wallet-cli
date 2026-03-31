@@ -13,7 +13,7 @@ import { start as startSpinner } from '../ui/spinner.ts';
 import { discoverDappConfig, discoverTestSuites, loadAssertions, loadPrompt } from '../lib/test/discovery.ts';
 import { createPrepContext, type TestRunResult, type PrepStepResult } from '../lib/test/types.ts';
 import { runPrepSteps } from '../lib/test/prep-runner.ts';
-import { runBrowserTest } from '../lib/test/browser-test.ts';
+import { runBrowserTest, resolveBrowserMode } from '../lib/test/browser-test.ts';
 import { runAssertions, type AssertionContext } from '../lib/test/assertions.ts';
 import { writeResult, readLatestResult, listResults } from '../lib/test/results.ts';
 import { runTeardown } from '../lib/test/teardown.ts';
@@ -83,6 +83,10 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
     if (selectedSuite) {
       process.stderr.write(keyValue('Suite', selectedSuite.suite.name) + '\n');
       process.stderr.write(keyValue('Strategy', selectedSuite.suite.strategy) + '\n');
+      if (selectedSuite.suite.strategy === 'browser') {
+        const mode = resolveBrowserMode(selectedSuite.suite);
+        process.stderr.write(keyValue('Browser Mode', mode) + '\n');
+      }
     }
     process.stderr.write('\n');
   }
