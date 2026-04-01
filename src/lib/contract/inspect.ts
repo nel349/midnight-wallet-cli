@@ -144,7 +144,7 @@ export function formatCompactType(type: CompactType): string {
     case 'Uint':
       return 'bigint';
     case 'Bytes':
-      return type.length ? `Uint8Array` : 'Uint8Array';
+      return 'Uint8Array';
     case 'Opaque':
       return type.tsType ?? 'unknown';
     case 'Tuple':

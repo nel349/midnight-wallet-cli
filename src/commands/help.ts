@@ -356,6 +356,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--args \'<json>\'               JSON arguments for circuit call (call)',
       '--network <name>              Override network (default: undeployed)',
       '--path <dir>                  Path to dApp directory (inspect)',
+      '--managed <dir>               Direct path to managed/<name> directory (inspect)',
       '--json                        Output structured JSON',
     ],
     examples: [
