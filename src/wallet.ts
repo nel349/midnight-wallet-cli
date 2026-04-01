@@ -128,7 +128,7 @@ async function run(): Promise<void> {
     }
     case 'contract': {
       const { default: handler } = await import('./commands/contract.ts');
-      return handler(args);
+      return handler(args, signal);
     }
     default:
       throw new Error(
@@ -140,7 +140,7 @@ async function run(): Promise<void> {
 
 // Commands that start a WalletFacade leave WebSocket connections in the event loop.
 // facade.stop() doesn't fully drain them, so we must exit explicitly.
-const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve', 'test']);
+const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve', 'test', 'contract']);
 
 run().then(() => {
   if (FACADE_COMMANDS.has(command)) {
