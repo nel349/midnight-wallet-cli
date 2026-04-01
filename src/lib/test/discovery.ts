@@ -115,7 +115,7 @@ const VALID_NETWORKS: NetworkName[] = ['undeployed', 'preprod', 'preview'];
 const VALID_STRATEGIES = ['browser', 'cli', 'hybrid'] as const;
 const VALID_BROWSER_MODES: BrowserMode[] = ['dom', 'script', 'vision', 'auto'];
 
-const PREP_STEP_PATTERN = /^(cache-clear|localnet-up|balance:\d+|dust-register|dust-wait|mn-serve|build-and-serve)$/;
+const PREP_STEP_PATTERN = /^(cache-clear|localnet-up|balance:\d+|dust|dust-register|dust-wait|mn-serve|build-and-serve)$/;
 
 function validateDappConfig(raw: unknown, path: string): DappTestConfig {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {

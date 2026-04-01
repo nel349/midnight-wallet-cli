@@ -70,8 +70,8 @@ async function runStep(
     const amount = parseInt(step.split(':')[1], 10);
     return stepBalance(amount, config, callbacks);
   }
-  if (step === 'dust-register' || step === 'dust-wait') {
-    return stepDust(step, config, callbacks);
+  if (step === 'dust' || step === 'dust-register' || step === 'dust-wait') {
+    return stepDust(config, callbacks);
   }
   if (step === 'mn-serve') {
     return stepMnServe(config, ctx, callbacks);
@@ -92,8 +92,46 @@ async function stepCacheClear(config: DappTestConfig): Promise<void> {
   clearWalletCache(undefined, network);
 }
 
-const LOCALNET_TIMEOUT_MS = 30_000; // 30s per attempt
+const LOCALNET_TIMEOUT_MS = 30_000; // 30s for Docker health
 const LOCALNET_MAX_RETRIES = 2;
+const INDEXER_PROBE_TIMEOUT_MS = 30_000; // 30s for indexer to start responding after Docker healthy
+
+/** Probe the indexer HTTP endpoint to verify it's actually responding. */
+function probeIndexer(): boolean {
+  try {
+    const { execSync } = require('node:child_process') as typeof import('node:child_process');
+    // Any response (even 400/405) means the server is alive — we just need TCP+HTTP
+    execSync(
+      'curl -sf -o /dev/null http://localhost:8088/api/v3/graphql --max-time 3',
+      { timeout: 5_000, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    return true;
+  } catch {
+    // curl returns non-zero for HTTP errors (400, 405, etc.) with -f flag — try without -f
+    try {
+      const { execSync: exec2 } = require('node:child_process') as typeof import('node:child_process');
+      exec2(
+        'curl -s -o /dev/null http://localhost:8088/api/v3/graphql --max-time 3',
+        { timeout: 5_000, stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** Poll the indexer until it responds or timeout. */
+function waitForIndexer(timeoutMs: number, onMessage?: (msg: string) => void): boolean {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (probeIndexer()) return true;
+    onMessage?.('Waiting for indexer...');
+    const { execSync } = require('node:child_process') as typeof import('node:child_process');
+    try { execSync('sleep 2', { timeout: 3_000 }); } catch {}
+  }
+  return false;
+}
 
 async function stepLocalnetUp(callbacks: PrepCallbacks): Promise<void> {
   checkDockerAvailable();
@@ -101,15 +139,19 @@ async function stepLocalnetUp(callbacks: PrepCallbacks): Promise<void> {
 
   const expected = ['node', 'indexer', 'proof-server'];
 
-  // Always start clean for tests — stale containers cause silent failures
+  // Check Docker says all 3 are running and healthy
   const services = getServiceStatus();
-  const allHealthy = services.length === 3 &&
-    services.every(s => s.state === 'running') &&
+  const allHealthy = services.length >= 3 &&
+    expected.every(name => services.some(s => s.name === name && s.state === 'running')) &&
     services.every(s => !s.health || s.health === 'healthy');
 
   if (allHealthy) {
-    callbacks.onMessage(`Localnet OK (3 services healthy)`);
-    return;
+    // Docker thinks they're healthy — verify the indexer is actually responding
+    if (waitForIndexer(10_000, (msg) => callbacks.onMessage(msg))) {
+      callbacks.onMessage(`Localnet OK (3 services healthy, indexer responding)`);
+      return;
+    }
+    callbacks.onMessage('Localnet containers running but indexer not responding. Restarting...');
   }
 
   // Something is wrong — tear down and start fresh
@@ -129,9 +171,13 @@ async function stepLocalnetUp(callbacks: PrepCallbacks): Promise<void> {
     dockerCompose('up -d');
 
     const healthy = waitForHealthy(LOCALNET_TIMEOUT_MS);
-    if (healthy) {
-      callbacks.onMessage('Localnet running');
+    if (healthy && waitForIndexer(INDEXER_PROBE_TIMEOUT_MS, (msg) => callbacks.onMessage(msg))) {
+      callbacks.onMessage('Localnet running (indexer verified)');
       return;
+    }
+    if (healthy) {
+      callbacks.onMessage(`Attempt ${attempt}: Docker healthy but indexer not responding after ${INDEXER_PROBE_TIMEOUT_MS / 1000}s`);
+      continue;
     }
 
     // Report what went wrong on this attempt
@@ -194,8 +240,17 @@ async function stepBalance(amount: number, config: DappTestConfig, callbacks: Pr
     try { await stopFacade(bundle); } catch {}
   }
 
-  // Balance is zero — airdrop from genesis
-  callbacks.onMessage(`Balance is 0. Airdropping ${amount} NIGHT...`);
+  // Balance is zero
+  if (network !== 'undeployed') {
+    throw new Error(
+      `Wallet has 0 NIGHT on ${network}. Fund your wallet before running tests:\n` +
+      `  mn airdrop ${amount}   (if faucet available)\n` +
+      `  Or transfer NIGHT from another wallet.`
+    );
+  }
+
+  // Undeployed (localnet) — auto-airdrop from genesis
+  callbacks.onMessage(`Balance is 0. Airdropping ${amount} NIGHT from genesis...`);
   const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
   const genesisAddress = deriveUnshieldedAddress(genesisSeedBuffer, network as NetworkName);
 
@@ -217,7 +272,9 @@ async function stepBalance(amount: number, config: DappTestConfig, callbacks: Pr
   callbacks.onMessage(`Airdropped ${amount} NIGHT`);
 }
 
-async function stepDust(step: 'dust-register' | 'dust-wait', config: DappTestConfig, callbacks: PrepCallbacks): Promise<void> {
+const DUST_WAIT_TIMEOUT_MS = 90_000; // 90s for dust to become available after registration
+
+async function stepDust(config: DappTestConfig, callbacks: PrepCallbacks): Promise<void> {
   const network = config.network ?? 'undeployed';
   const { config: networkConfig } = resolveNetwork({
     args: { command: 'test', subcommand: undefined, positionals: [], flags: { network } },
@@ -233,18 +290,44 @@ async function stepDust(step: 'dust-register' | 'dust-wait', config: DappTestCon
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
 
   try {
+    callbacks.onMessage('Syncing wallet...');
     await startAndSyncFacade(bundle, { syncMode: 'lite' });
 
-    if (step === 'dust-register') {
-      callbacks.onMessage('Registering dust...');
-      await ensureDust(bundle, (status) => callbacks.onMessage(`Dust: ${status}`));
-      callbacks.onMessage('Dust registered');
-    } else {
-      callbacks.onMessage('Waiting for dust to become available...');
-      await waitForDustAvailable(bundle);
-      callbacks.onMessage('Dust is available');
+    // Register dust (auto-registers UTXOs if needed, no-op if already available)
+    callbacks.onMessage('Ensuring dust...');
+    const result = await ensureDust(bundle, (status) => callbacks.onMessage(`Dust: ${status}`));
+
+    if (result.alreadyAvailable) {
+      callbacks.onMessage('Dust already available');
+      try { await saveWalletCache(address, network, bundle.facade); } catch {}
+      return;
     }
 
+    // Dust was just registered — wait for coins to actually appear on-chain.
+    // This MUST use the same facade to get real-time state updates.
+    callbacks.onMessage('Dust registered. Waiting for coins to become available...');
+    const dustState = await waitForDustAvailable(bundle, DUST_WAIT_TIMEOUT_MS);
+
+    // Verify dust is actually available — don't trust silent timeouts
+    const dustAvailable = (() => {
+      try {
+        const dust = dustState.dust as any;
+        return dust?.availableCoins?.length > 0 || dust?.balance(new Date()) > 0n;
+      } catch { return false; }
+    })();
+
+    if (!dustAvailable) {
+      if (network !== 'undeployed') {
+        throw new Error(
+          `Dust not available on ${network}. Register dust and wait for it to generate:\n` +
+          `  mn dust register\n` +
+          `  mn dust status   (check until dustAvailable: true)`
+        );
+      }
+      throw new Error(`Dust not available after ${DUST_WAIT_TIMEOUT_MS / 1000}s. The chain may be slow — try again.`);
+    }
+
+    callbacks.onMessage('Dust is available');
     try { await saveWalletCache(address, network, bundle.facade); } catch {}
   } finally {
     restoreRpc();

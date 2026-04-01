@@ -20,8 +20,9 @@ export type PrepStepId =
   | 'cache-clear'
   | 'localnet-up'
   | `balance:${number}`
-  | 'dust-register'
-  | 'dust-wait'
+  | 'dust'
+  | 'dust-register'   // alias for 'dust' (backward compat)
+  | 'dust-wait'        // alias for 'dust' (backward compat)
   | 'mn-serve'
   | 'build-and-serve';
 
