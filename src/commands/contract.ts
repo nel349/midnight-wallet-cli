@@ -93,6 +93,81 @@ async function handleInspect(args: ParsedArgs): Promise<void> {
   process.stderr.write('\n');
 }
 
+// ── Preflight check: balance + dust before deploy/call ──
+
+async function preflight(network: string, jsonMode: boolean): Promise<void> {
+  const { loadWalletConfig, resolveWalletPath } = await import('../lib/wallet-config.ts');
+  const { resolveNetwork } = await import('../lib/resolve-network.ts');
+  const { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors } = await import('../lib/facade.ts');
+  const { loadWalletCache } = await import('../lib/wallet-cache.ts');
+  const { suppressRpcNoise } = await import('../lib/transfer.ts');
+  const ledgerMod = await import('@midnight-ntwrk/ledger-v8');
+
+  const { config: networkConfig } = resolveNetwork({
+    args: { command: 'contract', subcommand: undefined, positionals: [], flags: { network } },
+  });
+  const walletConfig = loadWalletConfig(resolveWalletPath());
+  const seedBuffer = Buffer.from(walletConfig.seed, 'hex');
+  const address = walletConfig.addresses[network as NetworkName];
+
+  const spinner = startSpinner('Checking wallet...');
+  const unsuppress = suppressSdkTransientErrors();
+  const restoreRpc = suppressRpcNoise();
+  const cache = loadWalletCache(address, network);
+  const bundle = await buildFacade(seedBuffer, networkConfig, cache);
+
+  try {
+    const state = await startAndSyncFacade(bundle, { syncMode: 'lite' });
+
+    // Check NIGHT balance
+    const nightToken = ledgerMod.unshieldedToken().raw;
+    const balance = state.unshielded.balances[nightToken] ?? 0n;
+
+    if (balance === 0n) {
+      spinner.stop(red('✗') + ' No NIGHT balance');
+      throw new Error(
+        `Wallet has 0 NIGHT on ${network}.\n\n` +
+        `  Fund your wallet before deploying:\n` +
+        `    Address: ${address}\n` +
+        (network === 'undeployed'
+          ? `    Run: midnight airdrop 1000\n`
+          : `    Use the Midnight faucet or transfer from another wallet.\n`)
+      );
+    }
+
+    // Check dust
+    const dustBalance = (() => {
+      try {
+        const dust = state.dust as any;
+        return dust?.balance?.(new Date()) ?? 0n;
+      } catch { return 0n; }
+    })();
+
+    const dustCoins = (() => {
+      try {
+        const dust = state.dust as any;
+        return dust?.availableCoins?.length ?? 0;
+      } catch { return 0; }
+    })();
+
+    if (dustBalance === 0n && dustCoins === 0) {
+      spinner.stop(red('✗') + ' No dust available');
+      throw new Error(
+        `Wallet has no dust on ${network}. Dust is required to pay transaction fees.\n\n` +
+        `  Register for dust generation:\n` +
+        `    Run: midnight dust register --network ${network}\n` +
+        `    Then wait: midnight dust status --network ${network}\n`
+      );
+    }
+
+    spinner.stop(`Wallet OK (${balance} NIGHT, dust available)`);
+  } finally {
+    restoreRpc();
+    unsuppress();
+    try { await stopFacade(bundle); } catch {}
+  }
+}
+
 // ── Serve lifecycle for deploy/call ──
 
 async function ensureServe(network: string, jsonMode: boolean): Promise<{ port: number; stop: () => Promise<void> }> {
@@ -149,6 +224,9 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     process.stderr.write(keyValue('Contract', info.name) + '\n');
     process.stderr.write(keyValue('Network', network) + '\n\n');
   }
+
+  // Pre-check: verify wallet has balance and dust before attempting deploy
+  await preflight(network, jsonMode);
 
   // Start mn serve (or reuse existing)
   const serve = await ensureServe(network, jsonMode);
@@ -229,6 +307,8 @@ async function handleCall(args: ParsedArgs): Promise<void> {
     process.stderr.write(keyValue('Circuit', circuit) + '\n');
     process.stderr.write(keyValue('Address', address.slice(0, 20) + '...') + '\n\n');
   }
+
+  await preflight(network, jsonMode);
 
   const serve = await ensureServe(network, jsonMode);
   const spinner = startSpinner(`Calling ${circuit}...`);
