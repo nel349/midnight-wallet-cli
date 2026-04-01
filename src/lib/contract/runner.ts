@@ -150,16 +150,36 @@ const MANAGED_DIR = ${JSON.stringify(managedDir)};
 // Load compiled contract class
 const contractMod = await import(pathToFileURL(resolve(MANAGED_DIR, 'contract', 'index.js')).href);
 
-// Try to load witnesses
+// Try to load witnesses and private state factory
 let witnesses;
+let createPrivateState;
 for (const p of ['contract/dist/witnesses.js', 'contract/src/witnesses.js']) {
   try {
     const wMod = await import(pathToFileURL(resolve(p)).href);
-    if (wMod.witnesses) { witnesses = wMod.witnesses; break; }
+    if (wMod.witnesses) { witnesses = wMod.witnesses; }
+    // Look for createInitialPrivateState or create*PrivateState
+    for (const key of Object.keys(wMod)) {
+      if (typeof wMod[key] === 'function' && key.startsWith('create') && key.toLowerCase().includes('privatestate')) {
+        createPrivateState = wMod[key];
+      }
+    }
+    if (witnesses) break;
   } catch {}
 }
 
 if (!witnesses) process.stderr.write('Warning: No witnesses found — using vacant witnesses\\n');
+
+// Generate initial private state
+function makeInitialPrivateState() {
+  if (createPrivateState) {
+    // Pass a random secret key (standard pattern for Midnight contracts)
+    const secretKey = new Uint8Array(32);
+    globalThis.crypto.getRandomValues(secretKey);
+    try { return createPrivateState(secretKey); } catch {}
+    try { return createPrivateState(); } catch {}
+  }
+  return {};
+}
 
 const compiled = witnesses
   ? CompiledContract.make(${JSON.stringify(contractName)}, contractMod.Contract).pipe(
@@ -225,7 +245,7 @@ process.stderr.write('Deploying contract...\\n');
 const deployed = await deployContract(providers, {
   compiledContract: compiled,
   privateStateId: ${JSON.stringify(privateStateKey)},
-  initialPrivateState: {},
+  initialPrivateState: makeInitialPrivateState(),
 });
 
 const address = deployed.deployTxData?.public?.contractAddress ?? 'unknown';
@@ -261,11 +281,13 @@ const deployed = await findDeployedContract(providers, {
   compiledContract: compiled,
   contractAddress: ${JSON.stringify(opts.contractAddress)},
   privateStateId: ${JSON.stringify(privateStateKey)},
-  initialPrivateState: {},
+  initialPrivateState: makeInitialPrivateState(),
 });
 
 process.stderr.write('Calling ${opts.circuit}...\\n');
-const args = ${JSON.stringify(opts.args ?? [])};
+// Convert numeric args to BigInt (Compact runtime requires BigInt for all integers)
+const rawArgs = ${JSON.stringify(opts.args ?? [])};
+const args = rawArgs.map(a => typeof a === 'number' ? BigInt(a) : a);
 await deployed.callTx.${opts.circuit}(...args);
 
 console.log(JSON.stringify({ status: 'success', circuit: ${JSON.stringify(opts.circuit)} }));
