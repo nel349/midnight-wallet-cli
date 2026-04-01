@@ -126,6 +126,10 @@ async function run(): Promise<void> {
       const { default: handler } = await import('./commands/test.ts');
       return handler(args, signal);
     }
+    case 'contract': {
+      const { default: handler } = await import('./commands/contract.ts');
+      return handler(args);
+    }
     default:
       throw new Error(
         `Unknown command: "${command}"\n` +

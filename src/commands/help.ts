@@ -343,6 +343,29 @@ const COMMAND_SPECS: CommandSpec[] = [
     },
   },
   {
+    name: 'contract',
+    description: 'Inspect compiled Midnight smart contracts',
+    usage: 'midnight contract <inspect> [--path <dir>] [--managed <dir>] [--json]',
+    flags: [
+      'inspect                       Show circuits, witnesses, and types',
+      '--path <dir>                  Path to dApp or contract directory (default: cwd)',
+      '--managed <dir>               Direct path to managed/<name> directory',
+      '--json                        Output structured JSON',
+    ],
+    examples: [
+      'midnight contract inspect',
+      'midnight contract inspect --path ./my-dapp',
+      'midnight contract inspect --managed ./contract/src/managed/starship',
+      'midnight contract inspect --json',
+    ],
+    jsonFields: {
+      name: 'Contract name (from managed directory)',
+      compilerVersion: 'Compact compiler version',
+      circuits: 'Array of circuit definitions with types',
+      witnesses: 'Array of witness definitions with types',
+    },
+  },
+  {
     name: 'localnet',
     description: 'Manage a local Midnight network via Docker Compose',
     usage: 'midnight localnet <up|stop|down|status|logs|clean>',

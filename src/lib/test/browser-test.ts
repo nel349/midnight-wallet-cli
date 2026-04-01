@@ -41,19 +41,17 @@ You have chrome-devtools MCP tools available. You MUST follow these rules:
 `;
 
 const SCRIPT_PREAMBLE = `\
-## Browser Automation Mode: Script (Test Bridge)
+## Browser Automation Mode: Script (Canvas App)
 
-You have chrome-devtools MCP tools available. This is a canvas-based app with a test bridge at \`window.__mnTest\`. You MUST follow these rules:
+You have chrome-devtools MCP tools available. This is a canvas-based app — the accessibility tree will be empty. You MUST follow these rules:
 
 1. Use \`navigate_page\` to open the URL in Chrome.
-2. Use \`evaluate_script\` to read game state: \`() => window.__mnTest.getState()\`
-3. Use \`evaluate_script\` to send keyboard input: \`() => window.__mnTest.pressKey('Enter')\`
-4. Use \`evaluate_script\` to type text: \`() => window.__mnTest.typeText('HELLO')\`
-5. Use \`evaluate_script\` to wait for screen transitions: \`() => window.__mnTest.waitForScreen('menu', 60000)\`
-6. Use \`evaluate_script\` to read leaderboard: \`() => window.__mnTest.getLeaderboard()\`
-7. Only use \`take_screenshot\` for final visual verification (once, at the end).
-8. Do NOT use \`take_snapshot\` — the accessibility tree is empty for canvas apps.
-9. Poll state with \`evaluate_script\` between actions to verify transitions.
+2. Use \`evaluate_script\` to dispatch keyboard input via \`window.dispatchEvent(new KeyboardEvent(...))\`.
+3. Use \`evaluate_script\` to read DOM state (e.g., toast notifications via \`document.querySelector\`).
+4. Use \`list_console_messages\` to monitor app output (contract addresses, errors, status changes).
+5. Use \`take_screenshot\` at key checkpoints to verify visual state — but minimize usage (a few, not every step).
+6. Do NOT use \`take_snapshot\` — the accessibility tree is empty for canvas content.
+7. Between actions, use \`take_screenshot\` or \`list_console_messages\` to verify transitions — not rapid polling.
 
 ---
 
