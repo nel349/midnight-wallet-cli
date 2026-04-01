@@ -352,10 +352,11 @@ async function handleCall(args: ParsedArgs): Promise<void> {
 
 async function handleState(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
+  const dappDir = resolve(process.cwd());
   const address = requireFlag(args, 'address', 'contract address');
 
   const { resolveNetwork } = await import('../lib/resolve-network.ts');
-  const { buildStateProvider } = await import('../lib/contract/providers.ts');
+  const { runState } = await import('../lib/contract/runner.ts');
 
   const network = getFlag(args, 'network') ?? 'undeployed';
   const { config: networkConfig } = resolveNetwork({
@@ -368,44 +369,68 @@ async function handleState(args: ParsedArgs): Promise<void> {
     process.stderr.write(keyValue('Network', network) + '\n\n');
   }
 
+  // Try parsed ledger state via runner (needs compiled contract in dApp)
   const spinner = startSpinner('Querying contract state...');
-  const publicDataProvider = buildStateProvider(networkConfig);
 
   try {
-    const contractState = await publicDataProvider.queryContractState(address);
+    const { info } = findContractInfo(dappDir);
 
-    if (!contractState) {
-      spinner.stop(red('✗') + ' Not found');
-      throw new Error(`No contract found at address ${address} on ${network}`);
-    }
+    const result = await runState({
+      dappDir,
+      networkConfig,
+      managedDir: info.managedDir,
+      contractName: info.name,
+      contractAddress: address,
+      onMessage: (msg) => spinner.update(msg),
+    });
 
     spinner.stop(green('✓') + ' State retrieved');
-
-    const stateData = contractState.data ?? contractState;
 
     if (jsonMode) {
       writeJsonResult({
         subcommand: 'state',
         address,
         network,
-        state: stateData,
+        ...result,
       });
     } else {
-      process.stderr.write(bold('  Ledger State') + '\n');
-      if (typeof stateData === 'object' && stateData !== null) {
-        for (const [key, value] of Object.entries(stateData)) {
-          const display = typeof value === 'bigint' ? value.toString() : JSON.stringify(value);
-          process.stderr.write(`    ${key}: ${display}\n`);
+      // Display scalar fields
+      const hasFields = Object.keys(result.fields).length > 0;
+      const hasMaps = Object.keys(result.maps).length > 0;
+
+      if (hasFields || hasMaps) {
+        process.stderr.write(bold('  Ledger State') + '\n');
+        for (const [key, value] of Object.entries(result.fields)) {
+          process.stderr.write(`    ${key}: ${teal(value)}` + '\n');
+        }
+        for (const [key, info] of Object.entries(result.maps)) {
+          process.stderr.write(`    ${key}: ${dim(`Map (${(info as any).size} entries)`)}` + '\n');
         }
       } else {
-        process.stderr.write(dim('    (raw state — use --json for full data)') + '\n');
-        process.stderr.write(`    ${JSON.stringify(stateData).slice(0, 200)}\n`);
+        process.stderr.write(dim('  (no ledger fields found)') + '\n');
       }
       process.stderr.write('\n');
     }
   } catch (err) {
-    if ((err as Error).message.includes('No contract found')) throw err;
-    spinner.stop(red('✗') + ' Query failed');
-    throw err;
+    // If runner fails (no compiled contract in cwd), fall back to raw state
+    spinner.stop(yellow('⚠') + ' Parsed state unavailable, showing raw');
+
+    const { buildStateProvider } = await import('../lib/contract/providers.ts');
+    const publicDataProvider = buildStateProvider(networkConfig);
+    const contractState = await publicDataProvider.queryContractState(address);
+
+    if (!contractState) {
+      throw new Error(`No contract found at address ${address} on ${network}`);
+    }
+
+    const stateData = contractState.data ?? contractState;
+
+    if (jsonMode) {
+      writeJsonResult({ subcommand: 'state', address, network, raw: stateData });
+    } else {
+      process.stderr.write(bold('  Raw State') + '\n');
+      process.stderr.write(dim('    (run from dApp root for parsed ledger fields)') + '\n');
+      process.stderr.write(`    ${JSON.stringify(stateData).slice(0, 200)}\n\n`);
+    }
   }
 }

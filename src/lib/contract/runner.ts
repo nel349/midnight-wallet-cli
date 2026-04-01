@@ -27,6 +27,15 @@ export interface CallOptions extends RunnerOptions {
   privateStateKey?: string;
 }
 
+export interface StateOptions {
+  dappDir: string;
+  networkConfig: NetworkConfig;
+  managedDir: string;
+  contractName: string;
+  contractAddress: string;
+  onMessage?: (msg: string) => void;
+}
+
 export interface DeployResult {
   contractAddress: string;
 }
@@ -34,6 +43,21 @@ export interface DeployResult {
 export interface CallResult {
   status: string;
   circuit: string;
+}
+
+export interface StateResult {
+  fields: Record<string, string>;
+  maps: Record<string, { size: string }>;
+}
+
+export async function runState(options: StateOptions): Promise<StateResult> {
+  const script = generateStateScript(options);
+  const result = await executeScript(options.dappDir, script, options.onMessage);
+  try {
+    return JSON.parse(result) as StateResult;
+  } catch {
+    throw new Error(`State script returned unexpected output:\n${result}`);
+  }
 }
 
 export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
@@ -292,6 +316,73 @@ await deployed.callTx.${opts.circuit}(...args);
 
 console.log(JSON.stringify({ status: 'success', circuit: ${JSON.stringify(opts.circuit)} }));
 rpcClose();
+process.exit(0);
+`;
+}
+
+function generateStateScript(opts: StateOptions): string {
+  return `
+import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
+setNetworkId(${JSON.stringify(opts.networkConfig.networkId.toLowerCase())});
+
+import { pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
+
+const MANAGED_DIR = ${JSON.stringify(opts.managedDir)};
+
+// Load the contract module which exports the ledger() function
+const contractMod = await import(pathToFileURL(resolve(MANAGED_DIR, 'contract', 'index.js')).href);
+
+if (typeof contractMod.ledger !== 'function') {
+  console.error('Contract module does not export a ledger() function');
+  process.exit(1);
+}
+
+process.stderr.write('Querying contract state...\\n');
+const provider = indexerPublicDataProvider(
+  ${JSON.stringify(opts.networkConfig.indexer)},
+  ${JSON.stringify(opts.networkConfig.indexerWS ?? opts.networkConfig.indexer.replace('http', 'ws'))},
+);
+
+const contractState = await provider.queryContractState(${JSON.stringify(opts.contractAddress)});
+if (!contractState) {
+  console.error('No contract found at address ${opts.contractAddress}');
+  process.exit(1);
+}
+
+process.stderr.write('Parsing ledger state...\\n');
+// ledger() expects contractState.data (ChargedState), not the full ContractState
+const state = contractMod.ledger(contractState.data ?? contractState);
+
+// Extract scalar fields and map fields
+const fields = {};
+const maps = {};
+
+for (const key of Object.keys(state)) {
+  const val = state[key];
+
+  // Check if it's a map-like (has size() and Symbol.iterator)
+  if (val && typeof val === 'object' && typeof val.size === 'function') {
+    try {
+      maps[key] = { size: val.size().toString() };
+    } catch {
+      maps[key] = { size: '?' };
+    }
+  } else if (typeof val === 'bigint') {
+    fields[key] = val.toString();
+  } else if (typeof val === 'string') {
+    fields[key] = val;
+  } else if (typeof val === 'boolean') {
+    fields[key] = String(val);
+  } else if (val instanceof Uint8Array) {
+    fields[key] = Array.from(val).map(b => b.toString(16).padStart(2, '0')).join('');
+  } else if (val !== undefined && val !== null) {
+    try { fields[key] = String(val); } catch { fields[key] = '?'; }
+  }
+}
+
+console.log(JSON.stringify({ fields, maps }));
 process.exit(0);
 `;
 }

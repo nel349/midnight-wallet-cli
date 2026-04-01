@@ -94,12 +94,22 @@ export interface TestRunResult {
   model?: string;
   status: 'pass' | 'fail' | 'timeout' | 'error';
   prep: PrepStepResult[];
+  actions?: ActionRunResult[];
   assertions: AssertionResult[];
   testOutput?: {
     exitCode: number;
     logFile: string;
   };
   error?: string;
+}
+
+export interface ActionRunResult {
+  id: string;
+  type: string;
+  status: 'pass' | 'fail';
+  duration: number;
+  message?: string;
+  contractAddress?: string;
 }
 
 export interface PrepStepResult {

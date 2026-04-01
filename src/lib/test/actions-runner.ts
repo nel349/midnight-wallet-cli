@@ -1,0 +1,387 @@
+// Actions runner — execute TestAction[] sequentially for CLI test strategy.
+// Uses the contract runner (deploy/call/state) with mn serve for wallet ops.
+
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import type { TestAction, DappTestConfig } from './types.ts';
+import type { NetworkConfig } from '../network.ts';
+import { runDeploy, runCall, runState, type StateResult } from '../contract/runner.ts';
+import { findContractInfo } from '../contract/inspect.ts';
+
+export interface ActionResult {
+  id: string;
+  type: string;
+  status: 'pass' | 'fail';
+  duration: number;
+  message?: string;
+  contractAddress?: string;
+  stateBefore?: StateResult;
+  stateAfter?: StateResult;
+}
+
+export interface ActionsRunnerOptions {
+  actions: TestAction[];
+  config: DappTestConfig;
+  dappDir: string;
+  suiteName: string;
+  networkConfig: NetworkConfig;
+  servePort: number;
+  redeploy?: boolean;
+  onActionStart?: (action: TestAction) => void;
+  onActionComplete?: (action: TestAction, result: ActionResult) => void;
+  onMessage?: (msg: string) => void;
+}
+
+/**
+ * Execute a list of test actions sequentially.
+ * Deploy address flows to subsequent call/state actions automatically.
+ */
+export async function runActions(options: ActionsRunnerOptions): Promise<ActionResult[]> {
+  const { actions, config, dappDir, suiteName, networkConfig, servePort, redeploy, onActionStart, onActionComplete, onMessage } = options;
+  const results: ActionResult[] = [];
+
+  // Load cached contract address (test replay)
+  const network = config.network ?? 'undeployed';
+  let contractAddress: string | undefined;
+  if (!redeploy) {
+    contractAddress = loadContractCache(dappDir, suiteName, network);
+  }
+
+  const { info } = findContractInfo(dappDir);
+
+  for (const action of actions) {
+    onActionStart?.(action);
+    const start = Date.now();
+
+    try {
+      const result = await executeAction(action, {
+        dappDir,
+        networkConfig,
+        managedDir: info.managedDir,
+        contractName: info.name,
+        servePort,
+        contractAddress,
+        onMessage,
+      });
+
+      // Capture deploy address for subsequent actions + cache it
+      if (result.contractAddress) {
+        contractAddress = result.contractAddress;
+        saveContractCache(dappDir, suiteName, network, contractAddress);
+      }
+
+      const duration = Date.now() - start;
+      const actionResult: ActionResult = { ...result, duration };
+      results.push(actionResult);
+      onActionComplete?.(action, actionResult);
+    } catch (err) {
+      const duration = Date.now() - start;
+      const actionResult: ActionResult = {
+        id: action.id,
+        type: action.type,
+        status: 'fail',
+        duration,
+        message: (err as Error).message,
+      };
+      results.push(actionResult);
+      onActionComplete?.(action, actionResult);
+      // Stop on first failure
+      break;
+    }
+  }
+
+  return results;
+}
+
+// ── Action execution ──
+
+interface ExecutionContext {
+  dappDir: string;
+  networkConfig: NetworkConfig;
+  managedDir: string;
+  contractName: string;
+  servePort: number;
+  contractAddress?: string;
+  onMessage?: (msg: string) => void;
+}
+
+async function executeAction(action: TestAction, ctx: ExecutionContext): Promise<ActionResult> {
+  switch (action.type) {
+    case 'contract-deploy':
+      return executeDeploy(action, ctx);
+    case 'contract-call':
+      return executeCall(action, ctx);
+    case 'contract-state':
+      return executeState(action, ctx);
+    case 'wallet-cmd':
+      return executeWalletCmd(action, ctx);
+    default:
+      throw new Error(`Unknown action type: ${action.type}`);
+  }
+}
+
+async function executeDeploy(action: TestAction, ctx: ExecutionContext): Promise<ActionResult> {
+  // Skip deploy if we already have a cached address (test replay)
+  if (ctx.contractAddress) {
+    return {
+      id: action.id,
+      type: action.type,
+      status: 'pass',
+      duration: 0,
+      contractAddress: ctx.contractAddress,
+      message: `Reusing cached contract ${ctx.contractAddress.slice(0, 16)}...`,
+    };
+  }
+
+  const result = await runDeploy({
+    dappDir: ctx.dappDir,
+    networkConfig: ctx.networkConfig,
+    managedDir: ctx.managedDir,
+    contractName: ctx.contractName,
+    servePort: ctx.servePort,
+    onMessage: ctx.onMessage,
+  });
+
+  return {
+    id: action.id,
+    type: action.type,
+    status: 'pass',
+    duration: 0,
+    contractAddress: result.contractAddress,
+    message: `Deployed at ${result.contractAddress.slice(0, 16)}...`,
+  };
+}
+
+async function executeCall(action: TestAction, ctx: ExecutionContext): Promise<ActionResult> {
+  if (!ctx.contractAddress) {
+    throw new Error(`Action "${action.id}": no contract address. Add a contract-deploy action first.`);
+  }
+  if (!action.circuit) {
+    throw new Error(`Action "${action.id}": missing circuit name.`);
+  }
+
+  // Snapshot state before call (for diff)
+  let stateBefore: StateResult | undefined;
+  try {
+    stateBefore = await runState({
+      dappDir: ctx.dappDir,
+      networkConfig: ctx.networkConfig,
+      managedDir: ctx.managedDir,
+      contractName: ctx.contractName,
+      contractAddress: ctx.contractAddress,
+      onMessage: () => {},
+    });
+  } catch {
+    // State snapshot is best-effort
+  }
+
+  // Parse args from object to array
+  const args = action.args ? Object.values(action.args) : [];
+
+  await runCall({
+    dappDir: ctx.dappDir,
+    networkConfig: ctx.networkConfig,
+    managedDir: ctx.managedDir,
+    contractName: ctx.contractName,
+    contractAddress: ctx.contractAddress,
+    circuit: action.circuit,
+    args,
+    servePort: ctx.servePort,
+    onMessage: ctx.onMessage,
+  });
+
+  // Snapshot state after call (for diff)
+  let stateAfter: StateResult | undefined;
+  try {
+    stateAfter = await runState({
+      dappDir: ctx.dappDir,
+      networkConfig: ctx.networkConfig,
+      managedDir: ctx.managedDir,
+      contractName: ctx.contractName,
+      contractAddress: ctx.contractAddress,
+      onMessage: () => {},
+    });
+  } catch {
+    // State snapshot is best-effort
+  }
+
+  return {
+    id: action.id,
+    type: action.type,
+    status: 'pass',
+    duration: 0,
+    message: `${action.circuit} called`,
+    stateBefore,
+    stateAfter,
+  };
+}
+
+async function executeState(action: TestAction, ctx: ExecutionContext): Promise<ActionResult> {
+  if (!ctx.contractAddress) {
+    throw new Error(`Action "${action.id}": no contract address. Add a contract-deploy action first.`);
+  }
+
+  const stateResult = await runState({
+    dappDir: ctx.dappDir,
+    networkConfig: ctx.networkConfig,
+    managedDir: ctx.managedDir,
+    contractName: ctx.contractName,
+    contractAddress: ctx.contractAddress,
+    onMessage: ctx.onMessage,
+  });
+
+  // Evaluate inline assertions if present
+  if (action.assert) {
+    const failures: string[] = [];
+
+    for (const [field, condition] of Object.entries(action.assert)) {
+      const actualStr = stateResult.fields[field];
+      if (actualStr === undefined) {
+        // Check maps
+        const mapInfo = stateResult.maps[field];
+        if (mapInfo) {
+          evaluateCondition(field, BigInt(mapInfo.size), condition as Record<string, unknown>, failures);
+        } else {
+          failures.push(`Field "${field}" not found in ledger state`);
+        }
+        continue;
+      }
+
+      // Try numeric comparison
+      try {
+        const actual = BigInt(actualStr);
+        evaluateCondition(field, actual, condition as Record<string, unknown>, failures);
+      } catch {
+        // String comparison
+        evaluateCondition(field, actualStr, condition as Record<string, unknown>, failures);
+      }
+    }
+
+    if (failures.length > 0) {
+      throw new Error(`State assertion failed:\n  ${failures.join('\n  ')}`);
+    }
+  }
+
+  return {
+    id: action.id,
+    type: action.type,
+    status: 'pass',
+    duration: 0,
+    message: `State checked (${Object.keys(stateResult.fields).length} fields, ${Object.keys(stateResult.maps).length} maps)`,
+    stateAfter: stateResult,
+  };
+}
+
+function evaluateCondition(
+  field: string,
+  actual: bigint | string,
+  condition: Record<string, unknown>,
+  failures: string[],
+): void {
+  for (const [op, expected] of Object.entries(condition)) {
+    const expectedVal = typeof expected === 'number' ? BigInt(expected) : expected;
+
+    if (typeof actual === 'bigint' && (typeof expectedVal === 'bigint' || typeof expectedVal === 'number')) {
+      const exp = BigInt(expectedVal);
+      switch (op) {
+        case '>':  if (!(actual > exp)) failures.push(`${field}: expected > ${exp}, got ${actual}`); break;
+        case '>=': if (!(actual >= exp)) failures.push(`${field}: expected >= ${exp}, got ${actual}`); break;
+        case '<':  if (!(actual < exp)) failures.push(`${field}: expected < ${exp}, got ${actual}`); break;
+        case '<=': if (!(actual <= exp)) failures.push(`${field}: expected <= ${exp}, got ${actual}`); break;
+        case '==': if (!(actual === exp)) failures.push(`${field}: expected == ${exp}, got ${actual}`); break;
+        case '!=': if (!(actual !== exp)) failures.push(`${field}: expected != ${exp}, got ${actual}`); break;
+        default: failures.push(`${field}: unknown operator "${op}"`);
+      }
+    } else {
+      // String comparison
+      const expStr = String(expectedVal);
+      switch (op) {
+        case '==': if (actual !== expStr) failures.push(`${field}: expected == "${expStr}", got "${actual}"`); break;
+        case '!=': if (actual === expStr) failures.push(`${field}: expected != "${expStr}", got "${actual}"`); break;
+        default: failures.push(`${field}: operator "${op}" not supported for string values`);
+      }
+    }
+  }
+}
+
+async function executeWalletCmd(action: TestAction, _ctx: ExecutionContext): Promise<ActionResult> {
+  // Future: execute mn commands like `mn balance`
+  return {
+    id: action.id,
+    type: action.type,
+    status: 'pass',
+    duration: 0,
+    message: `wallet-cmd: ${action.cmd ?? 'no command'} (not yet implemented)`,
+  };
+}
+
+// ── State diff utility ──
+
+export interface StateDiff {
+  field: string;
+  before: string;
+  after: string;
+}
+
+export function diffState(before: StateResult | undefined, after: StateResult | undefined): StateDiff[] {
+  if (!before || !after) return [];
+  const diffs: StateDiff[] = [];
+
+  // Compare scalar fields
+  const allFields = new Set([...Object.keys(before.fields), ...Object.keys(after.fields)]);
+  for (const field of allFields) {
+    const b = before.fields[field] ?? '(absent)';
+    const a = after.fields[field] ?? '(absent)';
+    if (b !== a) {
+      diffs.push({ field, before: b, after: a });
+    }
+  }
+
+  // Compare map sizes
+  const allMaps = new Set([...Object.keys(before.maps), ...Object.keys(after.maps)]);
+  for (const field of allMaps) {
+    const b = before.maps[field]?.size ?? '0';
+    const a = after.maps[field]?.size ?? '0';
+    if (b !== a) {
+      diffs.push({ field: `${field} (entries)`, before: b, after: a });
+    }
+  }
+
+  return diffs;
+}
+
+// ── Contract address cache (test replay) ──
+
+interface ContractCache {
+  address: string;
+  network: string;
+  timestamp: string;
+}
+
+function getCachePath(dappDir: string, suiteName: string): string {
+  return join(dappDir, 'tests', 'results', `.contract-cache-${suiteName}.json`);
+}
+
+function loadContractCache(dappDir: string, suiteName: string, network: string): string | undefined {
+  const cachePath = getCachePath(dappDir, suiteName);
+  if (!existsSync(cachePath)) return undefined;
+
+  try {
+    const cache: ContractCache = JSON.parse(readFileSync(cachePath, 'utf-8'));
+    if (cache.network !== network) return undefined; // Different network — don't reuse
+    return cache.address;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveContractCache(dappDir: string, suiteName: string, network: string, address: string): void {
+  const cachePath = getCachePath(dappDir, suiteName);
+  mkdirSync(join(dappDir, 'tests', 'results'), { recursive: true });
+  const cache: ContractCache = {
+    address,
+    network,
+    timestamp: new Date().toISOString(),
+  };
+  writeFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n');
+}

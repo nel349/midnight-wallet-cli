@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import type { DappTestConfig, TestSuite, TestAssertions, NetworkName, PrepStepId, BrowserMode } from './types.ts';
+import type { DappTestConfig, TestSuite, TestAssertions, TestActions, NetworkName, PrepStepId, BrowserMode } from './types.ts';
 
 const CONFIG_FILENAME = 'dapp.test.json';
 const SUITES_DIR = 'tests/suites';
@@ -94,6 +94,26 @@ export function loadAssertions(suiteDir: string): TestAssertions | null {
   }
 
   return validateAssertions(raw, assertionsPath);
+}
+
+/**
+ * Load actions from a suite directory, if actions.json exists.
+ */
+export function loadActions(suiteDir: string): TestActions | null {
+  const actionsPath = join(suiteDir, 'actions.json');
+
+  if (!existsSync(actionsPath)) {
+    return null;
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(actionsPath, 'utf-8'));
+  } catch (err) {
+    throw new Error(`Failed to parse ${actionsPath}: ${(err as Error).message}`);
+  }
+
+  return validateActions(raw, actionsPath);
 }
 
 /**
@@ -244,4 +264,36 @@ function validateAssertions(raw: unknown, path: string): TestAssertions {
     pre: Array.isArray(obj.pre) ? obj.pre as TestAssertions['pre'] : undefined,
     post: obj.post as TestAssertions['post'],
   };
+}
+
+const VALID_ACTION_TYPES = ['contract-deploy', 'contract-call', 'contract-state', 'wallet-cmd'] as const;
+
+function validateActions(raw: unknown, path: string): TestActions {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${path}: must be a JSON object`);
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  if (!Array.isArray(obj.actions)) {
+    throw new Error(`${path}: "actions" is required and must be an array`);
+  }
+
+  for (const action of obj.actions) {
+    if (typeof action !== 'object' || action === null) {
+      throw new Error(`${path}: each action must be an object`);
+    }
+    const a = action as Record<string, unknown>;
+    if (typeof a.id !== 'string') {
+      throw new Error(`${path}: each action must have a string "id"`);
+    }
+    if (typeof a.type !== 'string' || !VALID_ACTION_TYPES.includes(a.type as typeof VALID_ACTION_TYPES[number])) {
+      throw new Error(`${path}: action "${a.id}" has invalid type "${a.type}". Valid: ${VALID_ACTION_TYPES.join(', ')}`);
+    }
+    if (a.type === 'contract-call' && typeof a.circuit !== 'string') {
+      throw new Error(`${path}: action "${a.id}" (contract-call) requires a "circuit" field`);
+    }
+  }
+
+  return { actions: obj.actions as TestActions['actions'] };
 }

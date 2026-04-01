@@ -10,7 +10,7 @@ import { header, keyValue, divider } from '../ui/format.ts';
 import { bold, dim, green, red, teal } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
 
-import { discoverDappConfig, discoverTestSuites, loadAssertions, loadPrompt } from '../lib/test/discovery.ts';
+import { discoverDappConfig, discoverTestSuites, loadAssertions, loadActions, loadPrompt } from '../lib/test/discovery.ts';
 import { createPrepContext, type TestRunResult, type PrepStepResult } from '../lib/test/types.ts';
 import { runPrepSteps } from '../lib/test/prep-runner.ts';
 import { runBrowserTest, resolveBrowserMode } from '../lib/test/browser-test.ts';
@@ -170,10 +170,85 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
           }
         }
       } else if (suite.strategy === 'cli') {
-        // CLI strategy — future implementation
-        if (!jsonMode) {
-          process.stderr.write(dim('  CLI test strategy not yet implemented\n'));
+        const actionsConfig = loadActions(selectedSuite.suiteDir);
+        if (!actionsConfig) {
+          throw new Error(`No actions.json found in ${selectedSuite.suiteDir} — required for CLI strategy`);
         }
+
+        if (!jsonMode) {
+          process.stderr.write(bold('  CLI Test\n'));
+          process.stderr.write(dim(`  Executing ${actionsConfig.actions.length} action(s)\n\n`));
+        }
+
+        const { runActions, diffState } = await import('../lib/test/actions-runner.ts');
+        const { resolveNetwork } = await import('../lib/resolve-network.ts');
+
+        const network = config.network ?? 'undeployed';
+        const { config: networkConfig } = resolveNetwork({
+          args: { command: 'test', subcommand: 'run', positionals: [], flags: { network } },
+        });
+
+        // mn serve should already be started by the prep step (mn-serve)
+        // Use the serve port from ctx if available, otherwise default
+        const { DEFAULT_SERVE_PORT } = await import('../lib/constants.ts');
+        const servePort = ctx.serveHandle?.port ?? DEFAULT_SERVE_PORT;
+
+        const redeployFlag = hasFlag(args, 'redeploy');
+
+        const actionResults = await runActions({
+          actions: actionsConfig.actions,
+          config,
+          dappDir,
+          suiteName: suite.name,
+          networkConfig,
+          servePort,
+          redeploy: redeployFlag,
+          onActionStart: (action) => {
+            if (!jsonMode) {
+              const spinner = startSpinner(`[${action.id}] ${action.type}${action.circuit ? ` ${action.circuit}` : ''}...`);
+              (action as any)._spinner = spinner;
+            }
+          },
+          onActionComplete: (action, result) => {
+            if (!jsonMode) {
+              const spinner = (action as any)._spinner;
+              if (spinner) {
+                if (result.status === 'pass') {
+                  spinner.stop(`${green('✓')} ${action.id}: ${result.message ?? 'pass'}`);
+                } else {
+                  spinner.stop(`${red('✗')} ${action.id}: ${result.message ?? 'fail'}`);
+                }
+              }
+
+              // Show state diff if available
+              if (result.stateBefore && result.stateAfter) {
+                const diffs = diffState(result.stateBefore, result.stateAfter);
+                if (diffs.length > 0) {
+                  for (const d of diffs) {
+                    process.stderr.write(dim(`      ${d.field}: ${d.before} → `) + teal(d.after) + '\n');
+                  }
+                }
+              }
+            }
+          },
+          onMessage: (msg) => {
+            // Messages from the runner (deploy/call progress)
+          },
+        });
+
+        // Check if any action failed
+        const actionsFailed = actionResults.some(r => r.status === 'fail');
+        testExitCode = actionsFailed ? 1 : 0;
+
+        if (!jsonMode) {
+          process.stderr.write('\n');
+          const passed = actionResults.filter(r => r.status === 'pass').length;
+          const failed = actionResults.filter(r => r.status === 'fail').length;
+          process.stderr.write(`  Actions: ${green(String(passed) + ' passed')}${failed > 0 ? `, ${red(String(failed) + ' failed')}` : ''}\n`);
+        }
+
+        // Store action results for the final result JSON
+        (ctx as any)._actionResults = actionResults;
       }
     } else {
       if (!jsonMode) {
@@ -210,6 +285,9 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
     const allAssertionsPassed = assertionResults.every(r => r.status === 'pass');
     const overall = allPrepPassed && allAssertionsPassed && testExitCode === 0 ? 'pass' : 'fail';
 
+    // Collect action results if CLI strategy was used
+    const actionResults = (ctx as any)._actionResults as import('../lib/test/actions-runner.ts').ActionResult[] | undefined;
+
     const runResult: TestRunResult = {
       id: `${config.name}_${timestamp}`,
       dapp: config.name,
@@ -221,6 +299,14 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
       model: selectedSuite?.suite.model,
       status: overall,
       prep: prepResults,
+      actions: actionResults?.map(r => ({
+        id: r.id,
+        type: r.type,
+        status: r.status,
+        duration: r.duration,
+        message: r.message,
+        contractAddress: r.contractAddress,
+      })),
       assertions: assertionResults,
       testOutput: testLogFile ? { exitCode: testExitCode, logFile: testLogFile } : undefined,
     };
