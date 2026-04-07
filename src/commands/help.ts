@@ -720,7 +720,7 @@ Setup:
 If not installed globally, use "command": "npx" with
 "args": ["-y", "midnight-wallet-cli@latest", "--mcp"].
 
-AVAILABLE MCP TOOLS (25)
+AVAILABLE MCP TOOLS (24)
 ────────────────────────
 
   Wallet Management

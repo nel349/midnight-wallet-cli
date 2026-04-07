@@ -151,11 +151,13 @@ export function isFacadeSynced(state: FacadeState, syncMode: SyncMode = 'full'):
   if (!dustOk) {
     try {
       const p = state.dust?.state?.progress as any;
-      // Guard: only use the index fallback when highestRelevantWalletIndex > 0.
-      // Both indices start at 0 before the indexer reports event counts, so
-      // without this guard, 0 >= 0 fires immediately on the first emission
-      // before any dust events have been processed.
       if (p && p.highestRelevantWalletIndex > 0 && p.appliedIndex >= p.highestRelevantWalletIndex) {
+        dustOk = true;
+      }
+      // Unfunded wallet: both indices are 0 and isConnected is false.
+      // If unshielded is done (it syncs independently), treat dust as done too —
+      // there's nothing to sync, the wallet just has no dust events.
+      if (p && p.highestRelevantWalletIndex === 0 && p.appliedIndex === 0 && unshieldedOk) {
         dustOk = true;
       }
     } catch { /* best-effort */ }
@@ -165,7 +167,18 @@ export function isFacadeSynced(state: FacadeState, syncMode: SyncMode = 'full'):
     return unshieldedOk && dustOk;
   }
 
-  const shieldedOk = state.shielded?.state?.progress?.isStrictlyComplete() ?? false;
+  let shieldedOk = state.shielded?.state?.progress?.isStrictlyComplete() ?? false;
+  // Same pattern for shielded: unfunded wallet has no zswap events.
+  // If unshielded is synced and shielded shows 0/0 indices, consider it done.
+  if (!shieldedOk && unshieldedOk) {
+    try {
+      const p = state.shielded?.state?.progress as any;
+      if (p && p.highestRelevantWalletIndex === 0 && p.appliedIndex === 0) {
+        shieldedOk = true;
+      }
+    } catch { /* best-effort */ }
+  }
+
   return shieldedOk && unshieldedOk && dustOk;
 }
 
@@ -175,6 +188,9 @@ function isDustSyncPending(state: FacadeState): boolean {
   try {
     const p = state.dust?.state?.progress as any;
     if (p && p.highestRelevantWalletIndex > 0 && p.appliedIndex >= p.highestRelevantWalletIndex) return false;
+    // Unfunded wallet: 0/0 indices with unshielded synced = not pending
+    if (p && p.highestRelevantWalletIndex === 0 && p.appliedIndex === 0
+        && state.unshielded?.progress?.isStrictlyComplete()) return false;
   } catch { /* best-effort */ }
   return true;
 }

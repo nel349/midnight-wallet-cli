@@ -135,9 +135,9 @@ Every command supports `--json` for structured output:
 
 ```bash
 midnight balance --json
-# → {"address":"mn_addr_...","network":"undeployed","balances":{"NIGHT":"504.850000"},"utxoCount":2,"txCount":8}
+# → {"address":"mn_addr_...","shieldedAddress":"mn_shield-addr_...","network":"undeployed","unshielded":{"NIGHT":"1000.000000","utxoCount":1},"shielded":{"NIGHT":"10.000000","availableCoins":1,"pendingCoins":0}}
 
-midnight transfer mn_addr_... 100 --json
+midnight transfer alice 100 --json
 # → {"txHash":"00ab...","amount":100,"recipient":"mn_addr_...","network":"undeployed"}
 ```
 

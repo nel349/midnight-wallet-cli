@@ -57,19 +57,19 @@ export function getWordmarkMaterializeFrame(progress: number): string[] {
 export const COMMAND_BRIEFS: [name: string, brief: string][] = [
   ['wallet',          'Manage named wallets'],
   ['info',            'Display wallet metadata'],
-  ['balance',         'Check unshielded balance'],
+  ['balance',         'Check balance'],
   ['address',         'Derive address from seed'],
   ['genesis-address', 'Show genesis address'],
   ['inspect-cost',    'Display block limits'],
   ['airdrop',         'Fund from genesis wallet'],
   ['transfer',        'Send NIGHT tokens'],
   ['dust',            'Manage dust (fee tokens)'],
+  ['contract',        'Inspect, deploy, call contracts'],
   ['config',          'Manage CLI config'],
   ['cache',           'Manage wallet cache'],
   ['localnet',        'Manage local network'],
   ['serve',           'DApp Connector server'],
   ['test',            'Run dApp E2E tests'],
-  ['status',          'Network health status'],
   ['help',            'Show command usage'],
 ];
 

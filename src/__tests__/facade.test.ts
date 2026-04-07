@@ -132,7 +132,7 @@ describe('isFacadeSynced', () => {
       expect(isFacadeSynced(state, 'lite')).toBe(false);
     });
 
-    it('does not use fallback when highestRelevantWalletIndex is 0 (initial state)', () => {
+    it('treats 0/0 dust as synced when unshielded is complete (unfunded wallet)', () => {
       const state = {
         shielded: { state: { progress: { isStrictlyComplete: () => true } } },
         unshielded: { progress: { isStrictlyComplete: () => true } },
@@ -147,7 +147,27 @@ describe('isFacadeSynced', () => {
         },
       } as unknown as FacadeState;
 
-      // 0 >= 0 should NOT trigger the fallback — indices haven't been populated yet
+      // Unshielded is synced, dust is 0/0 → unfunded wallet, nothing to sync
+      expect(isFacadeSynced(state, 'full')).toBe(true);
+      expect(isFacadeSynced(state, 'lite')).toBe(true);
+    });
+
+    it('does not use 0/0 fallback when unshielded is not yet synced', () => {
+      const state = {
+        shielded: { state: { progress: { isStrictlyComplete: () => false } } },
+        unshielded: { progress: { isStrictlyComplete: () => false } },
+        dust: {
+          state: {
+            progress: {
+              isStrictlyComplete: () => false,
+              appliedIndex: 0,
+              highestRelevantWalletIndex: 0,
+            },
+          },
+        },
+      } as unknown as FacadeState;
+
+      // Nothing is synced yet — 0/0 on dust could be initial state, not unfunded
       expect(isFacadeSynced(state, 'full')).toBe(false);
       expect(isFacadeSynced(state, 'lite')).toBe(false);
     });
