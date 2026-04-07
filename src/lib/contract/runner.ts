@@ -193,12 +193,28 @@ for (const p of ['contract/dist/witnesses.js', 'contract/src/witnesses.js']) {
 
 if (!witnesses) process.stderr.write('Warning: No witnesses found — using vacant witnesses\\n');
 
-// Generate initial private state
+// Generate initial private state.
+// Uses a deterministic seed derived from the wallet so post/takeDown use the same key.
+// The private state provider (leveldb) persists between calls, but initialPrivateState
+// is the fallback when no stored state exists yet.
 function makeInitialPrivateState() {
   if (createPrivateState) {
-    // Pass a random secret key (standard pattern for Midnight contracts)
-    const secretKey = new Uint8Array(32);
-    globalThis.crypto.getRandomValues(secretKey);
+    // Derive a deterministic key from the wallet's coin public key.
+    // This ensures post and takeDown always use the same secret key
+    // for the same wallet, even across separate CLI invocations.
+    const cpk = walletState?.shieldedCoinPublicKey ?? '';
+    let secretKey;
+    if (cpk && cpk.length >= 64) {
+      // Use first 32 bytes of coin public key as seed
+      secretKey = new Uint8Array(32);
+      for (let i = 0; i < 32; i++) {
+        secretKey[i] = parseInt(cpk.substr(i * 2, 2), 16);
+      }
+    } else {
+      // Fallback: random (will break takeDown if state isn't persisted)
+      secretKey = new Uint8Array(32);
+      globalThis.crypto.getRandomValues(secretKey);
+    }
     try { return createPrivateState(secretKey); } catch {}
     try { return createPrivateState(); } catch {}
   }
