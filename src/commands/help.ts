@@ -533,13 +533,24 @@ MIDNIGHT CLI — AI Agent & MCP Reference
 
 Version: ${PKG_VERSION}
 
+OVERVIEW
+────────
+
+midnight-wallet-cli (mn) is a standalone CLI wallet for the Midnight
+blockchain. It manages wallets, balances, transfers (unshielded and
+shielded), dust fees, a DApp connector server, contract inspection,
+E2E testing, and a local devnet — all from the terminal.
+
+Wallets are network-agnostic: one seed derives addresses for all three
+networks (undeployed, preprod, preview). Network is chosen at runtime.
+
 STRUCTURED JSON OUTPUT
 ──────────────────────
 
-Every command supports the --json flag. When passed:
+Every command supports --json. When passed:
   - stdout receives a single line of JSON
   - stderr is fully suppressed (no spinners, no formatting)
-  - Errors produce JSON: {"error":true,"code":"...","message":"...","exitCode":N}
+  - Errors: {"error":true,"code":"...","message":"...","exitCode":N}
 
 Usage: midnight <command> [args] --json
 
@@ -548,9 +559,8 @@ CAPABILITY MANIFEST
 
   midnight help --json
 
-Outputs a machine-readable JSON manifest containing all commands,
-their flags, examples, and expected JSON output fields. Use this
-for programmatic discovery of CLI capabilities.
+Outputs a machine-readable manifest with all commands, flags,
+examples, and JSON field schemas.
 
 COMMANDS & JSON SCHEMAS
 ───────────────────────
@@ -565,11 +575,115 @@ ${COMMAND_SPECS.filter(s => s.jsonFields).map(spec => {
 ${fields}`;
 }).join('\n')}
 
-ERROR CODES
+SHIELDED TRANSACTIONS
+─────────────────────
+
+Midnight supports private (shielded) transactions using zero-knowledge
+proofs. The CLI provides full shielded support:
+
+  Balance (shows both unshielded + shielded):
+    midnight balance --json
+    → { address, shieldedAddress, network,
+        unshielded: { NIGHT, utxoCount },
+        shielded: { NIGHT, availableCoins, pendingCoins } }
+
+  Shielded airdrop (localnet only — genesis has 250M shielded NIGHT):
+    midnight airdrop 100 --shielded --json
+    → { txHash, amount, shieldedAddress, network, type: "shielded" }
+
+  Shielded transfer (to shielded address or wallet name):
+    midnight transfer alice 50 --shielded --json
+    midnight transfer mn_shield-addr_... 50 --shielded --json
+    → { txHash, amount, recipient, network, type: "shielded" }
+
+  Positional address balance (unshielded only, fast GraphQL):
+    midnight balance mn_addr_... --json
+    → { address, network, balances, utxoCount, txCount }
+
+Note: there is no self-shielding. Shielded coins come from receiving
+transfers from wallets that already have shielded tokens.
+
+WALLET NAME RESOLUTION
+──────────────────────
+
+Transfer commands accept wallet names instead of full addresses:
+
+  midnight transfer alice 10           → resolves alice's unshielded address
+  midnight transfer alice 10 --shielded → resolves alice's shielded address
+
+Names are resolved from ~/.midnight/wallets/<name>.json. If the input
+starts with mn_addr_ or mn_shield-addr_, it's used as an address directly.
+
+DAPP CONNECTOR
+──────────────
+
+  midnight serve [--port 9932] [--approve-all] [--network name]
+
+Starts a WebSocket JSON-RPC server implementing the Midnight
+ConnectedAPI interface (same as the Lace browser wallet). Any DApp
+can connect to it — no browser extension needed.
+
+  - Port default: 9932, localhost only
+  - Read operations: auto-approved
+  - Write operations: terminal approval prompt (or --approve-all)
+  - --no-auto-approve-reads: require approval for everything
+
+DApp developers connect via the midnight-wallet-connector npm package:
+
+  npm install midnight-wallet-connector
+
+  import { createWalletClient } from 'midnight-wallet-connector';
+  const wallet = await createWalletClient({
+    url: 'ws://localhost:9932',
+    networkId: 'Undeployed',  // or 'PreProd', 'Preview'
+  });
+  const balances = await wallet.getUnshieldedBalances();
+
+Reference DApp: https://github.com/nel349/midnight-starship
+
+SMART CONTRACTS
+───────────────
+
+Run these commands from the root of a dApp project that contains a
+compiled Compact contract (managed/ directory with .js and .d.ts files).
+
+  Inspect — show circuits, witnesses, types:
+    midnight contract inspect [--path <dir>] [--json]
+    → { name, compilerVersion, circuits: [...], witnesses: [...] }
+
+  Deploy — deploy a contract to the network:
+    midnight contract deploy [--network <name>] [--json]
+    → { contractName, address, network }
+    Requires: funded wallet with dust. Auto-starts mn serve if needed.
+
+  Call — call a circuit on a deployed contract:
+    midnight contract call --address <addr> --circuit <name> [--args '<json>'] [--json]
+    → { contractName, circuit, address, network, status }
+    Example: midnight contract call --address abc123... --circuit post --args '["Hello!"]'
+
+  State — read ledger state of a deployed contract:
+    midnight contract state --address <addr> [--network <name>] [--json]
+    → { address, network, fields: { key: value }, maps: { key: { size } } }
+
+  Full workflow example:
+    cd my-dapp
+    midnight contract inspect                    # see what circuits exist
+    midnight contract deploy                     # deploy to localnet
+    midnight contract call --address <addr> --circuit post --args '["Hello"]'
+    midnight contract state --address <addr>     # read on-chain state
+
+E2E TESTING
 ───────────
 
-When --json is active and an error occurs, the output is:
-  {"error":true,"code":"<CODE>","message":"...","exitCode":N}
+  midnight test run [--suite <name>] [--json]
+  midnight test list [--json]
+  midnight test results [--all] [--json]
+
+Runs E2E tests for Midnight dApps defined in dapp.test.json. Includes
+contract deployment, circuit calls, and state verification.
+
+ERROR CODES
+───────────
 
   Code                    Exit  Meaning
   INVALID_ARGS            2     Missing or invalid arguments
@@ -583,114 +697,137 @@ When --json is active and an error occurs, the output is:
   CANCELLED               7     Operation cancelled (SIGINT)
   UNKNOWN                 1     Unclassified error
 
-EXIT CODES
-──────────
-
-  0   Success
-  1   General error
-  2   Invalid arguments / usage
-  3   Wallet not found
-  4   Network / connection error
-  5   Insufficient balance
-  6   Transaction rejected
-  7   Operation cancelled (SIGINT)
-
 MCP SERVER
 ──────────
 
 The CLI includes an MCP (Model Context Protocol) server for native
-AI agent integration. Instead of parsing CLI output, agents call
-typed tools directly via JSON-RPC over stdio.
+AI agent integration. Agents call typed tools directly via JSON-RPC
+over stdio — no shell spawning or output parsing.
 
-Setup — add to your MCP config:
+Setup:
 
-  Claude Code (.mcp.json in project root):
-  {
-    "mcpServers": {
-      "midnight-wallet": {
-        "type": "stdio",
-        "command": "midnight-wallet-mcp"
-      }
-    }
-  }
+  Claude Code (.mcp.json):
+  { "mcpServers": { "midnight-wallet": { "command": "midnight-wallet-mcp" } } }
 
-  Or via CLI: claude mcp add --transport stdio midnight-wallet -- midnight-wallet-mcp
+  CLI: claude mcp add --transport stdio midnight-wallet -- midnight-wallet-mcp
 
   Cursor (.cursor/mcp.json):
-  {
-    "mcpServers": {
-      "midnight-wallet": {
-        "command": "midnight-wallet-mcp"
-      }
-    }
-  }
+  { "mcpServers": { "midnight-wallet": { "command": "midnight-wallet-mcp" } } }
+
+  VS Code (.vscode/mcp.json):
+  { "servers": { "midnight-wallet": { "type": "stdio", "command": "midnight-wallet-mcp" } } }
 
 If not installed globally, use "command": "npx" with
-"args": ["-y", "midnight-wallet-cli@latest", "--mcp"] instead.
+"args": ["-y", "midnight-wallet-cli@latest", "--mcp"].
 
-AVAILABLE MCP TOOLS (24)
+AVAILABLE MCP TOOLS (25)
 ────────────────────────
 
-  Tool Name                    Description                                          Required Params
+  Wallet Management
   midnight_wallet_generate     Create a named wallet                                name
   midnight_wallet_list         List all wallets                                     —
   midnight_wallet_use          Set active wallet                                    name
-  midnight_wallet_info         Show wallet details                                  —
+  midnight_wallet_info         Show wallet details (incl. shielded address)         —
   midnight_wallet_remove       Remove a named wallet                                name
   midnight_generate            Generate or restore a wallet (deprecated)            —
+
+  Balance & Info
   midnight_info                Display wallet metadata                              —
-  midnight_balance             Check unshielded balance                             —
+  midnight_balance             Check unshielded + shielded balance                  —
   midnight_address             Derive address from seed                             seed
   midnight_genesis_address     Genesis wallet address                               —
   midnight_inspect_cost        Display block cost limits                            —
+
+  Transactions
   midnight_airdrop             Fund wallet from genesis (undeployed only)           amount
-  midnight_transfer            Send NIGHT tokens                                    to, amount
+  midnight_transfer            Send NIGHT (unshielded or --shielded)                to, amount
   midnight_dust_register       Register UTXOs for dust generation                   —
   midnight_dust_status         Check dust balance and registration                  —
+
+  Configuration
   midnight_config_get          Read a config value                                  key
   midnight_config_set          Write a config value                                 key, value
   midnight_config_unset        Reset a config value to default                      key
   midnight_cache_clear         Clear cached wallet sync state                       —
+
+  Local Network
   midnight_localnet_up         Start local network (Docker)                         —
   midnight_localnet_stop       Stop local network (preserves state)                 —
   midnight_localnet_down       Full teardown (removes volumes)                      —
   midnight_localnet_status     Show service status and ports                        —
   midnight_localnet_clean      Remove conflicting containers                        —
 
-Optional params shared by wallet tools: wallet (wallet name or path),
-network (preprod, preview, undeployed).
+Optional params shared by wallet tools: wallet, network.
+All tools return JSON. Errors: {error, code, message}.
 
-All tools return JSON. Errors return: {error, code, message}.
+TYPICAL AGENT WORKFLOWS
+───────────────────────
 
-TYPICAL AGENT WORKFLOW
-──────────────────────
+  Local development (undeployed):
+  1. midnight_localnet_up          → Start node, indexer, proof server
+  2. midnight_wallet_generate      → Create wallet (name: "alice")
+  3. midnight_config_set           → Set network (key: "network", value: "undeployed")
+  4. midnight_airdrop              → Fund wallet (amount: "1000")
+  5. midnight_dust_register        → Register for fee tokens
+  6. midnight_balance              → Check unshielded + shielded balance
+  7. midnight_transfer             → Send tokens (to: "bob", amount: "100")
+  8. midnight_dust_status          → Check remaining dust
 
-  1. midnight_localnet_up          → Start local network
-  2. midnight_wallet_generate      → Create wallet (name: "dev", network: "undeployed")
-  3. midnight_airdrop              → Fund wallet (amount: "1000")
-  4. midnight_dust_register        → Register UTXOs for fee tokens
-  5. midnight_balance              → Verify balance
-  6. midnight_transfer             → Send tokens (to: "mn_addr_...", amount: "100")
-  7. midnight_dust_status          → Check remaining dust for fees
+  Shielded workflow:
+  1. midnight_airdrop              → Fund shielded (amount: "100", shielded: "true")
+  2. midnight_balance              → Shows both unshielded + shielded
+  3. midnight_transfer             → Shielded send (to: "bob", amount: "50", shielded: "true")
 
-EXAMPLE WORKFLOW
-────────────────
+  Testnet (preprod/preview):
+  1. midnight_wallet_generate      → Create wallet
+  2. midnight_config_set           → Set network (key: "network", value: "preview")
+  3. (fund via faucet: https://faucet.preview.midnight.network/)
+  4. midnight_dust_register        → Register for fees
+  5. midnight_balance              → Check balance
+  6. midnight_transfer             → Send tokens
 
-  # 1. Generate a wallet
-  midnight wallet generate dev --network undeployed --json
-  # → {"name":"dev","address":"mn_addr_...","network":"undeployed","seed":"...","mnemonic":"...","file":"...","createdAt":"...","active":true}
+EXAMPLE CLI COMMANDS
+────────────────────
 
-  # 2. Check balance
+  # Generate wallet (all 3 network addresses + seed)
+  midnight wallet generate alice --json
+  # → {"name":"alice","addresses":{...},"activeAddress":"mn_addr_...","activeNetwork":"undeployed","seed":"...","file":"..."}
+
+  # Balance (full sync — unshielded + shielded)
   midnight balance --json
-  # → {"address":"mn_addr_...","network":"undeployed","balances":{},"utxoCount":0,"txCount":0}
+  # → {"address":"mn_addr_...","shieldedAddress":"mn_shield-addr_...","network":"undeployed","unshielded":{"NIGHT":"1000.000000","utxoCount":1},"shielded":{"NIGHT":"10.000000","availableCoins":1,"pendingCoins":0}}
 
-  # 3. Airdrop tokens (undeployed network)
-  midnight airdrop 1000 --json
-  # → {"txHash":"...","amount":"1000","recipient":"mn_addr_...","network":"undeployed"}
+  # Transfer by wallet name
+  midnight transfer bob 100 --json
+  # → {"txHash":"00ab...","amount":100,"recipient":"mn_addr_...","network":"undeployed"}
 
-  # 4. Transfer tokens
-  midnight transfer mn_addr_... 100 --json
-  # → {"txHash":"...","amount":"100","recipient":"mn_addr_...","network":"undeployed"}
+  # Shielded transfer
+  midnight transfer bob 50 --shielded --json
+  # → {"txHash":"00cd...","amount":50,"recipient":"mn_shield-addr_...","network":"undeployed","type":"shielded"}
+
+  # Shielded airdrop (localnet only)
+  midnight airdrop 100 --shielded --json
+  # → {"txHash":"00ef...","amount":100,"shieldedAddress":"mn_shield-addr_...","network":"undeployed","type":"shielded"}
+
+  # Contract inspection
+  midnight contract inspect --json
+  # → {"name":"bboard","compilerVersion":"0.30.0","circuits":[{"name":"post",...}],"witnesses":[...]}
+
+  # Deploy contract (from dApp root directory)
+  midnight contract deploy --json
+  # → {"subcommand":"deploy","contractName":"bboard","address":"6cc5...","network":"undeployed"}
+
+  # Call a circuit
+  midnight contract call --address 6cc5... --circuit post --args '["Hello from CLI!"]' --json
+  # → {"subcommand":"call","circuit":"post","status":"success"}
+
+  # Read contract state
+  midnight contract state --address 6cc5... --json
+  # → {"subcommand":"state","fields":{"state":"1","message":"...","owner":"..."}}
+
+  # Start DApp connector
+  midnight serve --network preview --approve-all
+  # DApps connect at ws://localhost:9932
 `;
 
   process.stdout.write(manual);

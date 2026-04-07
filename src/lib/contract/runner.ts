@@ -378,7 +378,7 @@ for (const key of Object.keys(state)) {
   } else if (val instanceof Uint8Array) {
     fields[key] = Array.from(val).map(b => b.toString(16).padStart(2, '0')).join('');
   } else if (val !== undefined && val !== null) {
-    try { fields[key] = String(val); } catch { fields[key] = '?'; }
+    try { fields[key] = JSON.stringify(val); } catch { fields[key] = '?'; }
   }
 }
 

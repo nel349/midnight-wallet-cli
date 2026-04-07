@@ -37,6 +37,11 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 | `midnight genesis-address` | Show the genesis wallet address |
 | `midnight inspect-cost` | Display current block cost limits |
 | `midnight serve` | Start DApp Connector server (WebSocket JSON-RPC) |
+| `midnight contract inspect` | Show circuits, witnesses, and types for a compiled contract |
+| `midnight contract deploy` | Deploy a contract to the network |
+| `midnight contract call` | Call a circuit on a deployed contract |
+| `midnight contract state` | Read ledger state of a deployed contract |
+| `midnight test run/list/results` | Run E2E tests for Midnight dApps |
 | `midnight config get/set` | Manage persistent config (network, wallet, endpoints) |
 | `midnight cache clear` | Clear wallet state cache |
 | `midnight localnet up/stop/down/status` | Manage a local Midnight network via Docker |

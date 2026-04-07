@@ -8,7 +8,12 @@ import { join } from 'path';
 import { MIDNIGHT_DIR, LOCALNET_DIR_NAME, DIR_MODE } from './constants.ts';
 
 // Version tag — bump when compose content changes so stale files get overwritten
-export const COMPOSE_VERSION = '3.0.0';
+export const COMPOSE_VERSION = '3.0.1';
+
+// Docker image versions — update together per Midnight support matrix
+const NODE_IMAGE = 'midnightntwrk/midnight-node:0.22.3';
+const INDEXER_IMAGE = 'midnightntwrk/indexer-standalone:4.0.1';
+const PROOF_SERVER_IMAGE = 'midnightntwrk/proof-server:8.0.3';
 
 export const LOCALNET_DIR = join(homedir(), MIDNIGHT_DIR, LOCALNET_DIR_NAME);
 const COMPOSE_PATH = join(LOCALNET_DIR, 'compose.yml');
@@ -17,13 +22,13 @@ const VERSION_PATH = join(LOCALNET_DIR, '.version');
 // Full compose.yml for midnight-local-network — ledger-v8 / wallet-sdk 3.0.0
 export const COMPOSE_YAML = `services:
   proof-server:
-    image: 'midnightntwrk/proof-server:8.0.3'
+    image: '${PROOF_SERVER_IMAGE}'
     container_name: "proof-server"
     ports:
       - "6300:6300"
 
   indexer:
-    image: 'midnightntwrk/indexer-standalone:4.0.0'
+    image: '${INDEXER_IMAGE}'
     container_name: "indexer"
     ports:
       - '8088:8088'
@@ -45,7 +50,7 @@ export const COMPOSE_YAML = `services:
         condition: service_started
 
   node:
-    image: 'midnightntwrk/midnight-node:0.22.3'
+    image: '${NODE_IMAGE}'
     container_name: "node"
     ports:
       - "9944:9944"

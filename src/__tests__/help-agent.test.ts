@@ -61,15 +61,14 @@ describe('help --agent', () => {
     expect(out).toContain('CANCELLED');
   });
 
-  it('documents exit codes', async () => {
+  it('documents exit codes in error codes section', async () => {
     const args = parseArgs(['help', '--agent']);
     await helpCommand(args);
     const out = io.stdout();
 
-    expect(out).toContain('EXIT CODES');
-    expect(out).toContain('Success');
-    expect(out).toContain('Invalid arguments');
-    expect(out).toContain('Wallet not found');
+    expect(out).toContain('ERROR CODES');
+    expect(out).toContain('INVALID_ARGS');
+    expect(out).toContain('WALLET_NOT_FOUND');
   });
 
   it('documents MCP server setup', async () => {
@@ -82,15 +81,62 @@ describe('help --agent', () => {
     expect(out).toContain('mcpServers');
   });
 
-  it('includes example workflow', async () => {
+  it('includes example CLI commands', async () => {
     const args = parseArgs(['help', '--agent']);
     await helpCommand(args);
     const out = io.stdout();
 
-    expect(out).toContain('EXAMPLE WORKFLOW');
+    expect(out).toContain('EXAMPLE CLI COMMANDS');
     expect(out).toContain('midnight wallet generate');
     expect(out).toContain('midnight balance');
     expect(out).toContain('midnight airdrop');
+    expect(out).toContain('--shielded');
+    expect(out).toContain('midnight contract inspect');
+    expect(out).toContain('midnight serve');
+  });
+
+  it('documents shielded transactions', async () => {
+    const args = parseArgs(['help', '--agent']);
+    await helpCommand(args);
+    const out = io.stdout();
+
+    expect(out).toContain('SHIELDED TRANSACTIONS');
+    expect(out).toContain('--shielded');
+    expect(out).toContain('shieldedAddress');
+  });
+
+  it('documents DApp connector', async () => {
+    const args = parseArgs(['help', '--agent']);
+    await helpCommand(args);
+    const out = io.stdout();
+
+    expect(out).toContain('DAPP CONNECTOR');
+    expect(out).toContain('midnight serve');
+    expect(out).toContain('midnight-wallet-connector');
+    expect(out).toContain('ws://localhost:9932');
+  });
+
+  it('documents smart contracts and testing', async () => {
+    const args = parseArgs(['help', '--agent']);
+    await helpCommand(args);
+    const out = io.stdout();
+
+    expect(out).toContain('SMART CONTRACTS');
+    expect(out).toContain('midnight contract inspect');
+    expect(out).toContain('midnight contract deploy');
+    expect(out).toContain('midnight contract call');
+    expect(out).toContain('midnight contract state');
+    expect(out).toContain('E2E TESTING');
+    expect(out).toContain('midnight test run');
+  });
+
+  it('documents wallet name resolution', async () => {
+    const args = parseArgs(['help', '--agent']);
+    await helpCommand(args);
+    const out = io.stdout();
+
+    expect(out).toContain('WALLET NAME RESOLUTION');
+    expect(out).toContain('midnight transfer alice 10');
   });
 
   it('documents capability manifest', async () => {
