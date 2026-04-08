@@ -42,10 +42,12 @@ export default async function walletCommand(args: ParsedArgs): Promise<void> {
     case 'remove':
     case 'rm':
       return walletRemove(args);
+    case 'seed':
+      return walletSeed(args);
     default:
       throw new Error(
         `Unknown wallet subcommand: "${subcommand ?? '(none)'}"\n` +
-        `Available: generate, list, use, info, remove\n` +
+        `Available: generate, list, use, info, remove, seed\n` +
         `Run "midnight help wallet" for usage.`
       );
   }
@@ -289,4 +291,62 @@ async function walletRemove(args: ParsedArgs): Promise<void> {
   }
 
   process.stderr.write(green('✓') + ` Wallet "${name}" removed\n`);
+}
+
+async function walletSeed(args: ParsedArgs): Promise<void> {
+  const name = args.positionals[0] ?? getActiveWalletName();
+  const walletPath = resolveWalletPath(name);
+
+  // Read raw JSON to get seed + mnemonic directly from file
+  const fs = await import('fs');
+  const raw = JSON.parse(fs.readFileSync(walletPath, 'utf-8'));
+
+  if (!raw.seed) {
+    throw new Error(`Wallet "${name}" has no seed in ${walletPath}`);
+  }
+
+  // JSON mode — no interactive prompt, just output
+  if (hasFlag(args, 'json')) {
+    const result: Record<string, unknown> = { name, seed: raw.seed };
+    if (raw.mnemonic) result.mnemonic = raw.mnemonic;
+    writeJsonResult(result);
+    return;
+  }
+
+  // Warning + confirmation
+  process.stderr.write('\n');
+  process.stderr.write(yellow(bold('  ⚠ WARNING: This will display your wallet seed and mnemonic.')) + '\n');
+  process.stderr.write(yellow('  Anyone with this seed can access your funds.') + '\n');
+  process.stderr.write(yellow('  Never share it. Never paste it into a website.') + '\n');
+  process.stderr.write('\n');
+
+  const confirmed = await confirm('  Show seed? (y/N) ');
+  if (!confirmed) {
+    process.stderr.write(dim('  Cancelled.') + '\n\n');
+    return;
+  }
+
+  // Seed to stdout (pipeable)
+  process.stdout.write(raw.seed + '\n');
+
+  // Details to stderr
+  process.stderr.write('\n');
+  process.stderr.write(keyValue('Name', name) + '\n');
+  process.stderr.write(keyValue('Seed', raw.seed) + '\n');
+  if (raw.mnemonic) {
+    process.stderr.write(keyValue('Mnemonic', raw.mnemonic) + '\n');
+  }
+  process.stderr.write(keyValue('File', walletPath) + '\n');
+  process.stderr.write('\n');
+}
+
+function confirm(prompt: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    rl.question(prompt, (answer: string) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase() === 'y');
+    });
+  });
 }
