@@ -9,6 +9,7 @@ import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
 import { type FacadeBundle, buildFacade, startAndSyncFacade, quickSync, stopFacade, suppressSdkTransientErrors } from './facade.ts';
+import { primeDustCacheWithFeedback } from './dust-prime.ts';
 import { loadWalletCache, saveWalletCache } from './wallet-cache.ts';
 import { verbose } from './verbose.ts';
 import {
@@ -535,6 +536,17 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
   // Load cached wallet state (unless --no-cache or missing cache params)
   const useCache = !noCache && walletAddress && networkName;
   const cache = useCache ? loadWalletCache(walletAddress, networkName) : null;
+
+  // Prime the dust-direct cache so the facade's dust wallet restores from a
+  // near-tip checkpoint. Skip when --no-cache: user wants a fresh full sync.
+  // Reuses the caller's `onDust` hook for status — command-layer spinner
+  // picks up prime progress without needing its own dedicated callback.
+  if (useCache && networkName) {
+    await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
+      onStatus: onDust,
+      signal,
+    });
+  }
 
   // Build facade — may be rebuilt on sync retry
   verbose('transfer', 'Building facade...');

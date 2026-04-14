@@ -8,6 +8,7 @@ import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../lib/facade.ts';
+import { primeDustCacheWithFeedback } from '../lib/dust-prime.ts';
 import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
 import { createDAppConnector, type DAppConnectorCallbacks } from '../lib/dapp-connector.ts';
@@ -73,6 +74,16 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   // ── Build & sync facade ──
 
   const spinner = startSpinner('Building wallet facade...');
+
+  // Prime dust cache before building the facade so its dust wallet restores
+  // from a near-tip checkpoint and strict-sync completes in seconds instead
+  // of minutes. serve accepts write RPCs, so fast + correct dust state matters.
+  if (!noCache) {
+    await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
+      onStatus: (s) => spinner.update(s),
+    });
+  }
+
   const cache = noCache ? null : loadWalletCache(address, networkName);
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
   if (bundle.restoredFromCache) {

@@ -15,6 +15,7 @@ import { ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { checkBalance } from '../lib/balance-subscription.ts';
 import { readDustBalanceDirect } from '../lib/dust-direct.ts';
 import { loadDustCache, saveDustCache, dustPublicKeyHex } from '../lib/dust-direct-cache.ts';
+import { primeDustCacheWithFeedback } from '../lib/dust-prime.ts';
 import { header, keyValue, divider, formatDust, successMessage, toDust } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
@@ -73,6 +74,20 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
 
   // register: full facade flow (requires proof server, keystore, sync).
   const noCache = hasFlag(args, 'no-cache');
+
+  // Prime dust cache so register's facade sync resumes from chain tip instead
+  // of slowly catching up events from scratch. Owned UTXOs are typically 0
+  // here (that's why we're registering) — priming still populates the global
+  // commitment tree, which is what the register tx's proof needs.
+  if (!noCache) {
+    const primeSpinner = startSpinner(`Priming dust cache from ${networkName}...`);
+    await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
+      onStatus: (s) => primeSpinner.update(s),
+      signal,
+    });
+    primeSpinner.stop('Dust cache primed');
+  }
+
   const cache = noCache ? null : loadWalletCache(address, networkName);
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
 

@@ -15,6 +15,7 @@ import { GENESIS_SEED } from '../lib/constants.ts';
 import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
 import { parseAmount, nightToMicro, executeTransfer, ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
+import { primeDustCacheWithFeedback } from '../lib/dust-prime.ts';
 import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { header, keyValue, divider, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -197,7 +198,13 @@ async function shieldedAirdrop(
 
     process.stderr.write(keyValue('To', formatAddress(userShieldedAddrStr, true)) + '\n\n');
 
-    // Step 2: Build genesis facade, full sync (needs shielded balance)
+    // Step 2: Prime dust cache + build genesis facade (full sync, needs shielded balance)
+    if (!noCache) {
+      await primeDustCacheWithFeedback(genesisSeedBuffer, networkName, networkConfig.indexerWS, {
+        onStatus: (s) => spinner.update(s),
+        signal,
+      });
+    }
     spinner.update('Syncing genesis wallet...');
     const genesisCache = noCache ? null : loadWalletCache(genesisAddress, networkName);
     genesisBundle = await buildFacade(genesisSeedBuffer, networkConfig, genesisCache);
