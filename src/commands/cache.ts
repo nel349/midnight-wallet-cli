@@ -1,8 +1,12 @@
 // cache command — manage wallet state cache
 // cache clear [--network <name>] [--wallet <name|file>]
 
+import * as ledger from '@midnight-ntwrk/ledger-v8';
+
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { clearWalletCache } from '../lib/wallet-cache.ts';
+import { clearDustDirectCache, dustPublicKeyHex } from '../lib/dust-direct-cache.ts';
+import { deriveDustSeed } from '../lib/derivation.ts';
 import { resolveWalletPath, loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { green } from '../ui/colors.ts';
@@ -28,6 +32,9 @@ export default async function cacheCommand(args: ParsedArgs): Promise<void> {
     const { name: networkName } = resolveNetwork({ args });
     const address = config.addresses[networkName];
     clearWalletCache(address, networkName);
+    // Also clear the dust-direct cache for this wallet on this network.
+    const dustPubkey = dustPublicKeyHex(ledger.DustSecretKey.fromSeed(deriveDustSeed(Buffer.from(config.seed, 'hex'))).publicKey);
+    clearDustDirectCache(networkName, dustPubkey);
     if (jsonMode) {
       writeJsonResult({ action: 'clear', scope: 'wallet', wallet: walletFlag, network: networkName });
       return;
@@ -36,6 +43,7 @@ export default async function cacheCommand(args: ParsedArgs): Promise<void> {
   } else if (networkFlag) {
     // Clear cache for a specific network
     clearWalletCache(undefined, networkFlag);
+    clearDustDirectCache(networkFlag);
     if (jsonMode) {
       writeJsonResult({ action: 'clear', scope: 'network', network: networkFlag });
       return;
@@ -44,6 +52,7 @@ export default async function cacheCommand(args: ParsedArgs): Promise<void> {
   } else {
     // Clear all cache
     clearWalletCache();
+    clearDustDirectCache();
     if (jsonMode) {
       writeJsonResult({ action: 'clear', scope: 'all' });
       return;

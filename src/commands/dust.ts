@@ -14,6 +14,7 @@ import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { checkBalance } from '../lib/balance-subscription.ts';
 import { readDustBalanceDirect } from '../lib/dust-direct.ts';
+import { loadDustCache, saveDustCache, dustPublicKeyHex } from '../lib/dust-direct-cache.ts';
 import { header, keyValue, divider, formatDust, successMessage, toDust } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
@@ -65,7 +66,8 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     }
     // Registered → read balance directly from indexer (bypasses the dust-wallet
     // SDK's `isConnected` hang). No facade needed for a read-only query.
-    await dustStatusDirect(seedBuffer, networkName, networkConfig.indexerWS, preCheck, isJson, signal);
+    const useCache = !hasFlag(args, 'no-cache');
+    await dustStatusDirect(seedBuffer, networkName, networkConfig.indexerWS, preCheck, isJson, useCache, signal);
     return;
   }
 
@@ -269,26 +271,41 @@ async function dustRegister(
 
 // Registered-status path: read dust balance directly from the indexer by
 // subscribing to `dustLedgerEvents`, deserializing each raw event, and replaying
-// into a fresh DustLocalState. Bypasses the dust-wallet SDK facade entirely —
+// into a DustLocalState. Bypasses the dust-wallet SDK facade entirely —
 // no proof server, no keystore, no `isConnected` hang.
+//
+// Caching: persists the serialized DustLocalState + lastAppliedEventId between
+// runs (keyed by network + dust pubkey). Subsequent runs resume from the
+// checkpoint, subscribing to only new events since last sync.
 async function dustStatusDirect(
   seedBuffer: Buffer,
   networkName: string,
   indexerWS: string,
   preCheck: PreCheckResult,
   jsonMode: boolean,
+  useCache: boolean,
   signal?: AbortSignal,
 ): Promise<void> {
   const dustSeed = deriveDustSeed(seedBuffer);
   const dustSecretKey = ledger.DustSecretKey.fromSeed(dustSeed);
+  const pubkeyHex = dustPublicKeyHex(dustSecretKey.publicKey);
 
-  const spinner = startSpinner(`Reading dust events from ${networkName}...`);
+  const cached = useCache ? loadDustCache(networkName, pubkeyHex) : null;
+  const startFromId = cached ? cached.lastAppliedEventId + 1 : 0;
+
+  const spinner = startSpinner(
+    cached
+      ? `Resuming from cache (last event ${cached.lastAppliedEventId})...`
+      : `Reading dust events from ${networkName}...`,
+  );
 
   try {
     const result = await readDustBalanceDirect(dustSecretKey, indexerWS, {
+      initialState: cached?.state,
+      startFromId,
       onProgress: (applied, maxId) => {
         if (maxId > 0) {
-          spinner.update(`Reading dust events... ${applied}/${maxId + 1}`);
+          spinner.update(`Reading dust events... ${applied}/${maxId + 1 - startFromId}`);
         } else {
           spinner.update(`Reading dust events... ${applied}`);
         }
@@ -296,7 +313,18 @@ async function dustStatusDirect(
       signal,
     });
 
-    spinner.stop('Dust events applied');
+    // Save cache for next run (only if we actually advanced, or no cache existed).
+    if (useCache && (result.lastAppliedEventId >= 0 || !cached)) {
+      try {
+        // When no new events arrived but we had a cache, preserve the prior id.
+        const savedId = result.lastAppliedEventId >= 0
+          ? result.lastAppliedEventId
+          : (cached?.lastAppliedEventId ?? -1);
+        saveDustCache(networkName, pubkeyHex, result.state, savedId);
+      } catch { /* best-effort */ }
+    }
+
+    spinner.stop(cached && result.eventCount === 0 ? 'Cache up to date' : 'Dust events applied');
 
     const { registeredUtxos, unregisteredUtxos } = preCheck;
 
@@ -310,6 +338,7 @@ async function dustStatusDirect(
         dustAvailable: result.availableCoins > 0,
         eventsApplied: result.eventCount,
         ownedUtxos: result.ownedUtxoCount,
+        cached: cached !== null,
         network: networkName,
       });
       return;
@@ -326,7 +355,7 @@ async function dustStatusDirect(
     process.stderr.write(keyValue('UTXOs', `${registeredUtxos} registered, ${unregisteredUtxos} unregistered`) + '\n');
     process.stderr.write(keyValue('Dust Balance', bold(formatDust(result.balance))) + '\n');
     process.stderr.write(keyValue('Dust Available', result.availableCoins > 0 ? 'yes' : 'no') + '\n');
-    process.stderr.write(keyValue('Events applied', result.eventCount.toString()) + '\n');
+    process.stderr.write(keyValue('Events applied', result.eventCount.toString() + (cached ? ' (delta)' : '')) + '\n');
     if (unregisteredUtxos > 0) {
       process.stderr.write('\n' + dim(`${unregisteredUtxos} UTXO(s) not yet registered. Run: midnight dust register`) + '\n');
     }

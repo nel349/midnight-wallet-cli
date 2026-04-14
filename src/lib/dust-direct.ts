@@ -44,6 +44,10 @@ export interface DustDirectResult {
   eventCount: number;
   ownedUtxoCount: number;
   syncTime: Date;
+  /** Final DustLocalState — callers can serialize this for caching. */
+  state: ledger.DustLocalState;
+  /** Id of the last event applied in this run. -1 if none arrived. */
+  lastAppliedEventId: number;
 }
 
 export interface DustDirectOptions {
@@ -53,8 +57,19 @@ export interface DustDirectOptions {
   timeoutMs?: number;
   /** If no event arrives for this long (and we've received some), treat as caught up. Default: 5s. */
   idleMs?: number;
+  /**
+   * If no event is received AT ALL within this window after connecting, treat
+   * the stream as empty (nothing to catch up on) and return. This lets a
+   * cached-resume with zero new events finish quickly instead of waiting on
+   * `timeoutMs`. Default: 3s.
+   */
+  initialSilenceMs?: number;
   /** Abort the subscription mid-flight. */
   signal?: AbortSignal;
+  /** Resume from this cached state instead of building fresh. */
+  initialState?: ledger.DustLocalState;
+  /** Subscribe starting at this event id (inclusive). Default: 0. */
+  startFromId?: number;
 }
 
 function createInitialDustState(): ledger.DustLocalState {
@@ -78,7 +93,15 @@ export function readDustBalanceDirect(
   indexerWS: string,
   options: DustDirectOptions = {},
 ): Promise<DustDirectResult> {
-  const { onProgress, timeoutMs = 180_000, idleMs = 5_000, signal } = options;
+  const {
+    onProgress,
+    timeoutMs = 180_000,
+    idleMs = 5_000,
+    initialSilenceMs = 3_000,
+    signal,
+    initialState,
+    startFromId = 0,
+  } = options;
 
   // Apply events in chunks as they arrive so the final step is cheap and
   // progress updates stay responsive. Replaying 100k events in a single
@@ -87,19 +110,21 @@ export function readDustBalanceDirect(
 
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(indexerWS, ['graphql-transport-ws']);
-    let state = createInitialDustState();
+    let state = initialState ?? createInitialDustState();
     const pending: ledger.Event[] = [];
     let eventsAppliedCount = 0;
-    let lastEventId = -1;
+    let lastEventId = startFromId - 1;
     let maxIdSeen = -1;
     let sawFirstEvent = false;
     let settled = false;
     let timeoutId: ReturnType<typeof setTimeout>;
     let idleTimerId: ReturnType<typeof setTimeout> | undefined;
+    let initialSilenceTimerId: ReturnType<typeof setTimeout> | undefined;
 
     const cleanup = () => {
       clearTimeout(timeoutId);
       if (idleTimerId) clearTimeout(idleTimerId);
+      if (initialSilenceTimerId) clearTimeout(initialSilenceTimerId);
       try { ws.close(); } catch { /* best-effort */ }
       signal?.removeEventListener('abort', onAbort);
     };
@@ -135,6 +160,8 @@ export function readDustBalanceDirect(
           eventCount: eventsAppliedCount,
           ownedUtxoCount: state.utxos.length,
           syncTime: state.syncTime,
+          state,
+          lastAppliedEventId: lastEventId,
         });
       } catch (err) {
         reject(new Error(`Failed to build dust state: ${(err as Error).message}`));
@@ -165,9 +192,20 @@ export function readDustBalanceDirect(
           type: 'subscribe',
           payload: {
             query: SUBSCRIPTION_QUERY,
-            variables: { id: 0 },
+            variables: { id: startFromId },
           },
         }));
+        // After subscribing, arm the initial-silence timer IF we have a cached
+        // state to fall back on. If NO event arrives within `initialSilenceMs`,
+        // the stream is empty (nothing new to apply) and we return cached data.
+        // For fresh runs (no cached state), we must wait for events — a cold
+        // preprod subscription can take several seconds before the first
+        // event arrives.
+        if (initialState) {
+          initialSilenceTimerId = setTimeout(() => {
+            if (!sawFirstEvent && !settled) finishOk();
+          }, initialSilenceMs);
+        }
         return;
       }
 
@@ -186,6 +224,7 @@ export function readDustBalanceDirect(
       const evt = msg.payload?.data?.dustLedgerEvents as RawDustEvent | undefined;
       if (!evt) return;
       sawFirstEvent = true;
+      if (initialSilenceTimerId) { clearTimeout(initialSilenceTimerId); initialSilenceTimerId = undefined; }
 
       try {
         const bytes = Buffer.from(evt.raw, 'hex');
