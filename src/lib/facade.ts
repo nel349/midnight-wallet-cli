@@ -150,6 +150,17 @@ export async function buildFacade(
  *     transfer already advanced it past our indexer-direct snapshot)
  *   - parsing fails
  */
+// Shape of the facade's serialized dust-wallet snapshot. See
+// dust-wallet/src/v1/Serialization.ts `SnapshotSchema` — JSON on disk with
+// BigInts rendered as decimal strings.
+interface FacadeDustSnapshot {
+  publicKey: { publicKey: string };
+  state: string;
+  protocolVersion: string;
+  networkId: string;
+  offset?: string;
+}
+
 function maybeBridgeDustCache(
   cache: WalletCacheData,
   networkConfig: NetworkConfig,
@@ -161,8 +172,7 @@ function maybeBridgeDustCache(
     const direct = loadDustCache(networkName, pubkeyHex);
     if (!direct) return cache;
 
-    const snapshot = JSON.parse(cache.dust);
-    // Facade snapshots store offset as a decimal string of a bigint.
+    const snapshot: FacadeDustSnapshot = JSON.parse(cache.dust);
     const facadeOffset = snapshot.offset !== undefined ? Number(snapshot.offset) : -1;
     if (facadeOffset >= direct.lastAppliedEventId) {
       verbose('facade', `Facade dust offset=${facadeOffset} >= dust-direct offset=${direct.lastAppliedEventId}; skipping bridge`);
@@ -290,13 +300,22 @@ export async function startAndSyncFacade(
   const effectiveTimeout = timeoutMs ?? SYNC_TIMEOUT_MS;
   verbose('sync', `Sync timeout: ${effectiveTimeout / 1000}s, mode: ${syncMode}`);
 
+  // Cached-restore grace: if the facade was restored from cache and we're a
+  // READ operation, accept dust as "good enough" once non-dust wallets are
+  // strictly complete AND `CACHED_RESTORE_DUST_GRACE_MS` has elapsed — without
+  // waiting for the dust-wallet SDK's `isConnected` flag (known bug — never
+  // flips on idle preprod streams). Writes set `requireStrictSync` to opt out,
+  // because ZK proofs built against a stale commitment tree are rejected by
+  // the chain as MalformedError::InvalidDustSpendProof (error code 170).
+  const graceEligible = !requireStrictSync && bundle.restoredFromCache;
+  const startedAt = Date.now();
+
   return new Promise<FacadeState>((resolve, reject) => {
     let resolved = false;
     let emissionCount = 0;
     let lastPendingKey = '';
 
     let lastState: FacadeState | null = null;
-    const startedAt = Date.now();
 
     const timeout = setTimeout(() => {
       if (!resolved) {
@@ -317,52 +336,12 @@ export async function startAndSyncFacade(
       }
     }, effectiveTimeout);
 
-    // Grace-period fallback for the dust-wallet `isConnected` SDK bug (see
-    // isFacadeSynced). If the facade was restored from cache, we have a recent
-    // checkpoint of dust state. After a short grace period — enough for delta
-    // events to land — we accept dust as "up-to-date-enough" even though
-    // `isConnected` never flipped true.
-    //
-    // IMPORTANT: only safe for READ operations. Writes (transfer, airdrop,
-    // dust register) must wait for strict sync because ZK proofs are built
-    // against the commitment tree — a stale tree produces a proof the chain
-    // rejects as MalformedError::InvalidDustSpendProof (error code 170).
-    // Callers that will write pass `requireStrictSync: true`.
-    const graceIntervalId = setInterval(() => {
-      if (resolved || requireStrictSync || !bundle.restoredFromCache || !lastState) return;
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < CACHED_RESTORE_DUST_GRACE_MS) return;
-
-      const unshieldedOk = lastState.unshielded?.progress?.isStrictlyComplete() ?? false;
-      let shieldedOk = true;
-      if (syncMode === 'full' || syncMode === 'no-dust') {
-        shieldedOk = lastState.shielded?.state?.progress?.isStrictlyComplete() ?? false;
-        // Unfunded wallet has no zswap events — accept 0/0 progress when
-        // unshielded is complete (matches isFacadeSynced fallback).
-        if (!shieldedOk && unshieldedOk) {
-          try {
-            const p = lastState.shielded?.state?.progress as any;
-            if (p && p.highestRelevantWalletIndex === 0 && p.appliedIndex === 0) shieldedOk = true;
-          } catch { /* best-effort */ }
-        }
-      }
-
-      if (unshieldedOk && shieldedOk) {
-        resolved = true;
-        clearInterval(graceIntervalId);
-        clearTimeout(timeout);
-        verbose('sync', `Sync resolved via cached-restore grace (${elapsed}ms, ${emissionCount} emissions)`);
-        resolve(lastState);
-      }
-    }, 500);
-
     bundle.keepAlive = facade.state().subscribe({
       next: (state) => {
         if (resolved) return;
         emissionCount++;
         lastState = state;
 
-        // Report unshielded progress
         if (onProgress) {
           const progress = state.unshielded.progress;
           if (progress) {
@@ -382,7 +361,6 @@ export async function startAndSyncFacade(
 
         if (pending.length > 0) {
           onSyncDetail?.(pending.join(', '));
-          // Only log verbose on first emission, when pending wallets change, or every 100th
           const pendingKey = pending.join(',');
           if (emissionCount === 1 || pendingKey !== lastPendingKey || emissionCount % 100 === 0) {
             verbose('sync', `Waiting on: ${pending.join(', ')} (emission #${emissionCount})`);
@@ -390,21 +368,33 @@ export async function startAndSyncFacade(
           }
         }
 
-        // Resolve when synced (uses custom predicate to work around
-        // dust wallet isConnected bug — see isFacadeSynced above)
+        // Primary: strict sync per mode (uses the isFacadeSynced workaround for
+        // the dust isConnected bug — see that function above).
         if (isFacadeSynced(state, syncMode)) {
           resolved = true;
           clearTimeout(timeout);
-          clearInterval(graceIntervalId);
           verbose('sync', `Sync complete after ${emissionCount} emissions`);
           resolve(state);
+          return;
+        }
+
+        // Grace fallback: treat "everything except dust synced, and grace
+        // elapsed" as done. Reuses the existing no-dust predicate so the two
+        // completion paths can't drift.
+        if (graceEligible) {
+          const elapsed = Date.now() - startedAt;
+          if (elapsed >= CACHED_RESTORE_DUST_GRACE_MS && isFacadeSynced(state, 'no-dust')) {
+            resolved = true;
+            clearTimeout(timeout);
+            verbose('sync', `Sync resolved via cached-restore grace (${elapsed}ms, ${emissionCount} emissions)`);
+            resolve(state);
+          }
         }
       },
       error: (err) => {
         if (!resolved) {
           verbose('sync', `Sync error: ${(err as Error).message}`);
           clearTimeout(timeout);
-          clearInterval(graceIntervalId);
           reject(err);
         }
       },

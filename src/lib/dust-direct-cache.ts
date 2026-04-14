@@ -16,6 +16,7 @@ import { randomBytes } from 'node:crypto';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 
 import { MIDNIGHT_DIR, CACHE_DIR_NAME, DIR_MODE, FILE_MODE } from './constants.ts';
+import { deriveDustSeed } from './derivation.ts';
 
 const DUST_CACHE_VERSION = 1;
 
@@ -36,6 +37,17 @@ export interface DustCacheEntry {
 /** Normalize a DustPublicKey (bigint) to a fixed-width 64-char hex string. */
 export function dustPublicKeyHex(publicKey: ledger.DustPublicKey): string {
   return publicKey.toString(16).padStart(64, '0');
+}
+
+/**
+ * Derive the dust public key (as hex) from a wallet seed. Convenience for
+ * callers that want to look up dust-direct cache entries by wallet rather
+ * than by raw public key.
+ */
+export function dustPublicKeyHexFromSeed(seedBuffer: Buffer): string {
+  const dustSeed = deriveDustSeed(seedBuffer);
+  const sk = ledger.DustSecretKey.fromSeed(dustSeed);
+  return dustPublicKeyHex(sk.publicKey);
 }
 
 function dustCacheDir(network: string, cacheDir?: string): string {
