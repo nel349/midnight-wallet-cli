@@ -6,6 +6,10 @@ export interface BalanceSummary {
   utxoCount: number;
   txCount: number;
   highestTxId: number;
+  /** Count of unspent native-token UTXOs registered for dust generation. */
+  registeredUtxos: number;
+  /** Count of unspent native-token UTXOs NOT registered for dust generation. */
+  unregisteredUtxos: number;
 }
 
 interface Utxo {
@@ -14,6 +18,7 @@ interface Utxo {
   tokenType: string;
   intentHash: string;
   outputIndex: number;
+  registeredForDustGeneration: boolean;
 }
 
 interface UnshieldedTransaction {
@@ -36,8 +41,8 @@ const SUBSCRIPTION_QUERY = `
       __typename
       ... on UnshieldedTransaction {
         transaction { id hash }
-        createdUtxos { value owner tokenType intentHash outputIndex }
-        spentUtxos { value owner tokenType intentHash outputIndex }
+        createdUtxos { value owner tokenType intentHash outputIndex registeredForDustGeneration }
+        spentUtxos { value owner tokenType intentHash outputIndex registeredForDustGeneration }
       }
       ... on UnshieldedTransactionsProgress {
         highestTransactionId
@@ -58,7 +63,7 @@ export function checkBalance(
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(indexerWS, ['graphql-transport-ws']);
 
-    const utxos = new Map<string, { value: bigint; tokenType: string; spent: boolean }>();
+    const utxos = new Map<string, { value: bigint; tokenType: string; spent: boolean; registeredForDustGeneration: boolean }>();
     let txCount = 0;
     let highestTxId = 0;
     let lastSeenTxId = 0;
@@ -69,16 +74,23 @@ export function checkBalance(
     const buildResult = (): BalanceSummary => {
       const balances = new Map<string, bigint>();
       let utxoCount = 0;
+      let registeredUtxos = 0;
+      let unregisteredUtxos = 0;
 
       for (const utxo of utxos.values()) {
         if (!utxo.spent) {
           utxoCount++;
           const current = balances.get(utxo.tokenType) ?? 0n;
           balances.set(utxo.tokenType, current + utxo.value);
+          // Dust registration only applies to native NIGHT UTXOs.
+          if (utxo.tokenType === NATIVE_TOKEN_TYPE) {
+            if (utxo.registeredForDustGeneration) registeredUtxos++;
+            else unregisteredUtxos++;
+          }
         }
       }
 
-      return { balances, utxoCount, txCount, highestTxId };
+      return { balances, utxoCount, txCount, highestTxId, registeredUtxos, unregisteredUtxos };
     };
 
     const settle = () => {
@@ -140,6 +152,7 @@ export function checkBalance(
                 value: BigInt(utxo.value),
                 tokenType: utxo.tokenType,
                 spent: false,
+                registeredForDustGeneration: utxo.registeredForDustGeneration === true,
               });
             }
 

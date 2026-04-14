@@ -356,7 +356,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_dust_status',
-    description: 'Check dust registration status and balance',
+    description: 'Check dust registration status. Fast pre-check via indexer: if not registered, returns immediately. If registered, runs a full sync to report dust balance.',
     inputSchema: {
       type: 'object',
       properties: {

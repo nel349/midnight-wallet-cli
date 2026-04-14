@@ -28,7 +28,11 @@ const NETWORK_ID_MAP: Record<string, NetworkId.NetworkId> = {
   Undeployed: NetworkId.NetworkId.Undeployed,
 };
 
-export type SyncMode = 'full' | 'lite';
+export type SyncMode = 'full' | 'lite' | 'no-dust';
+// full    = shielded + unshielded + dust
+// lite    = unshielded + dust (skip shielded — used by dust register/status)
+// no-dust = shielded + unshielded (skip dust — used by balance; dust isn't needed
+//           to read NIGHT balances and avoids the dust `isConnected` SDK hang)
 
 export interface FacadeBundle {
   facade: WalletFacade;
@@ -145,22 +149,27 @@ export async function buildFacade(
 export function isFacadeSynced(state: FacadeState, syncMode: SyncMode = 'full'): boolean {
   const unshieldedOk = state.unshielded?.progress?.isStrictlyComplete() ?? false;
 
+  // Dust check (only evaluated for modes that need dust).
   // For dust: try isStrictlyComplete first; if it fails due to isConnected bug,
   // fall back to checking index values directly.
-  let dustOk = state.dust?.state?.progress?.isStrictlyComplete() ?? false;
-  if (!dustOk) {
-    try {
-      const p = state.dust?.state?.progress as any;
-      if (p && p.highestRelevantWalletIndex > 0 && p.appliedIndex >= p.highestRelevantWalletIndex) {
-        dustOk = true;
-      }
-      // Unfunded wallet: both indices are 0 and isConnected is false.
-      // If unshielded is done (it syncs independently), treat dust as done too —
-      // there's nothing to sync, the wallet just has no dust events.
-      if (p && p.highestRelevantWalletIndex === 0 && p.appliedIndex === 0 && unshieldedOk) {
-        dustOk = true;
-      }
-    } catch { /* best-effort */ }
+  const needsDust = syncMode !== 'no-dust';
+  let dustOk = !needsDust;
+  if (needsDust) {
+    dustOk = state.dust?.state?.progress?.isStrictlyComplete() ?? false;
+    if (!dustOk) {
+      try {
+        const p = state.dust?.state?.progress as any;
+        if (p && p.highestRelevantWalletIndex > 0 && p.appliedIndex >= p.highestRelevantWalletIndex) {
+          dustOk = true;
+        }
+        // Unfunded wallet: both indices are 0 and isConnected is false.
+        // If unshielded is done (it syncs independently), treat dust as done too —
+        // there's nothing to sync, the wallet just has no dust events.
+        if (p && p.highestRelevantWalletIndex === 0 && p.appliedIndex === 0 && unshieldedOk) {
+          dustOk = true;
+        }
+      } catch { /* best-effort */ }
+    }
   }
 
   if (syncMode === 'lite') {
@@ -267,11 +276,11 @@ export async function startAndSyncFacade(
           }
         }
 
-        // Report which wallets are still syncing
+        // Report which wallets are still syncing (only the ones this mode needs).
         const pending: string[] = [];
         try {
-          if (syncMode === 'full' && !state.shielded?.state?.progress?.isStrictlyComplete()) pending.push('shielded');
-          if (isDustSyncPending(state)) pending.push('dust');
+          if ((syncMode === 'full' || syncMode === 'no-dust') && !state.shielded?.state?.progress?.isStrictlyComplete()) pending.push('shielded');
+          if (syncMode !== 'no-dust' && isDustSyncPending(state)) pending.push('dust');
           if (!state.unshielded?.progress?.isStrictlyComplete()) pending.push('unshielded');
         } catch { /* best-effort */ }
 

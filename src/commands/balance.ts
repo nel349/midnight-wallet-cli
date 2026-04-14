@@ -124,7 +124,9 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
     if (bundle.restoredFromCache) spinner.update('Restoring from cache...');
 
     const state = await startAndSyncFacade(bundle, {
-      syncMode: 'full',
+      // Balance reads NIGHT from unshielded + shielded; dust isn't needed and
+      // skipping it avoids the dust isConnected SDK hang on hosted networks.
+      syncMode: 'no-dust',
       onProgress: (applied, highest) => {
         if (highest > 0) {
           const pct = Math.min(Math.round((applied / highest) * 100), 100);
