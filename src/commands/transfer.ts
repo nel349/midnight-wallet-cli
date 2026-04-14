@@ -228,6 +228,8 @@ async function shieldedTransfer(
 
     const state = await startAndSyncFacade(bundle, {
       syncMode: 'full',
+      // Writes build ZK proofs against the commitment tree — stale tree → chain rejects.
+      requireStrictSync: true,
       onProgress: (applied, highest) => {
         if (highest > 0) {
           const pct = Math.min(Math.round((applied / highest) * 100), 100);

@@ -205,6 +205,8 @@ async function dustRegister(
   try {
     const syncedState = await startAndSyncFacade(bundle, {
       syncMode: 'lite',
+      // dust register writes a tx — must be strictly synced for proof validity.
+      requireStrictSync: true,
       onProgress: (applied, highest) => {
         if (highest > 0) {
           const pct = Math.min(Math.round((applied / highest) * 100), 100);

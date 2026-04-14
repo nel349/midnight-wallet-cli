@@ -574,6 +574,9 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
           onSyncDetail,
           timeoutMs: syncTimeoutMs,
           syncMode: 'lite',
+          // Writes build ZK proofs — need strict sync or the commitment tree
+          // is stale and chain rejects with MalformedError::InvalidDustSpendProof.
+          requireStrictSync: true,
         });
         break;
       } catch (err: any) {

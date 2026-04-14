@@ -205,6 +205,8 @@ async function shieldedAirdrop(
 
     const genesisState = await startAndSyncFacade(genesisBundle, {
       syncMode: 'full',
+      // Airdrop sends a transaction — must be strictly synced for proof validity.
+      requireStrictSync: true,
       onProgress: (applied, highest) => {
         if (highest > 0) {
           const pct = Math.min(Math.round((applied / highest) * 100), 100);

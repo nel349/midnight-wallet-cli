@@ -92,6 +92,8 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   try {
     spinner.update('Syncing wallet...');
     await startAndSyncFacade(bundle, {
+      // serve accepts write requests from dApps — must be strictly synced.
+      requireStrictSync: true,
       onProgress: (applied, highest) => {
         if (highest > 0) {
           const pct = Math.min(Math.round((applied / highest) * 100), 100);

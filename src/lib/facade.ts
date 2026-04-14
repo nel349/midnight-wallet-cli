@@ -14,6 +14,7 @@ import * as rx from 'rxjs';
 import { type NetworkConfig } from './network.ts';
 import { deriveShieldedSeed, deriveUnshieldedSeed, deriveDustSeed } from './derivation.ts';
 import { type WalletCacheData } from './wallet-cache.ts';
+import { loadDustCache, dustPublicKeyHex } from './dust-direct-cache.ts';
 import {
   DUST_COST_OVERHEAD,
   DUST_FEE_BLOCKS_MARGIN,
@@ -104,18 +105,25 @@ export async function buildFacade(
     ),
   });
 
+  // Bridge: if the dust-direct cache has a more recent DustLocalState than the
+  // facade cache, overlay it into the facade cache's dust snapshot before
+  // restore. This lets commands that use the facade (transfer, airdrop, dust
+  // register) benefit from the indexer-direct reader's checkpoint without
+  // re-implementing the whole transaction flow.
+  const effectiveCache = cache ? maybeBridgeDustCache(cache, networkConfig, dustSecretKey.publicKey) : null;
+
   // Attempt cache restore — fall back to fresh build on any deserialization error.
   let restoredFromCache = false;
   let facade: WalletFacade;
 
-  if (cache) {
+  if (effectiveCache) {
     verbose('facade', 'Restoring from cache...');
     try {
       facade = await WalletFacade.init({
         configuration,
-        shielded: (cfg) => ShieldedWallet(cfg).restore(cache.shielded),
-        unshielded: (cfg) => UnshieldedWallet(cfg).restore(cache.unshielded),
-        dust: (cfg) => DustWallet(cfg).restore(cache.dust),
+        shielded: (cfg) => ShieldedWallet(cfg).restore(effectiveCache.shielded),
+        unshielded: (cfg) => UnshieldedWallet(cfg).restore(effectiveCache.unshielded),
+        dust: (cfg) => DustWallet(cfg).restore(effectiveCache.dust),
       });
       restoredFromCache = true;
       verbose('facade', 'Cache restore successful');
@@ -130,6 +138,45 @@ export async function buildFacade(
   }
 
   return { facade, keystore, zswapSecretKeys, dustSecretKey, restoredFromCache };
+}
+
+/**
+ * If our indexer-direct cache has a NEWER DustLocalState than the facade
+ * cache, overlay it into the facade cache's dust snapshot. Keeps publicKey,
+ * protocolVersion, networkId from the existing snapshot; only state + offset
+ * change. Returns the cache unchanged if:
+ *   - no dust-direct entry exists
+ *   - facade cache's own offset is already >= dust-direct's offset (prior
+ *     transfer already advanced it past our indexer-direct snapshot)
+ *   - parsing fails
+ */
+function maybeBridgeDustCache(
+  cache: WalletCacheData,
+  networkConfig: NetworkConfig,
+  dustPublicKey: ledger.DustPublicKey,
+): WalletCacheData {
+  try {
+    const networkName = networkConfig.networkId.toLowerCase();
+    const pubkeyHex = dustPublicKeyHex(dustPublicKey);
+    const direct = loadDustCache(networkName, pubkeyHex);
+    if (!direct) return cache;
+
+    const snapshot = JSON.parse(cache.dust);
+    // Facade snapshots store offset as a decimal string of a bigint.
+    const facadeOffset = snapshot.offset !== undefined ? Number(snapshot.offset) : -1;
+    if (facadeOffset >= direct.lastAppliedEventId) {
+      verbose('facade', `Facade dust offset=${facadeOffset} >= dust-direct offset=${direct.lastAppliedEventId}; skipping bridge`);
+      return cache;
+    }
+
+    snapshot.state = Buffer.from(direct.state.serialize()).toString('hex');
+    snapshot.offset = direct.lastAppliedEventId.toString();
+    verbose('facade', `Bridged dust-direct cache (facade offset ${facadeOffset} → dust-direct offset ${direct.lastAppliedEventId})`);
+    return { ...cache, dust: JSON.stringify(snapshot) };
+  } catch (err) {
+    verbose('facade', `Dust-direct bridge skipped: ${(err as Error).message}`);
+    return cache;
+  }
 }
 
 /**
@@ -218,13 +265,22 @@ export interface SyncOptions {
   onSyncDetail?: (detail: string) => void;
   timeoutMs?: number;
   syncMode?: SyncMode;
+  /**
+   * Require strict sync before resolving (disables the cached-restore grace
+   * period). Write operations (transfer, airdrop, dust register, contract
+   * calls) MUST pass this because they construct ZK proofs against the
+   * commitment tree — if the tree is stale, the proof fails validation on
+   * chain (MalformedError::InvalidDustSpendProof, error code 170). Read-only
+   * operations (balance, dust status) can leave this off for the speedup.
+   */
+  requireStrictSync?: boolean;
 }
 
 export async function startAndSyncFacade(
   bundle: FacadeBundle,
   options: SyncOptions = {},
 ): Promise<FacadeState> {
-  const { onProgress, onSyncDetail, timeoutMs, syncMode = 'full' } = options;
+  const { onProgress, onSyncDetail, timeoutMs, syncMode = 'full', requireStrictSync = false } = options;
   const { facade, zswapSecretKeys, dustSecretKey } = bundle;
 
   verbose('sync', 'Starting facade (connecting to node and indexer)...');
@@ -240,6 +296,7 @@ export async function startAndSyncFacade(
     let lastPendingKey = '';
 
     let lastState: FacadeState | null = null;
+    const startedAt = Date.now();
 
     const timeout = setTimeout(() => {
       if (!resolved) {
@@ -259,6 +316,45 @@ export async function startAndSyncFacade(
         reject(new Error('Wallet sync timed out'));
       }
     }, effectiveTimeout);
+
+    // Grace-period fallback for the dust-wallet `isConnected` SDK bug (see
+    // isFacadeSynced). If the facade was restored from cache, we have a recent
+    // checkpoint of dust state. After a short grace period — enough for delta
+    // events to land — we accept dust as "up-to-date-enough" even though
+    // `isConnected` never flipped true.
+    //
+    // IMPORTANT: only safe for READ operations. Writes (transfer, airdrop,
+    // dust register) must wait for strict sync because ZK proofs are built
+    // against the commitment tree — a stale tree produces a proof the chain
+    // rejects as MalformedError::InvalidDustSpendProof (error code 170).
+    // Callers that will write pass `requireStrictSync: true`.
+    const graceIntervalId = setInterval(() => {
+      if (resolved || requireStrictSync || !bundle.restoredFromCache || !lastState) return;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < CACHED_RESTORE_DUST_GRACE_MS) return;
+
+      const unshieldedOk = lastState.unshielded?.progress?.isStrictlyComplete() ?? false;
+      let shieldedOk = true;
+      if (syncMode === 'full' || syncMode === 'no-dust') {
+        shieldedOk = lastState.shielded?.state?.progress?.isStrictlyComplete() ?? false;
+        // Unfunded wallet has no zswap events — accept 0/0 progress when
+        // unshielded is complete (matches isFacadeSynced fallback).
+        if (!shieldedOk && unshieldedOk) {
+          try {
+            const p = lastState.shielded?.state?.progress as any;
+            if (p && p.highestRelevantWalletIndex === 0 && p.appliedIndex === 0) shieldedOk = true;
+          } catch { /* best-effort */ }
+        }
+      }
+
+      if (unshieldedOk && shieldedOk) {
+        resolved = true;
+        clearInterval(graceIntervalId);
+        clearTimeout(timeout);
+        verbose('sync', `Sync resolved via cached-restore grace (${elapsed}ms, ${emissionCount} emissions)`);
+        resolve(lastState);
+      }
+    }, 500);
 
     bundle.keepAlive = facade.state().subscribe({
       next: (state) => {
@@ -299,6 +395,7 @@ export async function startAndSyncFacade(
         if (isFacadeSynced(state, syncMode)) {
           resolved = true;
           clearTimeout(timeout);
+          clearInterval(graceIntervalId);
           verbose('sync', `Sync complete after ${emissionCount} emissions`);
           resolve(state);
         }
@@ -307,12 +404,18 @@ export async function startAndSyncFacade(
         if (!resolved) {
           verbose('sync', `Sync error: ${(err as Error).message}`);
           clearTimeout(timeout);
+          clearInterval(graceIntervalId);
           reject(err);
         }
       },
     });
   });
 }
+
+// Cached-restore grace period: after this long, if the facade was built from
+// a cache, accept dust as "good enough" without waiting for the SDK's
+// isConnected flag (which has a known bug and may never flip).
+const CACHED_RESTORE_DUST_GRACE_MS = 10_000;
 
 /**
  * Wait for a fully-populated lite-synced state (unshielded + dust data ready).
