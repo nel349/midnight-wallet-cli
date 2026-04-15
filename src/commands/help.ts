@@ -214,7 +214,7 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'dust',
     description: 'Register UTXOs for dust (fee token) generation or check status',
-    usage: 'midnight dust <register|status> [--wallet <name|file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache]',
+    usage: 'midnight dust <register|status> [--wallet <name|file>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--no-cache (status only)]',
     flags: [
       'register            Register NIGHT UTXOs for dust generation',
       'status              Check dust registration; if registered, also shows dust balance',

@@ -167,7 +167,7 @@ describe('isVerbose', () => {
   });
 
   it('works with other flags present', () => {
-    const args = parseArgs(['transfer', '--network', 'preview', '--verbose', '--no-cache']);
+    const args = parseArgs(['transfer', '--network', 'preview', '--verbose', '--json']);
     expect(isVerbose(args)).toBe(true);
   });
 });
