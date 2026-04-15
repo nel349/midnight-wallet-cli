@@ -342,6 +342,23 @@ export async function startAndSyncFacade(
         emissionCount++;
         lastState = state;
 
+        // Stale-cache detection: if we restored from cache and our cached
+        // appliedIndex exceeds the chain's currently-reported highest, the
+        // cache is from a different chain (common on localnet restarts).
+        // Runs on every emission so the error fires before `isFacadeSynced`
+        // might accept a stale state (sync can "complete" against cached
+        // data before any chain-tip data arrives on emission 1-2).
+        if (bundle.restoredFromCache) {
+          const staleReason = detectStaleCache(state);
+          if (staleReason) {
+            resolved = true;
+            clearTimeout(timeout);
+            verbose('sync', `Stale cache detected: ${staleReason}`);
+            reject(new StaleCacheError(staleReason));
+            return;
+          }
+        }
+
         if (onProgress) {
           const progress = state.unshielded.progress;
           if (progress) {
@@ -406,6 +423,53 @@ export async function startAndSyncFacade(
 // a cache, accept dust as "good enough" without waiting for the SDK's
 // isConnected flag (which has a known bug and may never flip).
 const CACHED_RESTORE_DUST_GRACE_MS = 10_000;
+
+/**
+ * Raised when a restored facade's cached state references event ids that
+ * don't exist on the current chain — typically because the local chain was
+ * reset (e.g. `mn localnet clean`) while the cache on disk kept the old
+ * wallet state. Commands should catch this and clear the cache before retrying.
+ */
+export class StaleCacheError extends Error {
+  readonly code = 'STALE_CACHE';
+  constructor(detail: string) {
+    super(
+      `Cached wallet state is stale (from a previous chain). ${detail}\n` +
+      `Run: midnight cache clear --wallet <name> --network <name>\n` +
+      `Or:  midnight cache clear  (wipe all caches)`,
+    );
+    this.name = 'StaleCacheError';
+  }
+}
+
+/**
+ * Detect a cache whose `appliedIndex` exceeds the chain's currently-reported
+ * `highestRelevantWalletIndex` — a signature of a cache restored against a
+ * different chain (new localnet, networkId reuse, etc).
+ *
+ * Returns a human-readable reason string if stale, otherwise undefined.
+ * Only checks unshielded (the indexer sends progress on every block so its
+ * `highestTransactionId` is populated reliably — dust's `highest` can be 0
+ * genuinely on a quiet stream even when cache is valid, so checking it would
+ * produce false positives).
+ */
+function detectStaleCache(state: FacadeState): string | undefined {
+  try {
+    const up = state.unshielded?.progress as any;
+    if (!up) return undefined;
+    const applied = Number(up.appliedId ?? 0);
+    const highest = Number(up.highestTransactionId ?? 0);
+    // We require highest > 0 to ensure the indexer has reported at least once;
+    // otherwise we can't make a reliable comparison. applied > highest means
+    // our local state has applied events the chain doesn't have.
+    if (highest > 0 && applied > highest) {
+      return `unshielded cache applied=${applied} but chain highest=${highest}.`;
+    }
+  } catch {
+    /* best-effort */
+  }
+  return undefined;
+}
 
 /**
  * Wait for a fully-populated lite-synced state (unshielded + dust data ready).

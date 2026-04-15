@@ -8,8 +8,10 @@ import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sd
 import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
-import { type FacadeBundle, buildFacade, startAndSyncFacade, quickSync, stopFacade, suppressSdkTransientErrors } from './facade.ts';
+import { type FacadeBundle, buildFacade, startAndSyncFacade, quickSync, stopFacade, suppressSdkTransientErrors, StaleCacheError } from './facade.ts';
 import { primeDustCacheWithFeedback } from './dust-prime.ts';
+import { clearDustDirectCache, dustPublicKeyHexFromSeed } from './dust-direct-cache.ts';
+import { clearWalletCache } from './wallet-cache.ts';
 import { loadWalletCache, saveWalletCache } from './wallet-cache.ts';
 import { verbose } from './verbose.ts';
 import {
@@ -591,6 +593,25 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
         break;
       } catch (err: any) {
         if (signal?.aborted) throw new Error('Operation cancelled');
+
+        // Auto-recover from stale cache (localnet reset, chain switch, etc).
+        // Wipe both caches and re-prime so the retry starts from fresh state.
+        if (err instanceof StaleCacheError && attempt < MAX_SYNC_ATTEMPTS && useCache) {
+          onDust?.(`Cache is stale, clearing and rebuilding (attempt ${attempt + 1}/${MAX_SYNC_ATTEMPTS})...`);
+          verbose('transfer', `Stale cache detected: ${err.message.split('\n')[0]}`);
+          await stopFacade(bundle).catch(() => {});
+          clearWalletCache(walletAddress, networkName);
+          clearDustDirectCache(networkName, dustPublicKeyHexFromSeed(seedBuffer));
+          // Re-prime the dust cache so the next attempt restores from a
+          // current checkpoint instead of a full SDK resync.
+          await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
+            onStatus: onDust,
+            signal,
+          });
+          bundle = await buildFacade(seedBuffer, networkConfig, null);
+          continue;
+        }
+
         if (attempt < MAX_SYNC_ATTEMPTS && String(err?.message).includes('timed out')) {
           // Save partial sync progress to cache before retrying
           if (useCache) {
