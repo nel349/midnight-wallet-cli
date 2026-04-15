@@ -20,6 +20,7 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 - **`no-dust` sync mode** — `mn balance` now syncs shielded + unshielded and skips dust entirely (dust isn't needed to read NIGHT balances). Eliminates the preprod balance hang.
 - **`requireStrictSync` option** — Write commands opt in so ZK proofs are built against a current commitment tree. Read commands skip this for a cached-restore grace-period speedup.
 - **Cached-restore grace period** — After 10s, if the facade was restored from cache and non-dust wallets are strictly complete, sync resolves even if the dust-wallet SDK's `isConnected` flag never flips (see Fixed below).
+- **`mn wallet seed --entropy` flag** — Also output the 32-byte BIP-39 entropy alongside the 64-byte PBKDF2 seed. Useful when a downstream tool expects the shorter entropy format. Clearly labels that the two values produce DIFFERENT Midnight wallets from the same mnemonic, so users pick the right one.
 
 ### Changed
 

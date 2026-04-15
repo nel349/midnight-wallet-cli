@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
-import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
+import { generateMnemonic, mnemonicToSeedSync, mnemonicToEntropy, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { deriveUnshieldedAddress, deriveAllAddresses } from '../lib/derive-address.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
@@ -305,10 +305,26 @@ async function walletSeed(args: ParsedArgs): Promise<void> {
     throw new Error(`Wallet "${name}" has no seed in ${walletPath}`);
   }
 
+  // `--entropy` adds the 32-byte BIP-39 entropy (derived from the mnemonic)
+  // alongside the 64-byte PBKDF2 seed. They're DIFFERENT values that produce
+  // DIFFERENT Midnight wallets — use the format your target project expects.
+  const includeEntropy = hasFlag(args, 'entropy');
+  let entropyHex: string | undefined;
+  if (includeEntropy) {
+    if (!raw.mnemonic) {
+      throw new Error(
+        `Wallet "${name}" has no mnemonic on file — cannot derive BIP-39 entropy.\n` +
+        `The 32-byte entropy can only be computed from the original 24-word mnemonic.`,
+      );
+    }
+    entropyHex = Buffer.from(mnemonicToEntropy(raw.mnemonic, wordlist)).toString('hex');
+  }
+
   // JSON mode — no interactive prompt, just output
   if (hasFlag(args, 'json')) {
     const result: Record<string, unknown> = { name, seed: raw.seed };
     if (raw.mnemonic) result.mnemonic = raw.mnemonic;
+    if (entropyHex) result.entropy = entropyHex;
     writeJsonResult(result);
     return;
   }
@@ -332,11 +348,19 @@ async function walletSeed(args: ParsedArgs): Promise<void> {
   // Details to stderr
   process.stderr.write('\n');
   process.stderr.write(keyValue('Name', name) + '\n');
-  process.stderr.write(keyValue('Seed', raw.seed) + '\n');
+  process.stderr.write(keyValue('Seed (64-byte PBKDF2)', raw.seed) + '\n');
+  if (entropyHex) {
+    process.stderr.write(keyValue('Entropy (32-byte BIP-39)', entropyHex) + '\n');
+  }
   if (raw.mnemonic) {
     process.stderr.write(keyValue('Mnemonic', raw.mnemonic) + '\n');
   }
   process.stderr.write(keyValue('File', walletPath) + '\n');
+  if (entropyHex) {
+    process.stderr.write('\n');
+    process.stderr.write(dim('  Note: seed and entropy derive DIFFERENT Midnight wallets from the') + '\n');
+    process.stderr.write(dim('  same mnemonic. Use the value your target project accepts.') + '\n');
+  }
   process.stderr.write('\n');
 }
 

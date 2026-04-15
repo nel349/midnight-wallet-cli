@@ -23,20 +23,28 @@ interface CommandSpec {
 const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'wallet',
-    description: 'Manage named wallets (generate, list, use, info, remove)',
-    usage: 'midnight wallet <generate|list|use|info|remove> [args]',
+    description: 'Manage named wallets (generate, list, use, info, remove, seed)',
+    usage: 'midnight wallet <generate|list|use|info|remove|seed> [args]',
     flags: [
       'generate <name>     Create a new named wallet and set it as active',
       'list                Show all wallets with active marker',
       'use <name>          Set active wallet',
       'info [name]         Show wallet details (active wallet if no name)',
       'remove <name>       Delete a wallet (refuses active or last wallet)',
+      'seed [name]         Reveal the seed + mnemonic (prompts for confirmation)',
       '',
       'generate flags:',
       '--network <name>    Network: preprod, preview, undeployed',
       '--seed <hex>        Restore from existing seed (64-char hex)',
       '--mnemonic "..."    Restore from BIP-39 mnemonic (24 words)',
       '--force             Overwrite existing wallet file',
+      '',
+      'seed flags:',
+      '--entropy           Also output the 32-byte BIP-39 entropy alongside the',
+      '                    64-byte PBKDF2 seed (use when another tool expects',
+      '                    the shorter entropy format — NB: the two derive',
+      '                    DIFFERENT Midnight wallets from the same mnemonic)',
+      '--json              Print JSON (skips interactive confirmation)',
     ],
     examples: [
       'midnight wallet generate alice --network preprod',
@@ -44,6 +52,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight wallet use alice',
       'midnight wallet info alice',
       'midnight wallet remove bob',
+      'midnight wallet seed alice --entropy',
     ],
     jsonFields: {
       name: 'Wallet name',
