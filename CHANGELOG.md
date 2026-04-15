@@ -4,6 +4,8 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-14
+
 ### Added
 
 - **`mn cache clear` command** — Clear wallet sync state cache. Supports `--network` to clear a specific network and `--wallet` to clear a specific wallet. Available as MCP tool (`midnight_cache_clear`). Also wipes the new dust-direct cache (see below).
