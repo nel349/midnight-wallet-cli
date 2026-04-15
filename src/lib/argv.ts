@@ -82,6 +82,22 @@ export function isVerbose(args: ParsedArgs): boolean {
 }
 
 /**
+ * Reject `--no-cache` on commands that don't support it (write commands).
+ * The SDK's fresh-sync path is too slow on hosted networks to be viable, so
+ * writes always use the cache. Users who want a clean state should
+ * `mn cache clear` explicitly.
+ */
+export function rejectNoCacheForWrites(args: ParsedArgs): void {
+  if (hasFlag(args, 'no-cache')) {
+    throw new Error(
+      '--no-cache is not supported on write commands (transfer, airdrop, dust register, serve).\n' +
+      'Writes always use the cache — the SDK\'s fresh-sync is too slow on hosted networks.\n' +
+      'To reset: midnight cache clear --wallet <name> --network <name>',
+    );
+  }
+}
+
+/**
  * Require a flag value — throws a descriptive error if missing.
  */
 export function requireFlag(args: ParsedArgs, name: string, description: string): string {

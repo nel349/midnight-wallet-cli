@@ -5,7 +5,7 @@
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
 import * as rx from 'rxjs';
-import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
@@ -23,6 +23,7 @@ import { start as startSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function airdropCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
+  rejectNoCacheForWrites(args);
   const amountStr = args.subcommand;
   if (!amountStr) {
     throw new Error(
@@ -68,7 +69,6 @@ async function unshieldedAirdrop(
   networkConfig: NetworkConfig,
   signal?: AbortSignal,
 ): Promise<void> {
-  const noCache = hasFlag(args, 'no-cache');
   if (isVerbose(args)) enableVerbose();
   const recipientAddress = config.addresses[networkName as NetworkName];
   const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
@@ -90,7 +90,6 @@ async function unshieldedAirdrop(
       recipientAddress,
       amountNight,
       signal,
-      noCache,
       walletAddress: genesisAddress,
       networkName,
       onSync(applied, highest) {
@@ -160,7 +159,6 @@ async function shieldedAirdrop(
   signal?: AbortSignal,
 ): Promise<void> {
   const amount = nightToMicro(amountNight);
-  const noCache = hasFlag(args, 'no-cache');
   if (isVerbose(args)) enableVerbose();
 
   const userSeedBuffer = Buffer.from(config.seed, 'hex');
@@ -185,7 +183,7 @@ async function shieldedAirdrop(
 
   try {
     // Step 1: Get user's shielded address (start facade, read first state emission, stop)
-    const userCache = noCache ? null : loadWalletCache(userUnshieldedAddress, networkName);
+    const userCache = loadWalletCache(userUnshieldedAddress, networkName);
     userBundle = await buildFacade(userSeedBuffer, networkConfig, userCache);
     await userBundle.facade.start(userBundle.zswapSecretKeys, userBundle.dustSecretKey);
     const userState = await rx.firstValueFrom(userBundle.facade.state());
@@ -199,14 +197,12 @@ async function shieldedAirdrop(
     process.stderr.write(keyValue('To', formatAddress(userShieldedAddrStr, true)) + '\n\n');
 
     // Step 2: Prime dust cache + build genesis facade (full sync, needs shielded balance)
-    if (!noCache) {
-      await primeDustCacheWithFeedback(genesisSeedBuffer, networkName, networkConfig.indexerWS, {
-        onStatus: (s) => spinner.update(s),
-        signal,
-      });
-    }
+    await primeDustCacheWithFeedback(genesisSeedBuffer, networkName, networkConfig.indexerWS, {
+      onStatus: (s) => spinner.update(s),
+      signal,
+    });
     spinner.update('Syncing genesis wallet...');
-    const genesisCache = noCache ? null : loadWalletCache(genesisAddress, networkName);
+    const genesisCache = loadWalletCache(genesisAddress, networkName);
     genesisBundle = await buildFacade(genesisSeedBuffer, networkConfig, genesisCache);
     if (genesisBundle.restoredFromCache) spinner.update('Restoring from cache...');
 
@@ -273,9 +269,7 @@ async function shieldedAirdrop(
     spinner.stop('Transaction submitted');
 
     // Save genesis cache
-    if (!noCache) {
-      try { await saveWalletCache(genesisAddress, networkName, genesisBundle.facade); } catch { /* best-effort */ }
-    }
+    try { await saveWalletCache(genesisAddress, networkName, genesisBundle.facade); } catch { /* best-effort */ }
 
     // Output
     if (hasFlag(args, 'json')) {

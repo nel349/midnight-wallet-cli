@@ -3,7 +3,7 @@
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 
-import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
@@ -73,22 +73,19 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   }
 
   // register: full facade flow (requires proof server, keystore, sync).
-  const noCache = hasFlag(args, 'no-cache');
-
+  rejectNoCacheForWrites(args);
   // Prime dust cache so register's facade sync resumes from chain tip instead
   // of slowly catching up events from scratch. Owned UTXOs are typically 0
   // here (that's why we're registering) — priming still populates the global
   // commitment tree, which is what the register tx's proof needs.
-  if (!noCache) {
-    const primeSpinner = startSpinner(`Priming dust cache from ${networkName}...`);
-    await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
-      onStatus: (s) => primeSpinner.update(s),
-      signal,
-    });
-    primeSpinner.stop('Dust cache primed');
-  }
+  const primeSpinner = startSpinner(`Priming dust cache from ${networkName}...`);
+  await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
+    onStatus: (s) => primeSpinner.update(s),
+    signal,
+  });
+  primeSpinner.stop('Dust cache primed');
 
-  const cache = noCache ? null : loadWalletCache(address, networkName);
+  const cache = loadWalletCache(address, networkName);
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
 
   const cleanup = async () => {
@@ -108,7 +105,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   const restoreRpc = suppressRpcNoise();
 
   try {
-    await dustRegister(bundle, networkName, address, noCache, isJson, signal, warningRef);
+    await dustRegister(bundle, networkName, address, isJson, signal, warningRef);
   } finally {
     signal?.removeEventListener('abort', onAbort);
     restoreRpc();
@@ -204,7 +201,6 @@ async function dustRegister(
   bundle: FacadeBundle,
   networkName: string,
   address: string,
-  noCache: boolean,
   jsonMode: boolean,
   signal?: AbortSignal,
   warningRef?: WarningRef,
@@ -252,10 +248,8 @@ async function dustRegister(
     const state = await waitForLiteSyncedState(bundle);
     const dustBal = state.dust.balance(new Date());
 
-    // Save cache after successful sync (unless --no-cache)
-    if (!noCache) {
-      try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
-    }
+    // Save cache after successful sync
+    try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
 
     if (result.alreadyAvailable) {
       spinner.stop('Dust already available');

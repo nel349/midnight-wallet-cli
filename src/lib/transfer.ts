@@ -46,8 +46,6 @@ export interface TransferParams {
   onProving?: () => void;
   onSubmitting?: () => void;
   onSyncWarning?: (tag: string, message: string) => void;
-  /** Skip cache load and save when true. */
-  noCache?: boolean;
   /** Wallet address for cache keying (required for cache). */
   walletAddress?: string;
   /** Network name for cache keying (required for cache). */
@@ -516,7 +514,6 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     onProving,
     onSubmitting,
     onSyncWarning,
-    noCache,
     walletAddress,
     networkName,
   } = params;
@@ -533,14 +530,15 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
   // entire transfer flow (covers dust registration and transfer submission).
   const restoreRpc = suppressRpcNoise();
 
-  // Load cached wallet state (unless --no-cache or missing cache params)
-  const useCache = !noCache && walletAddress && networkName;
+  // Writes always use the cache: on hosted networks the SDK's fresh-sync
+  // path is too slow to be viable, so there's no user-facing `--no-cache`
+  // flag. `mn cache clear` wipes the cache explicitly if needed.
+  const useCache = walletAddress && networkName;
   const cache = useCache ? loadWalletCache(walletAddress, networkName) : null;
 
   // Prime the dust-direct cache so the facade's dust wallet restores from a
-  // near-tip checkpoint. Skip when --no-cache: user wants a fresh full sync.
-  // Reuses the caller's `onDust` hook for status — command-layer spinner
-  // picks up prime progress without needing its own dedicated callback.
+  // near-tip checkpoint. Reuses the caller's `onDust` hook for status —
+  // command-layer spinner picks up prime progress.
   if (useCache && networkName) {
     await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
       onStatus: onDust,

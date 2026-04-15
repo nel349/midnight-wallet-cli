@@ -2,7 +2,7 @@
 // Usage: midnight serve [--port 9932] [--wallet path] [--network name]
 //                       [--approve-all] [--no-auto-approve-reads] [--json]
 
-import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
@@ -21,6 +21,7 @@ import { start as startSpinner, getActiveSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function serveCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
+  rejectNoCacheForWrites(args);
   // ── Parse args ──
 
   const portStr = getFlag(args, 'port');
@@ -68,7 +69,6 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   });
   const restoreRpc = suppressRpcNoise();
 
-  const noCache = hasFlag(args, 'no-cache');
   if (isVerbose(args)) enableVerbose();
 
   // ── Build & sync facade ──
@@ -78,13 +78,11 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   // Prime dust cache before building the facade so its dust wallet restores
   // from a near-tip checkpoint and strict-sync completes in seconds instead
   // of minutes. serve accepts write RPCs, so fast + correct dust state matters.
-  if (!noCache) {
-    await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
-      onStatus: (s) => spinner.update(s),
-    });
-  }
+  await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
+    onStatus: (s) => spinner.update(s),
+  });
 
-  const cache = noCache ? null : loadWalletCache(address, networkName);
+  const cache = loadWalletCache(address, networkName);
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
   if (bundle.restoredFromCache) {
     spinner.update('Restoring from cache...');
@@ -125,9 +123,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     dustSpinner.stop(hasDust ? 'Dust ready' : 'Dust not yet available (writes may fail)');
 
     // Save cache after successful sync
-    if (!noCache) {
-      try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
-    }
+    try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
@@ -258,7 +254,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     // Save cache on graceful shutdown — but NOT if transactions are pending.
     // The SDK drops pendingDustTokens on serialization, so saving while coins
     // are locked in pending would persist a corrupted state (dust=0).
-    if (!noCache && !connector.hasPendingTxs()) {
+    if (!connector.hasPendingTxs()) {
       try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
     }
     try { await server.close(); } catch { /* best-effort */ }

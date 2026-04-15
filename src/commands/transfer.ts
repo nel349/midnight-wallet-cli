@@ -3,7 +3,7 @@
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m, ShieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
-import { type ParsedArgs, getFlag, hasFlag, isVerbose } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
@@ -18,6 +18,7 @@ import { start as startSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function transferCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
+  rejectNoCacheForWrites(args);
   const recipientInput = args.subcommand;
   const amountStr = args.positionals[0];
 
@@ -106,7 +107,6 @@ async function unshieldedTransfer(
   process.stderr.write(keyValue('Amount', bold(amountNight + ' NIGHT')) + '\n');
   process.stderr.write('\n');
 
-  const noCache = hasFlag(args, 'no-cache');
   if (isVerbose(args)) enableVerbose();
   const spinner = startSpinner('Starting wallet...');
 
@@ -117,7 +117,6 @@ async function unshieldedTransfer(
       recipientAddress,
       amountNight,
       signal,
-      noCache,
       walletAddress: address,
       networkName,
       onSync(applied, highest) {
@@ -212,12 +211,11 @@ async function shieldedTransfer(
   process.stderr.write(keyValue('Amount', bold(amountNight + ' NIGHT (shielded)')) + '\n');
   process.stderr.write('\n');
 
-  const noCache = hasFlag(args, 'no-cache');
   if (isVerbose(args)) enableVerbose();
 
   const unsuppress = suppressSdkTransientErrors();
   const restoreRpc = suppressRpcNoise();
-  const cache = noCache ? null : loadWalletCache(unshieldedAddress, networkName);
+  const cache = loadWalletCache(unshieldedAddress, networkName);
   const spinner = startSpinner('Syncing wallet...');
 
   let bundle: FacadeBundle | undefined;
@@ -294,9 +292,7 @@ async function shieldedTransfer(
     spinner.stop('Transaction submitted');
 
     // Save cache
-    if (!noCache) {
-      try { await saveWalletCache(unshieldedAddress, networkName, bundle.facade); } catch { /* best-effort */ }
-    }
+    try { await saveWalletCache(unshieldedAddress, networkName, bundle.facade); } catch { /* best-effort */ }
 
     if (hasFlag(args, 'json')) {
       writeJsonResult({
