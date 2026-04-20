@@ -14,7 +14,7 @@ import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatNight, formatAddress, toNight } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
-import { start as startSpinner } from '../ui/spinner.ts';
+import { start as startSpinner, type Spinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function balanceCommand(args: ParsedArgs): Promise<void> {
@@ -104,6 +104,7 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
   const config = loadWalletConfig(walletPath);
   const seedBuffer = Buffer.from(config.seed, 'hex');
   const address = config.addresses[networkName];
+  const shieldedAddrStr = config.shieldedAddresses?.[networkName] ?? '';
 
   applyEndpointOverrides(networkConfig, {
     proofServer: getFlag(args, 'proof-server'),
@@ -114,51 +115,98 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
   const unsuppress = suppressSdkTransientErrors();
   const restoreRpc = suppressRpcNoise();
   const noCache = hasFlag(args, 'no-cache');
-  const cache = noCache ? null : loadWalletCache(address, networkName);
-  const spinner = startSpinner(`Syncing wallet on ${networkName}...`);
+  const isJson = hasFlag(args, 'json');
+  const nightToken = ledger.unshieldedToken().raw;
 
   let bundle: FacadeBundle | undefined;
+  let activeSpinner: Spinner | null = null;
 
   try {
+    // Header + address chrome (we already have everything except live balances).
+    if (!isJson) {
+      process.stderr.write('\n' + header('Balance') + '\n\n');
+      process.stderr.write(keyValue('Address', formatAddress(address)) + '\n');
+      if (shieldedAddrStr) {
+        process.stderr.write(keyValue('Shielded', formatAddress(shieldedAddrStr)) + '\n');
+      }
+      process.stderr.write(keyValue('Network', networkName) + '\n');
+      process.stderr.write('\n  ' + bold('Unshielded') + '\n');
+    }
+
+    // ── Phase 1: fast unshielded via GraphQL (no facade, no proof server) ──
+    if (!isJson) activeSpinner = startSpinner('Checking unshielded...');
+    const unshieldedResult = await checkBalance(address, networkConfig.indexerWS, () => {
+      // Progress callback intentionally quiet — this finishes in <1s on most networks.
+    });
+    const unshieldedBalance = unshieldedResult.balances.get(nightToken) ?? 0n;
+    const unshieldedUtxos = unshieldedResult.utxoCount;
+
+    if (activeSpinner) {
+      activeSpinner.stop('Unshielded ready');
+      activeSpinner = null;
+      if (unshieldedBalance > 0n) {
+        process.stderr.write(keyValue('  NIGHT', bold(formatNight(unshieldedBalance))) + '\n');
+        process.stderr.write(keyValue('  UTXOs', unshieldedUtxos.toString()) + '\n');
+      } else {
+        process.stderr.write(`    ${dim('No unshielded balance')}\n`);
+      }
+    }
+
+    // Pipeable stdout for unshielded — emit immediately so consumers don't
+    // have to wait for the shielded sync to read the unshielded value.
+    if (!isJson) {
+      process.stdout.write(`NIGHT=${unshieldedBalance}\n`);
+      process.stderr.write('\n  ' + bold('Shielded') + '\n');
+    }
+
+    // ── Phase 2: shielded via facade sync (slower — needs ZK keys + WASM state) ──
+    const cache = noCache ? null : loadWalletCache(address, networkName);
+    if (!isJson) activeSpinner = startSpinner('Syncing shielded...');
+
     bundle = await buildFacade(seedBuffer, networkConfig, cache);
-    if (bundle.restoredFromCache) spinner.update('Restoring from cache...');
+    if (bundle.restoredFromCache) activeSpinner?.update('Restoring from cache...');
 
     const state = await startAndSyncFacade(bundle, {
       // Balance reads NIGHT from unshielded + shielded; dust isn't needed and
       // skipping it avoids the dust isConnected SDK hang on hosted networks.
       syncMode: 'no-dust',
       onProgress: (applied, highest) => {
-        if (highest > 0) {
+        if (highest > 0 && activeSpinner) {
           const pct = Math.min(Math.round((applied / highest) * 100), 100);
-          spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
+          activeSpinner.update(pct >= 100 ? 'Syncing shielded...' : `Syncing shielded... ${pct}%`);
         }
       },
-      onSyncDetail: (detail) => spinner.update(`Syncing wallet... (waiting on: ${detail})`),
+      onSyncDetail: (detail) => activeSpinner?.update(`Syncing shielded... (waiting on: ${detail})`),
     });
 
-    spinner.stop('Synced');
-
-    // Save cache + shielded address
+    // Save cache + shielded address (defensive write — backfill from load may
+    // have already written this exact value).
     if (!noCache) {
       try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
     }
     const networkId = getNetworkId(networkConfig.networkId);
-    const shieldedAddrStr = MidnightBech32m.encode(networkId, state.shielded.address).asString();
-    saveShieldedAddress(walletPath, shieldedAddrStr);
+    const liveShieldedAddrStr = MidnightBech32m.encode(networkId, state.shielded.address).asString();
+    saveShieldedAddress(walletPath, networkName, liveShieldedAddrStr);
 
-    // Extract balances
-    const nightToken = ledger.unshieldedToken().raw;
-    const unshieldedBalance = state.unshielded.balances[nightToken] ?? 0n;
     const shieldedBalance = state.shielded.balances[nightToken] ?? 0n;
-    const unshieldedUtxos = state.unshielded.availableCoins?.length ?? 0;
     const shieldedCoins = state.shielded.availableCoins.length;
     const pendingCoins = state.shielded.pendingCoins.length;
 
-    // JSON mode
-    if (hasFlag(args, 'json')) {
+    if (activeSpinner) {
+      activeSpinner.stop('Shielded ready');
+      activeSpinner = null;
+      if (shieldedBalance > 0n) {
+        process.stderr.write(keyValue('  NIGHT', bold(formatNight(shieldedBalance))) + '\n');
+        process.stderr.write(keyValue('  Coins', `${shieldedCoins} available, ${pendingCoins} pending`) + '\n');
+      } else {
+        process.stderr.write(`    ${dim('No shielded balance')}\n`);
+      }
+    }
+
+    if (isJson) {
       writeJsonResult({
         address,
-        shieldedAddress: shieldedAddrStr,
+        shieldedAddress: liveShieldedAddrStr,
         network: networkName,
         unshielded: { NIGHT: toNight(unshieldedBalance), utxoCount: unshieldedUtxos },
         shielded: { NIGHT: toNight(shieldedBalance), availableCoins: shieldedCoins, pendingCoins },
@@ -166,35 +214,10 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
       return;
     }
 
-    // Bare data to stdout (pipeable)
-    process.stdout.write(`NIGHT=${unshieldedBalance}\n`);
     process.stdout.write(`SHIELDED_NIGHT=${shieldedBalance}\n`);
-
-    // Formatted to stderr
-    process.stderr.write('\n' + header('Balance') + '\n\n');
-    process.stderr.write(keyValue('Address', formatAddress(address)) + '\n');
-    process.stderr.write(keyValue('Shielded', formatAddress(shieldedAddrStr)) + '\n');
-    process.stderr.write(keyValue('Network', networkName) + '\n');
-
-    process.stderr.write('\n  ' + bold('Unshielded') + '\n');
-    if (unshieldedBalance > 0n) {
-      process.stderr.write(keyValue('  NIGHT', bold(formatNight(unshieldedBalance))) + '\n');
-      process.stderr.write(keyValue('  UTXOs', unshieldedUtxos.toString()) + '\n');
-    } else {
-      process.stderr.write(`    ${dim('No unshielded balance')}\n`);
-    }
-
-    process.stderr.write('\n  ' + bold('Shielded') + '\n');
-    if (shieldedBalance > 0n) {
-      process.stderr.write(keyValue('  NIGHT', bold(formatNight(shieldedBalance))) + '\n');
-      process.stderr.write(keyValue('  Coins', `${shieldedCoins} available, ${pendingCoins} pending`) + '\n');
-    } else {
-      process.stderr.write(`    ${dim('No shielded balance')}\n`);
-    }
-
     process.stderr.write('\n' + divider() + '\n\n');
   } catch (err) {
-    spinner.stop('Failed');
+    activeSpinner?.stop('Failed');
     throw err;
   } finally {
     if (bundle) await stopFacade(bundle);
