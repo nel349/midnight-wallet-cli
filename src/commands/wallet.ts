@@ -175,9 +175,20 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
 
 async function walletList(args: ParsedArgs): Promise<void> {
   const wallets = listWallets();
+  const networkName = resolveNetworkName({ args });
 
   if (hasFlag(args, 'json')) {
-    writeJsonResult({ wallets });
+    writeJsonResult({
+      activeNetwork: networkName,
+      wallets: wallets.map((w) => ({
+        name: w.name,
+        active: w.isActive,
+        addresses: w.addresses,
+        shieldedAddresses: w.shieldedAddresses,
+        createdAt: w.createdAt,
+        file: w.file,
+      })),
+    });
     return;
   }
 
@@ -187,31 +198,35 @@ async function walletList(args: ParsedArgs): Promise<void> {
     return;
   }
 
-  // Resolve current network for display
-  const networkName = resolveNetworkName({ args });
-
   process.stderr.write('\n' + header('Wallets') + '\n\n');
 
-  for (let i = 0; i < wallets.length; i++) {
-    const w = wallets[i];
+  // Compact one-line layout — name + truncated unshielded + truncated shielded.
+  // Columns padded to the widest entry so addresses align. Full per-network
+  // detail (untruncated, all 3 networks) lives in `mn wallet info <name>`.
+  const nameWidth = Math.max(...wallets.map((w) => w.name.length));
+  const ADDR_WIDTH = 19;     // formatAddress(_, true) renders as `<10>…<8>` = 19 chars
+  const SHIELDED_WIDTH = 19; // same truncation rule
+
+  // Header row
+  const namePad = ' '.repeat(nameWidth - 'name'.length);
+  process.stderr.write(
+    `    ${dim('name')}${namePad}  ${dim('unshielded'.padEnd(ADDR_WIDTH))}  ${dim('shielded')}\n`,
+  );
+
+  for (const w of wallets) {
     const marker = w.isActive ? green('●') : ' ';
     const nameStr = w.isActive ? bold(teal(w.name)) : teal(w.name);
-    const addr = w.addresses[networkName] ?? '(unknown)';
-
-    process.stderr.write(`  ${marker} ${nameStr}\n`);
-    process.stderr.write(`    ${dim(networkName + ':')}  ${formatAddress(addr)}\n`);
+    const padding = ' '.repeat(nameWidth - w.name.length);
+    const unshielded = w.addresses[networkName] ?? '(unknown)';
     const shielded = w.shieldedAddresses?.[networkName];
-    if (shielded) {
-      process.stderr.write(`    ${dim('shielded:')} ${formatAddress(shielded)}\n`);
-    }
-
-    if (i < wallets.length - 1) {
-      process.stderr.write(dim('    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─') + '\n');
-    }
+    const shieldedCell = shielded ? formatAddress(shielded, true) : dim('—'.padEnd(SHIELDED_WIDTH));
+    process.stderr.write(
+      `  ${marker} ${nameStr}${padding}  ${formatAddress(unshielded, true)}  ${shieldedCell}\n`,
+    );
   }
 
   process.stderr.write('\n' + divider() + '\n');
-  process.stderr.write(dim('  ● = active wallet') + '\n\n');
+  process.stderr.write(dim(`  ● = active wallet · network: ${networkName} · details: midnight wallet info <name>`) + '\n\n');
 }
 
 async function walletUse(args: ParsedArgs): Promise<void> {

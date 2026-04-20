@@ -19,6 +19,8 @@ export interface WalletInfo {
   addresses: Record<NetworkName, string>;
   shieldedAddresses?: Record<NetworkName, string>;
   isActive: boolean;
+  createdAt?: string;
+  file: string;
 }
 
 /**
@@ -187,12 +189,15 @@ export function listWallets(): WalletInfo[] {
         addresses,
         shieldedAddresses,
         isActive: name === activeName,
+        createdAt: typeof content.createdAt === 'string' ? content.createdAt : undefined,
+        file: filePath,
       };
     } catch {
       return {
         name,
         addresses: { undeployed: '(invalid)', preprod: '(invalid)', preview: '(invalid)' } as Record<NetworkName, string>,
         isActive: name === activeName,
+        file: filePath,
       };
     }
   });
