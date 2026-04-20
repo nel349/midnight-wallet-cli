@@ -7,7 +7,7 @@ import { homedir } from 'os';
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { generateMnemonic, mnemonicToSeedSync, mnemonicToEntropy, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
-import { deriveUnshieldedAddress, deriveAllAddresses } from '../lib/derive-address.ts';
+import { deriveUnshieldedAddress, deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
 import {
   saveWalletConfig,
@@ -107,11 +107,13 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
   }
 
   const addresses = deriveAllAddresses(seedBuffer);
+  const shieldedAddresses = deriveAllShieldedAddresses(seedBuffer);
   const activeAddress = addresses[networkName];
 
   const config: WalletConfig = {
     seed: seedBuffer.toString('hex'),
     addresses,
+    shieldedAddresses,
     createdAt: new Date().toISOString(),
   };
 
@@ -129,6 +131,7 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
     const result: Record<string, unknown> = {
       name,
       addresses,
+      shieldedAddresses,
       activeAddress,
       activeNetwork: networkName,
       seed: seedBuffer.toString('hex'),
@@ -149,6 +152,10 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
   process.stderr.write(keyValue('Name', name) + '\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
   process.stderr.write(keyValue('Address', formatAddress(activeAddress)) + '\n');
+  const activeShielded = shieldedAddresses[networkName];
+  if (activeShielded) {
+    process.stderr.write(keyValue('Shielded', formatAddress(activeShielded)) + '\n');
+  }
   process.stderr.write(keyValue('File', savedPath) + '\n');
   process.stderr.write(keyValue('Active', 'yes') + '\n');
   process.stderr.write('\n');
@@ -193,8 +200,9 @@ async function walletList(args: ParsedArgs): Promise<void> {
 
     process.stderr.write(`  ${marker} ${nameStr}\n`);
     process.stderr.write(`    ${dim(networkName + ':')}  ${formatAddress(addr)}\n`);
-    if (w.shieldedAddress) {
-      process.stderr.write(`    ${dim('shielded:')} ${formatAddress(w.shieldedAddress)}\n`);
+    const shielded = w.shieldedAddresses?.[networkName];
+    if (shielded) {
+      process.stderr.write(`    ${dim('shielded:')} ${formatAddress(shielded)}\n`);
     }
 
     if (i < wallets.length - 1) {
@@ -242,7 +250,7 @@ async function walletInfo(args: ParsedArgs): Promise<void> {
       file: walletPath,
       active: isActive,
     };
-    if (config.shieldedAddress) result.shieldedAddress = config.shieldedAddress;
+    if (config.shieldedAddresses) result.shieldedAddresses = config.shieldedAddresses;
     writeJsonResult(result);
     return;
   }
@@ -250,29 +258,33 @@ async function walletInfo(args: ParsedArgs): Promise<void> {
   // Bare active address to stdout (pipeable)
   process.stdout.write(activeAddress + '\n');
 
-  process.stderr.write('\n' + header('Wallet Info') + '\n\n');
-  process.stderr.write(keyValue('Name', name) + '\n');
+  // Header with wallet name inline
+  process.stderr.write('\n' + header(`Wallet: ${name}`) + '\n\n');
 
-  // Show all addresses, highlighting active network
-  for (const [network, addr] of Object.entries(config.addresses)) {
+  // Per-network grouping — unshielded + shielded together
+  const networks = Object.keys(config.addresses) as Array<keyof typeof config.addresses>;
+  for (let i = 0; i < networks.length; i++) {
+    const network = networks[i] as string;
     const isActiveNet = network === networkName;
-    const label = isActiveNet ? bold(network) : network;
-    const marker = isActiveNet ? ' *' : '';
-    process.stderr.write(keyValue(label + marker, formatAddress(addr as string)) + '\n');
+    const unshielded = config.addresses[network as keyof typeof config.addresses];
+    const shielded = config.shieldedAddresses?.[network as keyof typeof config.addresses];
+
+    const label = isActiveNet ? bold(teal(network)) + dim('  (active)') : network;
+    process.stderr.write(`  ${label}\n`);
+    process.stderr.write(`    ${dim('unshielded')}  ${formatAddress(unshielded as string)}\n`);
+    if (shielded) {
+      process.stderr.write(`    ${dim('shielded  ')}  ${formatAddress(shielded)}\n`);
+    } else {
+      process.stderr.write(`    ${dim('shielded  ')}  ${dim('(unavailable)')}\n`);
+    }
+    if (i < networks.length - 1) process.stderr.write('\n');
   }
 
-  // Shielded address (network-independent)
-  if (config.shieldedAddress) {
-    process.stderr.write(keyValue('shielded', formatAddress(config.shieldedAddress)) + '\n');
-  } else {
-    process.stderr.write(keyValue('shielded', dim('(run balance --shielded to populate)')) + '\n');
-  }
-
-  process.stderr.write(keyValue('Created', config.createdAt) + '\n');
-  process.stderr.write(keyValue('File', walletPath) + '\n');
-  process.stderr.write(keyValue('Active', isActive ? 'yes' : 'no') + '\n');
-  process.stderr.write(dim('  * = active network') + '\n');
+  // Footer
   process.stderr.write('\n' + divider() + '\n\n');
+  process.stderr.write(`  ${dim('created')}  ${config.createdAt}\n`);
+  process.stderr.write(`  ${dim('file   ')}  ${walletPath}\n`);
+  process.stderr.write(`  ${dim('active ')}  ${isActive ? green('yes') : 'no'}\n\n`);
 }
 
 async function walletRemove(args: ParsedArgs): Promise<void> {

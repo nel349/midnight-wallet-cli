@@ -97,8 +97,10 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight info --wallet my-wallet.json',
     ],
     jsonFields: {
-      address: 'Wallet address (bech32m)',
-      network: 'Network name',
+      addresses: 'Per-network unshielded addresses { preprod, preview, undeployed }',
+      shieldedAddresses: 'Per-network shielded addresses { preprod, preview, undeployed }',
+      activeNetwork: 'Currently active network',
+      activeAddress: 'Unshielded address for active network (also written to stdout)',
       createdAt: 'ISO 8601 creation timestamp',
       file: 'Wallet file path',
     },

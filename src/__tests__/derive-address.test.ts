@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
+import { deriveUnshieldedAddress, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
 
 const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
@@ -66,5 +66,40 @@ describe('deriveUnshieldedAddress', () => {
   it('throws for empty seed', () => {
     const emptySeed = Buffer.alloc(0);
     expect(() => deriveUnshieldedAddress(emptySeed, 'undeployed')).toThrow();
+  });
+});
+
+describe('deriveAllShieldedAddresses', () => {
+  it('returns one shielded address per supported network', () => {
+    const out = deriveAllShieldedAddresses(genesisSeedBuffer);
+    expect(Object.keys(out).sort()).toEqual(['preprod', 'preview', 'undeployed']);
+  });
+
+  it('each address has the correct network prefix', () => {
+    const out = deriveAllShieldedAddresses(genesisSeedBuffer);
+    expect(out.preprod.startsWith('mn_shield-addr_preprod1')).toBe(true);
+    expect(out.preview.startsWith('mn_shield-addr_preview1')).toBe(true);
+    expect(out.undeployed.startsWith('mn_shield-addr_undeployed1')).toBe(true);
+  });
+
+  it('addresses differ across networks', () => {
+    const out = deriveAllShieldedAddresses(genesisSeedBuffer);
+    expect(out.preprod).not.toBe(out.preview);
+    expect(out.preprod).not.toBe(out.undeployed);
+    expect(out.preview).not.toBe(out.undeployed);
+  });
+
+  it('is deterministic for a fixed seed', () => {
+    const a = deriveAllShieldedAddresses(genesisSeedBuffer);
+    const b = deriveAllShieldedAddresses(genesisSeedBuffer);
+    expect(a).toEqual(b);
+  });
+
+  it('different seeds produce different shielded addresses', () => {
+    const seedA = Buffer.from(GENESIS_SEED, 'hex');
+    const seedB = Buffer.from('0000000000000000000000000000000000000000000000000000000000000002', 'hex');
+    const outA = deriveAllShieldedAddresses(seedA);
+    const outB = deriveAllShieldedAddresses(seedB);
+    expect(outA.undeployed).not.toBe(outB.undeployed);
   });
 });

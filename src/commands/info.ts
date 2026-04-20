@@ -4,9 +4,9 @@
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
-import { header, keyValue, divider } from '../ui/format.ts';
+import { header, divider } from '../ui/format.ts';
 import { formatAddress } from '../ui/format.ts';
-import { bold, dim } from '../ui/colors.ts';
+import { bold, dim, teal } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function infoCommand(args: ParsedArgs): Promise<void> {
@@ -24,7 +24,7 @@ export default async function infoCommand(args: ParsedArgs): Promise<void> {
       createdAt: config.createdAt,
       file: resolvedPath,
     };
-    if (config.shieldedAddress) result.shieldedAddress = config.shieldedAddress;
+    if (config.shieldedAddresses) result.shieldedAddresses = config.shieldedAddresses;
     writeJsonResult(result);
     return;
   }
@@ -32,28 +32,30 @@ export default async function infoCommand(args: ParsedArgs): Promise<void> {
   // Bare active address to stdout (pipeable)
   process.stdout.write(activeAddress + '\n');
 
-  // Formatted details to stderr
+  // Header
   process.stderr.write('\n' + header('Wallet Info') + '\n\n');
 
-  // Show all addresses, highlighting active network
-  for (const [network, addr] of Object.entries(config.addresses)) {
-    const isActive = network === activeNetwork;
-    const label = isActive ? bold(network) : network;
-    const marker = isActive ? ' *' : '';
-    process.stderr.write(keyValue(label + marker, formatAddress(addr)) + '\n');
+  // Per-network grouping — unshielded + shielded together
+  const networks = Object.keys(config.addresses) as Array<keyof typeof config.addresses>;
+  for (let i = 0; i < networks.length; i++) {
+    const network = networks[i] as string;
+    const isActiveNet = network === activeNetwork;
+    const unshielded = config.addresses[network as keyof typeof config.addresses];
+    const shielded = config.shieldedAddresses?.[network as keyof typeof config.addresses];
+
+    const label = isActiveNet ? bold(teal(network)) + dim('  (active)') : network;
+    process.stderr.write(`  ${label}\n`);
+    process.stderr.write(`    ${dim('unshielded')}  ${formatAddress(unshielded as string)}\n`);
+    if (shielded) {
+      process.stderr.write(`    ${dim('shielded  ')}  ${formatAddress(shielded)}\n`);
+    } else {
+      process.stderr.write(`    ${dim('shielded  ')}  ${dim('(unavailable)')}\n`);
+    }
+    if (i < networks.length - 1) process.stderr.write('\n');
   }
 
-  // Shielded address (network-independent)
-  if (config.shieldedAddress) {
-    process.stderr.write(keyValue('shielded', formatAddress(config.shieldedAddress)) + '\n');
-  } else {
-    process.stderr.write(keyValue('shielded', dim('(run balance --shielded to populate)')) + '\n');
-  }
-
-  process.stderr.write('\n');
-  process.stderr.write(keyValue('Active Network', activeNetwork) + '\n');
-  process.stderr.write(keyValue('Created', config.createdAt) + '\n');
-  process.stderr.write(keyValue('File', resolvedPath) + '\n');
-  process.stderr.write(dim('  * = active network') + '\n');
+  // Footer
   process.stderr.write('\n' + divider() + '\n\n');
+  process.stderr.write(`  ${dim('created')}  ${config.createdAt}\n`);
+  process.stderr.write(`  ${dim('file   ')}  ${resolvedPath}\n\n`);
 }

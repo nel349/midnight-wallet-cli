@@ -190,7 +190,7 @@ async function shieldedAirdrop(
     const userShieldedAddress = userState.shielded.address;
     const userShieldedAddrStr = MidnightBech32m.encode(networkId, userShieldedAddress).asString();
     // Cache shielded address in wallet file
-    saveShieldedAddress(resolveWalletPath(getFlag(args, 'wallet')), userShieldedAddrStr);
+    saveShieldedAddress(resolveWalletPath(getFlag(args, 'wallet')), networkName as NetworkName, userShieldedAddrStr);
     await stopFacade(userBundle);
     userBundle = undefined;
 

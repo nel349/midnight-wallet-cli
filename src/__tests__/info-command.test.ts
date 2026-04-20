@@ -63,7 +63,7 @@ describe('info command — stderr (formatted details)', () => {
     const args = parseArgs(['info', '--wallet', walletFile]);
     await infoCommand(args);
     const err = io.stderr();
-    expect(err).toContain('Active Network');
+    expect(err).toContain('(active)');
     expect(err).toContain('undeployed');
   });
 

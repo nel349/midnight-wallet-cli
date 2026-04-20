@@ -63,17 +63,19 @@ function resolveRecipient(input: string, args: ParsedArgs, shielded: boolean): s
   const recipientPath = resolveWalletPath(input);
   const recipientConfig = loadWalletConfig(recipientPath);
 
+  const { name: networkName } = resolveNetwork({ args });
+
   if (shielded) {
-    if (!recipientConfig.shieldedAddress) {
+    const shieldedAddr = recipientConfig.shieldedAddresses?.[networkName];
+    if (!shieldedAddr) {
       throw new Error(
-        `Wallet "${input}" has no shielded address.\n` +
-        `The recipient must run "midnight balance --shielded" first to populate their shielded address.`
+        `Wallet "${input}" has no shielded address for network "${networkName}".\n` +
+        `Regenerate the wallet or run "midnight balance --shielded" first.`
       );
     }
-    return recipientConfig.shieldedAddress;
+    return shieldedAddr;
   }
 
-  const { name: networkName } = resolveNetwork({ args });
   return recipientConfig.addresses[networkName];
 }
 
@@ -239,7 +241,7 @@ async function shieldedTransfer(
 
     // Cache shielded address in wallet file
     const senderShieldedAddr = MidnightBech32m.encode(networkId, state.shielded.address).asString();
-    saveShieldedAddress(walletPath, senderShieldedAddr);
+    saveShieldedAddress(walletPath, networkName, senderShieldedAddr);
 
     // Check shielded balance
     const shieldedBalance = state.shielded.balances[nightToken] ?? 0n;

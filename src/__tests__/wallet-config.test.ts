@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { loadWalletConfig, saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
 import { DIR_MODE, FILE_MODE } from '../lib/constants.ts';
-import { deriveAllAddresses } from '../lib/derive-address.ts';
+import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-wallet-test-${process.pid}`);
 
@@ -191,10 +191,12 @@ describe('round-trip', () => {
     const filePath = path.join(TEST_DIR, 'roundtrip.json');
     const seed = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
     const addresses = deriveAllAddresses(Buffer.from(seed, 'hex'));
+    const shieldedAddresses = deriveAllShieldedAddresses(Buffer.from(seed, 'hex'));
     const original: WalletConfig = {
       seed,
       mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
       addresses,
+      shieldedAddresses,
       createdAt: '2026-02-26T12:00:00.000Z',
     };
     saveWalletConfig(original, filePath);
@@ -204,8 +206,12 @@ describe('round-trip', () => {
 
   it('save then load preserves config without mnemonic', () => {
     const filePath = path.join(TEST_DIR, 'roundtrip.json');
+    const expected: WalletConfig = {
+      ...VALID_CONFIG,
+      shieldedAddresses: deriveAllShieldedAddresses(Buffer.from(VALID_CONFIG.seed, 'hex')),
+    };
     saveWalletConfig(VALID_CONFIG, filePath);
     const loaded = loadWalletConfig(filePath);
-    expect(loaded).toEqual(VALID_CONFIG);
+    expect(loaded).toEqual(expected);
   });
 });

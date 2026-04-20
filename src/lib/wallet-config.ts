@@ -4,33 +4,46 @@ import { homedir } from 'os';
 import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME, WALLETS_DIR_NAME, DEFAULT_WALLET_NAME, DIR_MODE, FILE_MODE, isValidWalletName } from './constants.ts';
 import { isValidNetworkName, type NetworkName } from './network.ts';
 import { loadCliConfig, saveCliConfig } from './cli-config.ts';
-import { deriveAllAddresses } from './derive-address.ts';
+import { deriveAllAddresses, deriveAllShieldedAddresses } from './derive-address.ts';
 
 export interface WalletConfig {
   seed: string;
   mnemonic?: string;
   addresses: Record<NetworkName, string>;
-  shieldedAddress?: string;
+  shieldedAddresses?: Record<NetworkName, string>;
   createdAt: string;
 }
 
 export interface WalletInfo {
   name: string;
   addresses: Record<NetworkName, string>;
-  shieldedAddress?: string;
+  shieldedAddresses?: Record<NetworkName, string>;
   isActive: boolean;
 }
 
 /**
- * Save shielded address to an existing wallet file.
- * Reads the file, adds shieldedAddress, writes back.
+ * Save shielded address for a specific network to an existing wallet file.
+ * Reads the file, updates the shieldedAddresses map for that network, writes back.
+ * Migrates the legacy singular `shieldedAddress` field if present.
  */
-export function saveShieldedAddress(walletPath: string, shieldedAddress: string): void {
+export function saveShieldedAddress(
+  walletPath: string,
+  network: NetworkName,
+  shieldedAddress: string,
+): void {
   const resolvedPath = path.resolve(walletPath);
   if (!fs.existsSync(resolvedPath)) return;
   try {
     const raw = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8'));
-    raw.shieldedAddress = shieldedAddress;
+    const existing = (raw.shieldedAddresses && typeof raw.shieldedAddresses === 'object')
+      ? raw.shieldedAddresses
+      : {};
+    existing[network] = shieldedAddress;
+    raw.shieldedAddresses = existing;
+    // Drop the legacy singular field once we have a map entry for the same network
+    if (raw.shieldedAddress && raw.shieldedAddress === shieldedAddress) {
+      delete raw.shieldedAddress;
+    }
     fs.writeFileSync(resolvedPath, JSON.stringify(raw, null, 2) + '\n', { mode: FILE_MODE });
   } catch { /* best-effort */ }
 }
@@ -160,10 +173,19 @@ export function listWallets(): WalletInfo[] {
       } else {
         addresses = { undeployed: '(unknown)', preprod: '(unknown)', preview: '(unknown)' } as Record<NetworkName, string>;
       }
+      // Resolve shielded addresses map — prefer new field, fall back to seed derivation
+      let shieldedAddresses: Record<NetworkName, string> | undefined;
+      if (content.shieldedAddresses && typeof content.shieldedAddresses === 'object') {
+        shieldedAddresses = content.shieldedAddresses;
+      } else if (content.seed) {
+        try {
+          shieldedAddresses = deriveAllShieldedAddresses(Buffer.from(content.seed, 'hex'));
+        } catch { /* best-effort */ }
+      }
       return {
         name,
         addresses,
-        shieldedAddress: content.shieldedAddress as string | undefined,
+        shieldedAddresses,
         isActive: name === activeName,
       };
     } catch {
@@ -314,10 +336,15 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
       createdAt: raw.createdAt,
     };
     if (raw.mnemonic) config.mnemonic = raw.mnemonic;
-    if (raw.shieldedAddress) config.shieldedAddress = raw.shieldedAddress;
+    const shieldedAddresses = resolveShieldedAddresses(raw, seedBuffer);
+    if (shieldedAddresses) config.shieldedAddresses = shieldedAddresses;
 
     // Write back migrated format (keep old fields for backwards compat)
     const migrated = { ...raw, addresses };
+    if (shieldedAddresses) {
+      migrated.shieldedAddresses = shieldedAddresses;
+      delete migrated.shieldedAddress;
+    }
     fs.writeFileSync(resolvedPath, JSON.stringify(migrated, null, 2) + '\n', { mode: FILE_MODE });
 
     return config;
@@ -336,9 +363,57 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
     createdAt: raw.createdAt,
   };
   if (raw.mnemonic) config.mnemonic = raw.mnemonic;
-  if (raw.shieldedAddress) config.shieldedAddress = raw.shieldedAddress;
+
+  const seedBuffer = Buffer.from(raw.seed, 'hex');
+  const shieldedAddresses = resolveShieldedAddresses(raw, seedBuffer);
+  if (shieldedAddresses) config.shieldedAddresses = shieldedAddresses;
+
+  // One-time backfill: if the file is missing shieldedAddresses (or only has
+  // the legacy singular shieldedAddress), persist the full map so `mn wallet
+  // info` shows all three networks without requiring `mn balance --shielded`.
+  const needsBackfill = shieldedAddresses && (
+    !raw.shieldedAddresses ||
+    typeof raw.shieldedAddresses !== 'object' ||
+    Object.keys(raw.shieldedAddresses).length < Object.keys(shieldedAddresses).length
+  );
+  if (needsBackfill) {
+    try {
+      const updated = { ...raw, shieldedAddresses };
+      delete updated.shieldedAddress;
+      fs.writeFileSync(resolvedPath, JSON.stringify(updated, null, 2) + '\n', { mode: FILE_MODE });
+    } catch { /* best-effort */ }
+  }
 
   return config;
+}
+
+/**
+ * Resolve shielded addresses from a raw wallet JSON object.
+ *
+ * Stored entries win, derivation fills the gaps. Stored values are deterministic
+ * functions of the seed, so they should already match derivation — but if a
+ * future seed format ever changes encoding without changing the seed itself,
+ * preferring stored values protects external tools that read the file directly.
+ */
+function resolveShieldedAddresses(
+  raw: any,
+  seedBuffer: Buffer,
+): Record<NetworkName, string> | undefined {
+  let derived: Record<NetworkName, string> | undefined;
+  try {
+    derived = deriveAllShieldedAddresses(seedBuffer);
+  } catch { /* derivation can fail on malformed seeds */ }
+
+  const storedRaw = raw.shieldedAddresses;
+  const stored = (storedRaw && typeof storedRaw === 'object') ? storedRaw as Record<string, string> : null;
+  const validStored = stored
+    ? Object.fromEntries(Object.entries(stored).filter(([, v]) => typeof v === 'string' && v.length > 0))
+    : {};
+
+  if (!derived) {
+    return Object.keys(validStored).length > 0 ? validStored as Record<NetworkName, string> : undefined;
+  }
+  return { ...derived, ...validStored } as Record<NetworkName, string>;
 }
 
 /**
