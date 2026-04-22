@@ -1,5 +1,6 @@
 // `mn dev` — iteration loop for Compact contract development.
-// M1 scope: detect project → ensure localnet → watch .compact → compile on save.
+// M1: detect project → ensure localnet → watch .compact → compile on save.
+// M2: `d` keypress deploys the current compiled artifact, `q` quits cleanly.
 
 import { resolve, relative } from 'node:path';
 import { type ParsedArgs } from '../lib/argv.ts';
@@ -12,9 +13,15 @@ import {
   DEFAULT_DEV_WALLET_NAMES,
   DEFAULT_DEV_AIRDROP_AMOUNT,
 } from '../lib/dev/provision-wallets.ts';
+import { startKeyDispatcher } from '../lib/dev/keys.ts';
+import { captureCommand } from '../lib/run-command.ts';
 import { header, divider, keyValue } from '../ui/format.ts';
-import { dim, red, teal, yellow } from '../ui/colors.ts';
+import { bold, dim, red, teal, yellow } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
+
+/** Wallet used when `d` deploys. Must be one of the provisioned dev-* names. */
+const DEPLOY_WALLET = 'dev-alice';
+const DEPLOY_NETWORK = 'undeployed';
 
 export default async function devCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   const startDir = resolve(args.positionals[0] ?? process.cwd());
@@ -81,24 +88,31 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
     throw err;
   }
 
+  // Shared state threaded through the watcher and keypress handlers.
+  let lastCompile: CompileResult | null = null;
+  let deployInFlight = false;
+  let compileInFlight = false;
+  let compileQueued = false;
+
   // ── Phase 4: first compile pass ───────────────────────────
-  const firstCompile = await compileAndReport(project, signal);
-  if (!firstCompile.success) {
+  lastCompile = await compileAndReport(project, signal);
+  if (!lastCompile.success) {
     process.stderr.write(dim('\n  Fix the errors above and save — mn dev will recompile automatically.\n'));
   }
 
   // ── Phase 5: start watcher ────────────────────────────────
-  let compileInFlight = false;
-  let compileQueued = false;
-
   const runPass = async () => {
+    if (deployInFlight) {
+      // Deploy is holding the line. The save will be picked up after it returns.
+      return;
+    }
     if (compileInFlight) {
       compileQueued = true;
       return;
     }
     compileInFlight = true;
     try {
-      await compileAndReport(project, signal);
+      lastCompile = await compileAndReport(project, signal);
     } finally {
       compileInFlight = false;
       if (compileQueued) {
@@ -124,18 +138,78 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
 
   process.stderr.write('\n' + divider() + '\n');
   const watchedLabel = project.sourceDirs.map((d) => relative(project.projectRoot, d) || '.').join(', ');
-  process.stderr.write(dim('  Watching ') + teal(watchedLabel) + dim(' — save to recompile. Ctrl+C to exit.') + '\n\n');
+  process.stderr.write(dim('  Watching ') + teal(watchedLabel) + dim(' — save to recompile.') + '\n');
+  process.stderr.write(dim('  ') + bold('[d]') + dim(' deploy   ') + bold('[q]') + dim(' quit\n\n'));
 
-  // ── Wait until aborted ────────────────────────────────────
+  // ── Phase 6: keystroke dispatcher + wait until aborted ────
+  const abortController = new AbortController();
+  const stopRequest = () => {
+    if (!abortController.signal.aborted) abortController.abort();
+  };
+
+  const keys = startKeyDispatcher({
+    actions: {
+      d: async () => {
+        if (deployInFlight) {
+          process.stderr.write(dim('  Deploy already in flight — ignoring key press.\n'));
+          return;
+        }
+        if (!lastCompile?.success) {
+          process.stderr.write(yellow('  Cannot deploy — last compile did not succeed. Fix and save first.\n'));
+          return;
+        }
+        deployInFlight = true;
+        try {
+          await deployContract(project);
+        } finally {
+          deployInFlight = false;
+        }
+      },
+      q: () => stopRequest(),
+    },
+    onInterrupt: stopRequest,
+  });
+
   await new Promise<void>((resolvePromise) => {
     const onAbort = () => {
+      keys.stop();
       watcher.stop();
       process.stderr.write('\n' + dim('  mn dev stopped.') + '\n');
       resolvePromise();
     };
-    if (signal?.aborted) { onAbort(); return; }
-    signal?.addEventListener('abort', onAbort, { once: true });
+    if (abortController.signal.aborted) { onAbort(); return; }
+    abortController.signal.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) { stopRequest(); return; }
+    signal?.addEventListener('abort', stopRequest, { once: true });
   });
+}
+
+async function deployContract(project: ProjectInfo): Promise<void> {
+  const spinner = startSpinner(`Deploying with ${DEPLOY_WALLET} on ${DEPLOY_NETWORK}...`);
+  const previousCwd = process.cwd();
+  try {
+    // `mn contract deploy` reads process.cwd() to find the managed artifact;
+    // make sure it sees the project root regardless of where the user launched mn dev from.
+    if (previousCwd !== project.projectRoot) process.chdir(project.projectRoot);
+    const { default: handler } = await import('./contract.ts');
+    const result = await captureCommand(handler, {
+      command: 'contract',
+      subcommand: 'deploy',
+      positionals: [],
+      flags: { wallet: DEPLOY_WALLET, network: DEPLOY_NETWORK },
+    });
+    spinner.stop(`Deployed`);
+    const address = typeof result.address === 'string' ? result.address : '(unknown)';
+    process.stderr.write(`  ${dim('address')}  ${teal(address)}\n`);
+  } catch (err) {
+    spinner.fail('Deploy failed');
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(red('  ' + message) + '\n');
+  } finally {
+    if (process.cwd() !== previousCwd) {
+      try { process.chdir(previousCwd); } catch { /* best-effort */ }
+    }
+  }
 }
 
 async function compileAndReport(project: ProjectInfo, signal?: AbortSignal): Promise<CompileResult> {

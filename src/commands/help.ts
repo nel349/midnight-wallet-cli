@@ -353,10 +353,15 @@ const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'dev',
-    description: 'Iteration loop for Compact contract development (localnet + compile-on-save)',
+    description: 'Iteration loop for Compact contract development (localnet + compile-on-save + one-key deploy)',
     usage: 'midnight dev [path]',
     flags: [
       '[path]          Project directory (default: cwd)',
+      '',
+      'Keystrokes (while running):',
+      '  d             Deploy the current compiled artifact (dev-alice on undeployed)',
+      '  q             Quit cleanly',
+      '  Ctrl+C        Quit cleanly',
     ],
     examples: [
       'midnight dev',
