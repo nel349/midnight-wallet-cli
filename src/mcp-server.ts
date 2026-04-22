@@ -12,9 +12,21 @@ import { PKG_VERSION } from './lib/pkg.ts';
 
 // ── Tool definitions ────────────────────────────────────────
 
+interface ToolAnnotations {
+  /** Tool does not modify state (safe to call without confirmation). */
+  readOnlyHint?: boolean;
+  /** Tool may perform destructive actions — moves funds, deletes files, tears down infra. */
+  destructiveHint?: boolean;
+  /** Repeated calls with same args yield the same result. */
+  idempotentHint?: boolean;
+  /** Tool touches the network / chain / external process (Docker, indexer, node). */
+  openWorldHint?: boolean;
+}
+
 interface ToolDef {
   name: string;
   description: string;
+  annotations?: ToolAnnotations;
   inputSchema: {
     type: 'object';
     properties: Record<string, { type: string; description: string; enum?: string[] }>;
@@ -82,6 +94,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_generate',
     description: 'Generate a new wallet (deprecated — use midnight_wallet_generate instead)',
+    annotations: { destructiveHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -102,6 +115,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_wallet_generate',
     description: 'Create a new named wallet and set it as active',
+    annotations: { destructiveHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -126,6 +140,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_wallet_list',
     description: 'List all wallets with name, address, network, and active marker',
+    annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -144,6 +159,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_wallet_use',
     description: 'Set the active wallet by name',
+    annotations: { idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -166,6 +182,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_wallet_info',
     description: 'Show details for a named wallet or the active wallet',
+    annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -187,6 +204,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_wallet_remove',
     description: 'Remove a named wallet (refuses active or last wallet)',
+    annotations: { destructiveHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -209,6 +227,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_info',
     description: 'Display wallet address, network, creation date (no secrets shown)',
+    annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -224,6 +243,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_balance',
     description: 'Check unshielded + shielded NIGHT balance (full wallet sync when no address given)',
+    annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -245,6 +265,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_address',
     description: 'Derive and display an unshielded address from a seed',
+    annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -263,6 +284,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_genesis_address',
     description: 'Display the genesis wallet address (seed 0x01) for a network',
+    annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -278,6 +300,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_inspect_cost',
     description: 'Display current block limits derived from LedgerParameters',
+    annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -291,6 +314,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_airdrop',
     description: 'Fund your wallet from the genesis wallet (undeployed network only)',
+    annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -310,6 +334,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_transfer',
     description: 'Send NIGHT tokens to another address',
+    annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -336,6 +361,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_dust_register',
     description: 'Register NIGHT UTXOs for dust (fee token) generation',
+    annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -354,6 +380,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_dust_status',
     description: 'Check dust registration status. Fast pre-check via indexer: if not registered, returns immediately. If registered, runs a full sync to report dust balance.',
+    annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -373,6 +400,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_config_get',
     description: 'Read a persistent config value',
+    annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -395,6 +423,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_config_set',
     description: 'Write a persistent config value',
+    annotations: { idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -419,6 +448,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_cache_clear',
     description: 'Clear cached wallet sync state',
+    annotations: { destructiveHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -435,6 +465,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_config_unset',
     description: 'Reset a persistent config value to its default',
+    annotations: { idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -457,6 +488,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_localnet_up',
     description: 'Start a local Midnight network via Docker Compose',
+    annotations: { openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -475,6 +507,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_localnet_stop',
     description: 'Stop local network containers (preserves state for fast restart)',
+    annotations: { idempotentHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -493,6 +526,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_localnet_down',
     description: 'Remove local network containers, networks, and volumes (full teardown)',
+    annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -511,6 +545,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_localnet_status',
     description: 'Show local network service status and ports',
+    annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -529,6 +564,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'midnight_localnet_clean',
     description: 'Remove conflicting containers from other setups',
+    annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -579,6 +615,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
+      ...(t.annotations ? { annotations: t.annotations } : {}),
     })),
   };
 });

@@ -10,6 +10,8 @@
 
 A standalone CLI wallet for the Midnight blockchain. Manage wallets, check balances, transfer NIGHT tokens, and run a local network — all from the terminal.
 
+Built for two audiences: **beginners** starting their first Midnight project (localnet + funded wallets + contract deploy in under 5 minutes), and **AI agents** (Cursor, Claude Code, any MCP client) using the same primitives via a built-in MCP server.
+
 ## Install
 
 ```bash
