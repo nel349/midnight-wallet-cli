@@ -413,8 +413,11 @@ describe('help --json', () => {
     const data = parseJsonOutput();
 
     const commands = data.commands as Array<Record<string, unknown>>;
+    // Interactive commands (dev) don't emit structured JSON output.
+    const COMMANDS_WITHOUT_JSON = new Set(['dev']);
     for (const cmd of commands) {
-      expect(cmd.jsonFields).toBeDefined();
+      if (COMMANDS_WITHOUT_JSON.has(cmd.name as string)) continue;
+      expect(cmd.jsonFields, `command "${cmd.name}" is missing jsonFields`).toBeDefined();
       expect(Object.keys(cmd.jsonFields as object).length).toBeGreaterThan(0);
     }
   });

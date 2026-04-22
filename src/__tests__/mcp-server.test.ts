@@ -37,8 +37,8 @@ const EXPECTED_TOOLS = [
 describe('MCP tool coverage', () => {
   it('every CLI command has at least one MCP tool', () => {
     // CLI commands that should have MCP tools
-    // serve/test are long-running, contract MCP tools planned for later
-    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'serve' && n !== 'test' && n !== 'contract');
+    // serve/test/dev are long-running interactive, contract MCP tools planned for later
+    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'serve' && n !== 'test' && n !== 'contract' && n !== 'dev');
 
     for (const cmd of cliCommands) {
       // Normalize: dust → midnight_dust_register, midnight_dust_status

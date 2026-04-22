@@ -352,6 +352,18 @@ const COMMAND_SPECS: CommandSpec[] = [
     },
   },
   {
+    name: 'dev',
+    description: 'Iteration loop for Compact contract development (localnet + compile-on-save)',
+    usage: 'midnight dev [path]',
+    flags: [
+      '[path]          Project directory (default: cwd)',
+    ],
+    examples: [
+      'midnight dev',
+      'midnight dev ./contract',
+    ],
+  },
+  {
     name: 'contract',
     description: 'Inspect, deploy, call, and query Midnight smart contracts',
     usage: 'midnight contract <inspect|deploy|call|state> [options]',

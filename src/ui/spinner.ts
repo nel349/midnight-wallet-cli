@@ -9,6 +9,8 @@ const FRAME_INTERVAL_MS = 80;
 export interface Spinner {
   update(message: string): void;
   stop(finalMessage?: string): void;
+  /** Stop the spinner with a failure mark (red ✗) instead of the default ✓. */
+  fail(finalMessage?: string): void;
   /** Write a log line without breaking the spinner animation. */
   log(line: string): void;
 }
@@ -40,6 +42,12 @@ export function start(message: string): Spinner {
         stopped = true;
         active = null;
         process.stderr.write(`\r✓ ${finalMessage ?? currentMessage}\x1b[K\n`);
+      },
+      fail(finalMessage?: string) {
+        if (stopped) return;
+        stopped = true;
+        active = null;
+        process.stderr.write(`\r✗ ${finalMessage ?? currentMessage}\x1b[K\n`);
       },
       log(line: string) {
         process.stderr.write(`\r\x1b[K${line}\n`);
@@ -82,6 +90,14 @@ export function start(message: string): Spinner {
       active = null;
       const final = finalMessage ?? currentMessage;
       process.stderr.write(`\r\x1b[32m✓\x1b[0m ${final}\x1b[K\n`);
+    },
+    fail(finalMessage?: string) {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+      active = null;
+      const final = finalMessage ?? currentMessage;
+      process.stderr.write(`\r\x1b[31m✗\x1b[0m ${final}\x1b[K\n`);
     },
     log(line: string) {
       process.stderr.write(`\r\x1b[K${line}\n`);
