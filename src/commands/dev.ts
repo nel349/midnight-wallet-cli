@@ -154,13 +154,14 @@ async function compileAndReport(project: ProjectInfo, signal?: AbortSignal): Pro
     return result;
   } catch (err) {
     spinner.fail('Compile error');
-    process.stderr.write(red('  ' + (err as Error).message) + '\n');
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(red('  ' + message) + '\n');
     return {
       success: false,
       durationMs: 0,
       command: '',
       stdout: '',
-      stderr: (err as Error).message,
+      stderr: message,
       exitCode: -1,
     };
   }

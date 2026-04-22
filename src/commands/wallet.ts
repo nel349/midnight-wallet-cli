@@ -7,7 +7,7 @@ import { homedir } from 'os';
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { generateMnemonic, mnemonicToSeedSync, mnemonicToEntropy, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
-import { deriveUnshieldedAddress, deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
+import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
 import {
   saveWalletConfig,
@@ -17,11 +17,9 @@ import {
   removeWallet,
   resolveWalletPath,
   getActiveWalletName,
-  getAddress,
   type WalletConfig,
 } from '../lib/wallet-config.ts';
-import type { NetworkName } from '../lib/network.ts';
-import { WALLETS_DIR_NAME, MIDNIGHT_DIR, DIR_MODE, isValidWalletName } from '../lib/constants.ts';
+import { WALLETS_DIR_NAME, MIDNIGHT_DIR, isValidWalletName } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, yellow, dim, green, teal } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
