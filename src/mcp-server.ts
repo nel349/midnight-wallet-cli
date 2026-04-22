@@ -2,13 +2,25 @@
 // Exposes all CLI commands as MCP tools via stdio transport
 // Launch: midnight-wallet-mcp (or: node dist/mcp-server.js)
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { captureCommand } from './lib/run-command.ts';
 import { classifyError, ERROR_CODES } from './lib/exit-codes.ts';
 import type { ParsedArgs } from './lib/argv.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
+
+// Skill file — teaches MCP clients how to use this CLI conversationally.
+// Exposed as an MCP resource so any client can fetch it via resources/read.
+const SKILL_URI = 'midnight-wallet://skill';
+const SKILL_PATH = fileURLToPath(new URL('../docs/SKILL.md', import.meta.url));
 
 // ── Tool definitions ────────────────────────────────────────
 
@@ -605,8 +617,30 @@ const TOOLS: ToolDef[] = [
 
 const server = new Server(
   { name: 'midnight-wallet-cli', version: PKG_VERSION },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {}, resources: {} } },
 );
+
+// ── Resource: skill file ───────────────────────────────────
+server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  resources: [
+    {
+      uri: SKILL_URI,
+      name: 'midnight-wallet skill',
+      description: 'Conversational guide for using midnight-wallet-cli. Read this first to learn intent routing, canonical flows, safety rules, and error recovery.',
+      mimeType: 'text/markdown',
+    },
+  ],
+}));
+
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  if (request.params.uri !== SKILL_URI) {
+    throw new Error(`Unknown resource: ${request.params.uri}`);
+  }
+  const text = readFileSync(SKILL_PATH, 'utf-8');
+  return {
+    contents: [{ uri: SKILL_URI, mimeType: 'text/markdown', text }],
+  };
+});
 
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {

@@ -14,7 +14,8 @@
     "midnight-wallet-mcp": "dist/mcp-server.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "docs/SKILL.md"
   ],
   "scripts": {
     "wallet": "tsx src/wallet.ts",
