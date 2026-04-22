@@ -7,8 +7,13 @@ import { detectProject, type ProjectInfo } from '../lib/dev/detect-project.ts';
 import { runCompile, type CompileResult } from '../lib/dev/compile.ts';
 import { startWatching, type WatchHandle } from '../lib/dev/watch.ts';
 import { ensureLocalnetRunning } from '../lib/dev/localnet-ready.ts';
+import {
+  provisionDevWallets,
+  DEFAULT_DEV_WALLET_NAMES,
+  DEFAULT_DEV_AIRDROP_AMOUNT,
+} from '../lib/dev/provision-wallets.ts';
 import { header, divider, keyValue } from '../ui/format.ts';
-import { bold, dim, red, teal, yellow } from '../ui/colors.ts';
+import { dim, red, teal, yellow } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
 
 export default async function devCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
@@ -19,9 +24,18 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
   // ── Phase 1: detect project ───────────────────────────────
   const project: ProjectInfo = detectProject(startDir);
 
+  if (!project.hasNpmCompileScript) {
+    throw new Error(
+      `No "compile" script found in ${project.projectRoot}/package.json.\n` +
+      `Add one that invokes the Compact compiler — e.g.\n` +
+      `  "scripts": { "compile": "compactc src/my.compact src/managed/my" }\n` +
+      `Projects scaffolded with create-mn-app already include this.`,
+    );
+  }
+
   process.stderr.write(keyValue('Project', project.projectRoot) + '\n');
   process.stderr.write(keyValue('Sources', `${project.sourceFiles.length} .compact file(s)`) + '\n');
-  process.stderr.write(keyValue('Compile', project.hasNpmCompileScript ? 'npm run compile' : 'compact compile') + '\n\n');
+  process.stderr.write(keyValue('Compile', 'npm run compile') + '\n\n');
 
   // ── Phase 2: ensure localnet running ──────────────────────
   const localnetSpinner = startSpinner('Checking localnet...');
@@ -38,13 +52,42 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
     throw err;
   }
 
-  // ── Phase 3: first compile pass ───────────────────────────
+  // ── Phase 3: provision dev wallets ────────────────────────
+  const walletSpinner = startSpinner('Provisioning dev wallets...');
+  try {
+    const provisioned = await provisionDevWallets({
+      names: DEFAULT_DEV_WALLET_NAMES,
+      amountNight: DEFAULT_DEV_AIRDROP_AMOUNT,
+      signal,
+      onProgress: (name, phase) => {
+        const label = {
+          creating: 'generating',
+          funding: 'airdropping',
+          dust: 'registering dust',
+          done: 'ready',
+        }[phase];
+        walletSpinner.update(`${name}: ${label}`);
+      },
+    });
+    const created = provisioned.filter((w) => w.state === 'created').length;
+    const reused = provisioned.length - created;
+    const summary = [
+      created ? `${created} created` : '',
+      reused ? `${reused} reused` : '',
+    ].filter(Boolean).join(', ');
+    walletSpinner.stop(`Dev wallets: ${provisioned.map((w) => w.name).join(', ')} (${summary})`);
+  } catch (err) {
+    walletSpinner.fail('Wallet provisioning failed');
+    throw err;
+  }
+
+  // ── Phase 4: first compile pass ───────────────────────────
   const firstCompile = await compileAndReport(project, signal);
   if (!firstCompile.success) {
     process.stderr.write(dim('\n  Fix the errors above and save — mn dev will recompile automatically.\n'));
   }
 
-  // ── Phase 4: start watcher ────────────────────────────────
+  // ── Phase 5: start watcher ────────────────────────────────
   let compileInFlight = false;
   let compileQueued = false;
 
@@ -81,8 +124,7 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
 
   process.stderr.write('\n' + divider() + '\n');
   const watchedLabel = project.sourceDirs.map((d) => relative(project.projectRoot, d) || '.').join(', ');
-  process.stderr.write(dim('  Watching ') + teal(watchedLabel) + dim(' — save to recompile. Ctrl+C to exit.') + '\n');
-  process.stderr.write(dim('  For test wallets: ') + bold('mn wallet generate alice') + dim(' → ') + bold('mn airdrop 1000') + dim(' → ') + bold('mn dust register') + '\n\n');
+  process.stderr.write(dim('  Watching ') + teal(watchedLabel) + dim(' — save to recompile. Ctrl+C to exit.') + '\n\n');
 
   // ── Wait until aborted ────────────────────────────────────
   await new Promise<void>((resolvePromise) => {

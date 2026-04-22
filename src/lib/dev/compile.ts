@@ -77,7 +77,13 @@ function resolveCommand(opts: CompileOptions): { bin: string; args: string[]; la
   if (opts.project.hasNpmCompileScript) {
     return { bin: 'npm', args: ['run', 'compile', '--silent'], label: 'npm run compile' };
   }
-  // The `compact` toolchain's `compile` subcommand handles source discovery itself
-  // when invoked at the project root (it reads the project's Compact config).
-  return { bin: 'compact', args: ['compile'], label: 'compact compile' };
+  // The `compact` CLI is a version manager, not a compiler front-end —
+  // the actual compiler (`compactc.bin`) needs source + target args that
+  // vary per project. Require the project to define its own compile script.
+  throw new Error(
+    'No compile entrypoint found.\n' +
+    'Add a "compile" script to package.json that invokes the Compact compiler\n' +
+    '(e.g. `"compile": "compactc src/my.compact src/managed/my"`).\n' +
+    'create-mn-app templates ship with this script already wired.',
+  );
 }
