@@ -32,6 +32,7 @@ const EXPECTED_TOOLS = [
   'midnight_localnet_status',
   'midnight_localnet_clean',
   'midnight_status',
+  'midnight_confirm_operation',
 ];
 
 describe('MCP tool coverage', () => {
@@ -51,8 +52,8 @@ describe('MCP tool coverage', () => {
     }
   });
 
-  it('has 25 expected tools', () => {
-    expect(EXPECTED_TOOLS).toHaveLength(25);
+  it('has 26 expected tools', () => {
+    expect(EXPECTED_TOOLS).toHaveLength(26);
   });
 
   it('every COMMAND_SPEC with jsonFields is covered', () => {

@@ -47,10 +47,18 @@ Manage wallets, check balances, transfer NIGHT tokens, register dust (fee token)
 
 At step 5 the user is ready to transact.
 
-### User wants to send tokens (safely)
-1. Before calling `midnight_transfer`, **always** summarize the action: "You're about to send N NIGHT from wallet X to recipient Y on network Z." Get explicit user confirmation.
-2. After confirmation, call `midnight_transfer({ to, amount })`.
-3. On success: surface the tx hash. On failure: read the error and suggest recovery (see below).
+### User wants to send tokens (safely — two-step confirmation flow)
+
+`midnight_transfer` does **not** execute on the first call. It returns a pending token that you must redeem via `midnight_confirm_operation` after the user confirms.
+
+1. Call `midnight_transfer({ to, amount })` — returns `{ pending: true, token, description, expiresAt }`.
+2. Show `description` (e.g. "Send 100 NIGHT from alice to mn_addr_preprod1… on preprod") to the user verbatim. Do not paraphrase amounts or recipients.
+3. Wait for the user's explicit consent.
+4. If yes: call `midnight_confirm_operation({ token })` — this actually executes the transfer and returns the result (tx hash, etc).
+5. If no: do nothing; the token expires in 5 minutes.
+6. On success: surface the tx hash. On failure: read the error and suggest recovery (see below).
+
+**Never skip step 2–3.** The whole point of the token flow is that the user sees the exact operation before funds move.
 
 ### User wants to deploy a contract
 Use `mn contract` commands (not MCP tools yet). Flow: `compact compile` in the project → `mn contract inspect` to verify artifacts → `mn contract deploy --network <n>` → returns address → `mn contract call --address <addr> --circuit <name> --args '<json>'` to exercise it.

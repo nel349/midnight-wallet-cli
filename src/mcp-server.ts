@@ -16,6 +16,7 @@ import { captureCommand } from './lib/run-command.ts';
 import { classifyError, ERROR_CODES } from './lib/exit-codes.ts';
 import type { ParsedArgs } from './lib/argv.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
+import { createConfirmationStore } from './lib/mcp/confirmation.ts';
 
 // Skill file — teaches MCP clients how to use this CLI conversationally.
 // Exposed as an MCP resource so any client can fetch it via resources/read.
@@ -611,7 +612,44 @@ const TOOLS: ToolDef[] = [
   // },
   // status command disabled — currently being reworked
 
+  {
+    name: 'midnight_confirm_operation',
+    description: 'Redeem a pending operation token returned by a destructive tool (e.g. midnight_transfer). This is step 2 of the two-step confirmation flow: the first call returns { pending, token, description } without executing; show the description to the user, get explicit consent, then call this tool with the token to actually execute the operation. Tokens are single-use and expire after 5 minutes.',
+    annotations: { destructiveHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        token: { type: 'string', description: 'The token returned by the pending tool call' },
+      },
+      required: ['token'],
+    },
+    async handler() {
+      // Redemption is handled by the CallTool wrapper below — this handler
+      // is only reached if the wrapper fails to intercept. Treat as a bug.
+      throw new Error('midnight_confirm_operation reached the inner handler — this is an MCP wiring bug');
+    },
+  },
 ];
+
+/**
+ * Tools that require the two-step confirmation flow. On first call, we return
+ * a pending token; the agent must call midnight_confirm_operation with the
+ * token to actually execute.
+ */
+const REQUIRES_CONFIRMATION = new Set<string>(['midnight_transfer']);
+
+const confirmationStore = createConfirmationStore();
+
+function describePendingOp(tool: string, params: Record<string, unknown>): string {
+  const network = (params.network as string | undefined) ?? 'active network';
+  const wallet = (params.wallet as string | undefined) ?? 'active wallet';
+  switch (tool) {
+    case 'midnight_transfer':
+      return `Send ${params.amount} NIGHT from ${wallet} to ${params.to} on ${network}`;
+    default:
+      return `Execute ${tool} with ${JSON.stringify(params)}`;
+  }
+}
 
 // ── Server setup ────────────────────────────────────────────
 
@@ -656,33 +694,68 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: params } = request.params;
+  const { name, arguments: rawParams } = request.params;
+  const params = (rawParams ?? {}) as Record<string, unknown>;
 
-  const tool = TOOLS.find(t => t.name === name);
-  if (!tool) {
+  // Step 2 of confirmation: redeem the token and execute the original tool.
+  if (name === 'midnight_confirm_operation') {
+    const token = typeof params.token === 'string' ? params.token : '';
+    const pending = confirmationStore.redeem(token);
+    if (!pending) {
+      return errorResponse(new Error('Unknown or expired confirmation token. The first-step tool call may need to be re-issued.'));
+    }
+    return executeTool(pending.tool, pending.args);
+  }
+
+  // Step 1 of confirmation: return a pending token instead of executing.
+  if (REQUIRES_CONFIRMATION.has(name)) {
+    const pending = confirmationStore.create({
+      tool: name,
+      args: params,
+      description: describePendingOp(name, params),
+    });
     return {
-      content: [{ type: 'text' as const, text: `Unknown tool: ${name}` }],
-      isError: true,
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          pending: true,
+          token: pending.token,
+          description: pending.description,
+          tool: pending.tool,
+          expiresAt: new Date(pending.expiresAt).toISOString(),
+          nextStep: 'Show the description to the user, get explicit consent, then call midnight_confirm_operation with this token.',
+        }, null, 2),
+      }],
     };
   }
 
+  return executeTool(name, params);
+});
+
+async function executeTool(name: string, params: Record<string, unknown>) {
+  const tool = TOOLS.find((t) => t.name === name);
+  if (!tool) return errorResponse(new Error(`Unknown tool: ${name}`));
+
   try {
-    const result = await tool.handler(params ?? {});
+    const result = await tool.handler(params);
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
     };
   } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
-    const { errorCode } = classifyError(error);
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({ error: true, code: errorCode, message: error.message }),
-      }],
-      isError: true,
-    };
+    return errorResponse(err instanceof Error ? err : new Error(String(err)));
   }
-});
+}
+
+function errorResponse(error: Error) {
+  const { errorCode } = classifyError(error);
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({ error: true, code: errorCode, message: error.message }),
+    }],
+    isError: true,
+  };
+}
 
 // Start the server
 async function main() {
