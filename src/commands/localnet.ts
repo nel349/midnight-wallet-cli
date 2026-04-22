@@ -58,7 +58,7 @@ async function handleUp(jsonMode: boolean): Promise<void> {
       spinner.stop('Local network is running');
     }
   } catch (err) {
-    spinner.stop(red('Failed to start local network'));
+    spinner.fail('Failed to start local network');
     if (err instanceof Error) {
       if (err.message.includes('is already in use by container')) {
         throw new Error(
@@ -111,7 +111,7 @@ async function handleStop(jsonMode: boolean): Promise<void> {
       return;
     }
   } catch (err) {
-    spinner.stop(red('Failed to stop local network'));
+    spinner.fail('Failed to stop local network');
     throw err;
   }
 }
@@ -127,7 +127,7 @@ async function handleDown(jsonMode: boolean): Promise<void> {
       return;
     }
   } catch (err) {
-    spinner.stop(red('Failed to tear down local network'));
+    spinner.fail('Failed to tear down local network');
     throw err;
   }
 }
@@ -181,7 +181,7 @@ async function handleClean(jsonMode: boolean): Promise<void> {
       return;
     }
   } catch (err) {
-    spinner.stop(red('Failed to clean up'));
+    spinner.fail('Failed to clean up');
     throw err;
   }
 }

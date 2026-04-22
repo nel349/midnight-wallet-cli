@@ -5,7 +5,7 @@ import type { NetworkName } from '../lib/network.ts';
 import { type ParsedArgs, getFlag, hasFlag, requireFlag } from '../lib/argv.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { header, keyValue } from '../ui/format.ts';
-import { bold, dim, teal, yellow, green, red } from '../ui/colors.ts';
+import { bold, dim, teal, yellow, green } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
 import {
   findContractInfo,
@@ -124,7 +124,7 @@ async function preflight(network: string, jsonMode: boolean): Promise<void> {
     const balance = state.unshielded.balances[nightToken] ?? 0n;
 
     if (balance === 0n) {
-      spinner.stop(red('✗') + ' No NIGHT balance');
+      spinner.fail('No NIGHT balance');
       throw new Error(
         `Wallet has 0 NIGHT on ${network}.\n\n` +
         `  Fund your wallet before deploying:\n` +
@@ -151,7 +151,7 @@ async function preflight(network: string, jsonMode: boolean): Promise<void> {
     })();
 
     if (dustBalance === 0n && dustCoins === 0) {
-      spinner.stop(red('✗') + ' No dust available');
+      spinner.fail('No dust available');
       throw new Error(
         `Wallet has no dust on ${network}. Dust is required to pay transaction fees.\n\n` +
         `  Register for dust generation:\n` +
@@ -261,7 +261,7 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     // Write address to stdout for piping
     process.stdout.write(result.contractAddress + '\n');
   } catch (err) {
-    spinner.stop(red('✗') + ' Deploy failed');
+    spinner.fail('Deploy failed');
     throw err;
   } finally {
     await serve.stop();
@@ -341,7 +341,7 @@ async function handleCall(args: ParsedArgs): Promise<void> {
       process.stderr.write('\n' + green('  ✓ Circuit call successful') + '\n\n');
     }
   } catch (err) {
-    spinner.stop(red('✗') + ' Call failed');
+    spinner.fail('Call failed');
     throw err;
   } finally {
     await serve.stop();
