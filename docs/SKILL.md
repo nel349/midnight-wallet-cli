@@ -15,8 +15,8 @@ Manage wallets, check balances, transfer NIGHT tokens, register dust (fee token)
 - **No self-shielding** — a wallet cannot move its own funds from unshielded to shielded. To get shielded NIGHT, receive a shielded transfer from a wallet that already has some (genesis wallet has 250M shielded NIGHT on localnet).
 - **Networks**
   - `undeployed` — local Docker network via `mn localnet up`. Use this for dev iteration.
-  - `preprod` — public testnet. Day-0 wallet sync takes ~30 min on first run.
-  - `preview` — preview testnet. Similar cold-sync cost.
+  - `preprod` — public testnet. First-time wallet sync processes the full event history and can take significantly longer than subsequent syncs (which restore from cached wallet state). Exact time depends on wallet age, event density, network, and hardware.
+  - `preview` — public preview testnet. Same first-sync trade-off as preprod.
 - **Proof server** — local HTTP service that generates ZK proofs for transactions. Default port 6300. Version must match the network's ledger version or writes fail with "Custom error 170".
 
 ## Intent routing (natural language → tool)
@@ -67,7 +67,7 @@ Use `mn contract` commands (not MCP tools yet). Flow: `compact compile` in the p
 
 | Symptom | Recipe |
 |---|---|
-| "InsufficientFunds" or "could not balance dust" | Run `midnight_dust_register()` then retry. Wait ~2 min for dust to accumulate. |
+| "InsufficientFunds" or "could not balance dust" | Run `midnight_dust_register()` then retry once dust has accumulated (dust regenerates passively over time — exact wait depends on network parameters; check `midnight_dust_status()` until balance is non-zero). |
 | "Custom error 170" / "InvalidDustSpendProof" | Stale commitment tree (laptop slept between sync and submit). Run `midnight_cache_clear({ wallet: "<name>" })` then retry. |
 | "Wallet sync timed out" | On preprod/preview this can happen on Day 0. Retry with `mn balance` — caches progressively. Avoid `--no-cache` on hosted networks. |
 | "Unknown network" / invalid network name | Networks are `undeployed`, `preprod`, `preview`. Check `midnight_config_get({ key: "network" })`. |
@@ -76,19 +76,19 @@ Use `mn contract` commands (not MCP tools yet). Flow: `compact compile` in the p
 
 ## When to use which network
 
-- **Developing a contract?** → `undeployed` (localnet). No Day-0 sync. 3s transactions.
-- **Integration testing against a hosted chain?** → `preprod`. Accept the cold-sync cost once; subsequent syncs are 5–30s.
+- **Developing a contract?** → `undeployed` (localnet). No first-sync cost; everything is local.
+- **Integration testing against a hosted chain?** → `preprod`. First sync for a new wallet on this network processes full event history; subsequent syncs restore from cache and are much faster.
 - **Demoing to users?** → `preview` (if the dApp is deployed there) or `undeployed` (if self-contained).
 - **Mainnet?** → not on this CLI yet. Don't claim it is.
 
 ## What this CLI is NOT
 
 - Not a custody service. Keys are on the user's disk (`~/.midnight/wallets/<name>.json`).
-- Not a fast-sync solution for Day-0 preprod. That's coming (PIR). Today, first sync on preprod takes 30+ minutes.
+- Not a fast-sync solution for a first-time wallet on a hosted network. The wallet SDK must process the chain's event history on first run; the CLI caches state after that so repeat runs are fast.
 - Not a contract compiler. Use `compact compile` (the standalone tool) to produce artifacts; this CLI deploys/calls pre-compiled ones.
 
-## When to consult deeper docs
+## Authoritative references
 
-- Midnight SDK internals / version mappings → use the `midnight-sdk` skill if available.
-- Compact language syntax → use the `midnight-docs` skill if available.
-- This CLI's source of truth → `mn help <command>` and `mn help --agent` (structured reference for AI clients).
+- `mn help <command>` — per-command usage and flags.
+- `mn help --agent` — structured reference manual for AI clients.
+- `mn status` — live network health (indexer, node, proof server).
