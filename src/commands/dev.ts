@@ -2,7 +2,8 @@
 // M1: detect project → ensure localnet → watch .compact → compile on save.
 // M2: `d` keypress deploys the current compiled artifact, `q` quits cleanly.
 
-import { resolve, relative } from 'node:path';
+import { existsSync } from 'node:fs';
+import { resolve, relative, join } from 'node:path';
 import { type ParsedArgs } from '../lib/argv.ts';
 import { detectProject, type ProjectInfo } from '../lib/dev/detect-project.ts';
 import { runCompile, type CompileResult } from '../lib/dev/compile.ts';
@@ -193,14 +194,17 @@ async function deployContract(project: ProjectInfo): Promise<void> {
   }
 
   try {
-    // Pre-flight: contracts that declare witnesses can't be deployed by the
-    // auto-generated runner script (it injects vacant witnesses, which the
-    // Contract constructor rejects on function-valued witness fields).
+    // Pre-flight: contracts that declare witnesses need a witnesses.js the
+    // runner can load. If declared witnesses exist and no implementation file
+    // is present, refuse early with an actionable message rather than letting
+    // the SDK throw "first (witnesses) argument does not contain a function-
+    // valued field named X" mid-deploy.
     const witnessNames = await readDeclaredWitnesses(project.projectRoot);
-    if (witnessNames.length > 0) {
+    if (witnessNames.length > 0 && !findWitnessFile(project.projectRoot)) {
       process.stderr.write(yellow(`  ✗ Cannot auto-deploy: contract declares ${witnessNames.length} witness(es): ${witnessNames.join(', ')}\n`));
-      process.stderr.write(dim(`    mn dev's quick deploy is for witness-less contracts only.\n`));
-      process.stderr.write(dim(`    Deploy via your project's own script (e.g. "npm run deploy") so you can supply the witness implementations.\n`));
+      process.stderr.write(dim(`    Add a witnesses module (src/witnesses.ts compiled to dist/witnesses.js) that\n`));
+      process.stderr.write(dim(`    exports a "witnesses" object mapping each name to its implementation. Then\n`));
+      process.stderr.write(dim(`    rebuild (e.g. "npm run build") so dist/witnesses.js exists, and try "d" again.\n`));
       return;
     }
 
@@ -241,6 +245,25 @@ async function readDeclaredWitnesses(projectRoot: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+/**
+ * Best-effort check for a witnesses module the deploy runner can load.
+ * Mirrors the search paths in src/lib/contract/runner.ts so the preflight
+ * matches what the runner actually does.
+ */
+function findWitnessFile(projectRoot: string): string | null {
+  const candidates = [
+    'dist/witnesses.js',
+    'src/witnesses.js',
+    'contract/dist/witnesses.js',
+    'contract/src/witnesses.js',
+  ];
+  for (const rel of candidates) {
+    const full = join(projectRoot, rel);
+    if (existsSync(full)) return full;
+  }
+  return null;
 }
 
 async function compileAndReport(project: ProjectInfo, signal?: AbortSignal): Promise<CompileResult> {

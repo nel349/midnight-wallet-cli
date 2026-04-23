@@ -174,10 +174,18 @@ const MANAGED_DIR = ${JSON.stringify(managedDir)};
 // Load compiled contract class
 const contractMod = await import(pathToFileURL(resolve(MANAGED_DIR, 'contract', 'index.js')).href);
 
-// Try to load witnesses and private state factory
+// Try to load witnesses and private state factory.
+// Both relative-to-cwd locations and contract/<...> locations are checked
+// so mn dev (which chdirs into the contract sub-package) and mn contract
+// deploy run from a workspace root both work.
 let witnesses;
 let createPrivateState;
-for (const p of ['contract/dist/witnesses.js', 'contract/src/witnesses.js']) {
+for (const p of [
+  'dist/witnesses.js',
+  'src/witnesses.js',
+  'contract/dist/witnesses.js',
+  'contract/src/witnesses.js',
+]) {
   try {
     const wMod = await import(pathToFileURL(resolve(p)).href);
     if (wMod.witnesses) { witnesses = wMod.witnesses; }
