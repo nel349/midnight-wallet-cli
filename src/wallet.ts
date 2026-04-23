@@ -144,7 +144,9 @@ async function run(): Promise<void> {
 
 // Commands that start a WalletFacade leave WebSocket connections in the event loop.
 // facade.stop() doesn't fully drain them, so we must exit explicitly.
-const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve', 'test', 'contract']);
+// `dev` is in here because it provisions wallets internally (airdrop + dust register)
+// which start facades whose WS handles aren't reliably reclaimed.
+const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve', 'test', 'contract', 'dev']);
 
 run().then(() => {
   if (FACADE_COMMANDS.has(command)) {
