@@ -187,30 +187,59 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
 }
 
 async function deployContract(project: ProjectInfo): Promise<void> {
-  const spinner = startSpinner(`Deploying with ${DEPLOY_WALLET} on ${DEPLOY_NETWORK}...`);
   const previousCwd = process.cwd();
+  if (previousCwd !== project.projectRoot) {
+    try { process.chdir(project.projectRoot); } catch { /* best-effort */ }
+  }
+
   try {
-    // `mn contract deploy` reads process.cwd() to find the managed artifact;
-    // make sure it sees the project root regardless of where the user launched mn dev from.
-    if (previousCwd !== project.projectRoot) process.chdir(project.projectRoot);
-    const { default: handler } = await import('./contract.ts');
-    const result = await captureCommand(handler, {
-      command: 'contract',
-      subcommand: 'deploy',
-      positionals: [],
-      flags: { wallet: DEPLOY_WALLET, network: DEPLOY_NETWORK },
-    });
-    spinner.stop(`Deployed`);
-    const address = typeof result.address === 'string' ? result.address : '(unknown)';
-    process.stderr.write(`  ${dim('address')}  ${teal(address)}\n`);
-  } catch (err) {
-    spinner.fail('Deploy failed');
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(red('  ' + message) + '\n');
+    // Pre-flight: contracts that declare witnesses can't be deployed by the
+    // auto-generated runner script (it injects vacant witnesses, which the
+    // Contract constructor rejects on function-valued witness fields).
+    const witnessNames = await readDeclaredWitnesses(project.projectRoot);
+    if (witnessNames.length > 0) {
+      process.stderr.write(yellow(`  ✗ Cannot auto-deploy: contract declares ${witnessNames.length} witness(es): ${witnessNames.join(', ')}\n`));
+      process.stderr.write(dim(`    mn dev's quick deploy is for witness-less contracts only.\n`));
+      process.stderr.write(dim(`    Deploy via your project's own script (e.g. "npm run deploy") so you can supply the witness implementations.\n`));
+      return;
+    }
+
+    const spinner = startSpinner(`Deploying with ${DEPLOY_WALLET} on ${DEPLOY_NETWORK}...`);
+    try {
+      const { default: handler } = await import('./contract.ts');
+      const result = await captureCommand(handler, {
+        command: 'contract',
+        subcommand: 'deploy',
+        positionals: [],
+        flags: { wallet: DEPLOY_WALLET, network: DEPLOY_NETWORK },
+      });
+      spinner.stop(`Deployed`);
+      const address = typeof result.address === 'string' ? result.address : '(unknown)';
+      process.stderr.write(`  ${dim('address')}  ${teal(address)}\n`);
+    } catch (err) {
+      spinner.fail('Deploy failed');
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(red('  ' + message) + '\n');
+    }
   } finally {
     if (process.cwd() !== previousCwd) {
       try { process.chdir(previousCwd); } catch { /* best-effort */ }
     }
+  }
+}
+
+/**
+ * Returns the names of witnesses declared in the project's compiled contract,
+ * or an empty array if no compiled artifact / witnesses exist.
+ * Best-effort — failures (no managed dir yet, malformed info) → empty array.
+ */
+async function readDeclaredWitnesses(projectRoot: string): Promise<string[]> {
+  try {
+    const { findContractInfo } = await import('../lib/contract/inspect.ts');
+    const { info } = findContractInfo(projectRoot);
+    return info.witnesses.map((w) => w.name);
+  } catch {
+    return [];
   }
 }
 
