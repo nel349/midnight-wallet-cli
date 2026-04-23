@@ -74,16 +74,18 @@ function resolveCommand(opts: CompileOptions): { bin: string; args: string[]; la
     const { bin, args } = opts.commandOverride;
     return { bin, args, label: [bin, ...args].join(' ') };
   }
-  if (opts.project.hasNpmCompileScript) {
-    return { bin: 'npm', args: ['run', 'compile', '--silent'], label: 'npm run compile' };
+  if (opts.project.compileScript) {
+    const script = opts.project.compileScript;
+    return { bin: 'npm', args: ['run', script, '--silent'], label: `npm run ${script}` };
   }
-  // The `compact` CLI is a version manager, not a compiler front-end —
-  // the actual compiler (`compactc.bin`) needs source + target args that
-  // vary per project. Require the project to define its own compile script.
+  // The project's invocation of the Compact toolchain (`compact compile <src> <out>`)
+  // is project-specific — source paths and output dirs vary. Require the project
+  // to define its own npm script rather than guessing.
   throw new Error(
-    'No compile entrypoint found.\n' +
-    'Add a "compile" script to package.json that invokes the Compact compiler\n' +
-    '(e.g. `"compile": "compactc src/my.compact src/managed/my"`).\n' +
-    'create-mn-app templates ship with this script already wired.',
+    'No compile script found in package.json.\n' +
+    'Add one of:\n' +
+    '  "compact": "compact compile src/<your>.compact src/managed/<your>"\n' +
+    '  "compile": "compact compile src/<your>.compact src/managed/<your>"\n' +
+    'create-mn-app and midnight-starship templates ship with this script already wired.',
   );
 }

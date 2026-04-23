@@ -31,18 +31,20 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
   // ── Phase 1: detect project ───────────────────────────────
   const project: ProjectInfo = detectProject(startDir);
 
-  if (!project.hasNpmCompileScript) {
+  if (!project.compileScript) {
     throw new Error(
-      `No "compile" script found in ${project.projectRoot}/package.json.\n` +
-      `Add one that invokes the Compact compiler — e.g.\n` +
-      `  "scripts": { "compile": "compactc src/my.compact src/managed/my" }\n` +
-      `Projects scaffolded with create-mn-app already include this.`,
+      `No compile script found in ${project.projectRoot}/package.json.\n` +
+      `mn dev looks for a "compact" or "compile" npm script that invokes the\n` +
+      `Compact toolchain. Add one of:\n` +
+      `  "scripts": { "compact": "compact compile src/my.compact src/managed/my" }\n` +
+      `  "scripts": { "compile": "compact compile src/my.compact src/managed/my" }\n` +
+      `create-mn-app and midnight-starship templates ship with this already wired.`,
     );
   }
 
   process.stderr.write(keyValue('Project', project.projectRoot) + '\n');
   process.stderr.write(keyValue('Sources', `${project.sourceFiles.length} .compact file(s)`) + '\n');
-  process.stderr.write(keyValue('Compile', 'npm run compile') + '\n\n');
+  process.stderr.write(keyValue('Compile', `npm run ${project.compileScript}`) + '\n\n');
 
   // ── Phase 2: ensure localnet running ──────────────────────
   const localnetSpinner = startSpinner('Checking localnet...');

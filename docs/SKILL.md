@@ -93,7 +93,7 @@ Use `mn contract` commands (not MCP tools yet). Flow: `compact compile` in the p
 
 - Not a custody service. Keys are on the user's disk (`~/.midnight/wallets/<name>.json`).
 - Not a fast-sync solution for a first-time wallet on a hosted network. The wallet SDK must process the chain's event history on first run; the CLI caches state after that so repeat runs are fast.
-- Not a contract compiler. The project's `package.json` should expose a `compile` script that invokes the Compact compiler (`compactc.bin`); `mn dev` and other flows rely on that script. `create-mn-app` templates ship with it wired.
+- Not a contract compiler. The project's `package.json` should expose a `compact` script (Midnight convention, e.g. `"compact": "compact compile src/foo.compact src/managed/foo"`) or a `compile` script as a generic fallback. `mn dev` detects whichever is present; create-mn-app and midnight-starship templates ship with the `compact` script already wired.
 
 ## Authoritative references
 

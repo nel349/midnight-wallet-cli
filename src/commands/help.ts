@@ -746,7 +746,7 @@ Setup:
 If not installed globally, use "command": "npx" with
 "args": ["-y", "midnight-wallet-cli@latest", "--mcp"].
 
-AVAILABLE MCP TOOLS (24)
+AVAILABLE MCP TOOLS (25)
 ────────────────────────
 
   Wallet Management
@@ -766,9 +766,13 @@ AVAILABLE MCP TOOLS (24)
 
   Transactions
   midnight_airdrop             Fund wallet from genesis (undeployed only)           amount
-  midnight_transfer            Send NIGHT (unshielded or --shielded)                to, amount
+  midnight_transfer            Send NIGHT (two-step — returns pending token)        to, amount
   midnight_dust_register       Register UTXOs for dust generation                   —
   midnight_dust_status         Check dust balance and registration                  —
+
+  Consent
+  midnight_confirm_operation   Redeem a pending token returned by a destructive     token
+                               tool (step 2 of the confirmation flow)
 
   Configuration
   midnight_config_get          Read a config value                                  key
@@ -786,6 +790,47 @@ AVAILABLE MCP TOOLS (24)
 Optional params shared by wallet tools: wallet, network.
 All tools return JSON. Errors: {error, code, message}.
 
+TOOL ANNOTATIONS (MCP safety hints)
+───────────────────────────────────
+
+Every tool carries MCP-spec annotations so clients can apply safety policy
+without hardcoding per-tool rules:
+
+  readOnlyHint      Safe to call without user consent (balance, info, list).
+  destructiveHint   Moves funds, deletes files, or tears down infra — treat
+                    as requiring user consent.
+  idempotentHint    Repeated calls with same args yield the same result.
+  openWorldHint     Touches the network / chain / Docker — can fail
+                    non-deterministically.
+
+TWO-STEP CONFIRMATION FLOW (midnight_transfer)
+──────────────────────────────────────────────
+
+midnight_transfer does NOT execute on the first call. It returns a pending
+token that the agent must show to the user for consent, then redeem via
+midnight_confirm_operation to actually execute.
+
+  Call 1:  midnight_transfer({ to, amount, wallet, network })
+           → { pending: true, token, description, expiresAt, nextStep }
+  Show:    the description to the user verbatim.
+  Call 2:  midnight_confirm_operation({ token })
+           → actual transfer result (txHash, etc)
+
+Tokens are single-use and expire after 5 minutes.
+
+MCP RESOURCES (skill file)
+──────────────────────────
+
+The server exposes one MCP Resource:
+
+  uri       midnight-wallet://skill
+  name      midnight-wallet skill
+  mimeType  text/markdown
+
+Call resources/read on connect to fetch a conversational guide covering
+intent routing, canonical flows, safety rules, and error recovery. Ground
+responses in it instead of training-data guesses.
+
 TYPICAL AGENT WORKFLOWS
 ───────────────────────
 
@@ -796,13 +841,16 @@ TYPICAL AGENT WORKFLOWS
   4. midnight_airdrop              → Fund wallet (amount: "1000")
   5. midnight_dust_register        → Register for fee tokens
   6. midnight_balance              → Check unshielded + shielded balance
-  7. midnight_transfer             → Send tokens (to: "bob", amount: "100")
-  8. midnight_dust_status          → Check remaining dust
+  7. midnight_transfer             → Returns pending token + description
+  8. (show description to user, get explicit consent)
+  9. midnight_confirm_operation    → Redeem token → actual transfer runs
+ 10. midnight_dust_status          → Check remaining dust
 
   Shielded workflow:
   1. midnight_airdrop              → Fund shielded (amount: "100", shielded: "true")
   2. midnight_balance              → Shows both unshielded + shielded
-  3. midnight_transfer             → Shielded send (to: "bob", amount: "50", shielded: "true")
+  3. midnight_transfer             → Returns pending token for shielded send
+  4. (show + consent) → midnight_confirm_operation
 
   Testnet (preprod/preview):
   1. midnight_wallet_generate      → Create wallet
@@ -810,7 +858,13 @@ TYPICAL AGENT WORKFLOWS
   3. (fund via faucet: https://faucet.preview.midnight.network/)
   4. midnight_dust_register        → Register for fees
   5. midnight_balance              → Check balance
-  6. midnight_transfer             → Send tokens
+  6. midnight_transfer → midnight_confirm_operation → transfer
+
+  Contract development (CLI only — not an MCP tool):
+  Run "mn dev" in a Compact project. It auto-starts localnet, provisions
+  3 funded wallets (dev-alice/dev-bob/dev-carol), compiles on save, and
+  accepts a "d" keystroke to deploy the current artifact with dev-alice.
+  See "mn help dev".
 
 EXAMPLE CLI COMMANDS
 ────────────────────

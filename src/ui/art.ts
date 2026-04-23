@@ -65,6 +65,7 @@ export const COMMAND_BRIEFS: [name: string, brief: string][] = [
   ['transfer',        'Send NIGHT tokens'],
   ['dust',            'Manage dust (fee tokens)'],
   ['contract',        'Inspect, deploy, call contracts'],
+  ['dev',             'Contract dev loop (watch + deploy)'],
   ['config',          'Manage CLI config'],
   ['cache',           'Manage wallet cache'],
   ['localnet',        'Manage local network'],

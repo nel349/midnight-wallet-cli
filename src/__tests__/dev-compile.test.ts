@@ -20,6 +20,7 @@ function project(extra: Partial<ProjectInfo> = {}): ProjectInfo {
     projectRoot: TEST_DIR,
     sourceFiles: [join(TEST_DIR, 'x.compact')],
     sourceDirs: [TEST_DIR],
+    compileScript: null,
     hasNpmCompileScript: false,
     packageJson: null,
     ...extra,
@@ -63,15 +64,15 @@ describe('runCompile', () => {
     })).rejects.toThrow(/Failed to spawn/);
   });
 
-  it('rejects with a helpful message when no npm compile script is defined and no override', async () => {
-    await expect(runCompile({ project: project({ hasNpmCompileScript: false }) }))
-      .rejects.toThrow(/No compile entrypoint found|compile.*script/i);
+  it('rejects with a helpful message when no compile script is defined and no override', async () => {
+    await expect(runCompile({ project: project({ compileScript: null, hasNpmCompileScript: false }) }))
+      .rejects.toThrow(/No compile script|compile.*script/i);
   });
 
-  it('uses npm run compile when the project has a compile script', async () => {
+  it('uses npm run <detected-script> when the project has a compile script', async () => {
     // sh command that just succeeds — we're only checking the label resolution
     const result = await runCompile({
-      project: project({ hasNpmCompileScript: true }),
+      project: project({ compileScript: 'compact', hasNpmCompileScript: true }),
       commandOverride: { bin: 'sh', args: ['-c', 'exit 0'] },
     });
     expect(result.success).toBe(true);

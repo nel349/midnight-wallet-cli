@@ -48,23 +48,45 @@ describe('detectProject', () => {
     expect(() => detectProject(TEST_DIR)).toThrow(/No .compact source files found/);
   });
 
-  it('detects an npm "compile" script', () => {
+  it('detects an npm "compact" script (Midnight-starship / create-mn-app convention)', () => {
     writeFileSync(join(TEST_DIR, 'x.compact'), '');
     writeFileSync(
       join(TEST_DIR, 'package.json'),
-      JSON.stringify({ name: 'p', scripts: { compile: 'compact compile' } }),
+      JSON.stringify({ name: 'p', scripts: { compact: 'compact compile src/x.compact src/managed/x' } }),
     );
     const info = detectProject(TEST_DIR);
+    expect(info.compileScript).toBe('compact');
     expect(info.hasNpmCompileScript).toBe(true);
   });
 
-  it('returns hasNpmCompileScript=false when no script is defined', () => {
+  it('detects an npm "compile" script as fallback', () => {
+    writeFileSync(join(TEST_DIR, 'x.compact'), '');
+    writeFileSync(
+      join(TEST_DIR, 'package.json'),
+      JSON.stringify({ name: 'p', scripts: { compile: 'compact compile src/x.compact src/managed/x' } }),
+    );
+    const info = detectProject(TEST_DIR);
+    expect(info.compileScript).toBe('compile');
+    expect(info.hasNpmCompileScript).toBe(true);
+  });
+
+  it('prefers "compact" over "compile" when both are defined', () => {
+    writeFileSync(join(TEST_DIR, 'x.compact'), '');
+    writeFileSync(
+      join(TEST_DIR, 'package.json'),
+      JSON.stringify({ name: 'p', scripts: { compact: 'a', compile: 'b' } }),
+    );
+    expect(detectProject(TEST_DIR).compileScript).toBe('compact');
+  });
+
+  it('returns compileScript=null when no recognised script is defined', () => {
     writeFileSync(join(TEST_DIR, 'x.compact'), '');
     writeFileSync(
       join(TEST_DIR, 'package.json'),
       JSON.stringify({ name: 'p', scripts: { test: 'vitest' } }),
     );
     const info = detectProject(TEST_DIR);
+    expect(info.compileScript).toBeNull();
     expect(info.hasNpmCompileScript).toBe(false);
   });
 
