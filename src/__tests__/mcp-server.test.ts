@@ -12,7 +12,6 @@ const EXPECTED_TOOLS = [
   'midnight_wallet_use',
   'midnight_wallet_info',
   'midnight_wallet_remove',
-  'midnight_generate',
   'midnight_info',
   'midnight_balance',
   'midnight_address',
@@ -39,7 +38,7 @@ describe('MCP tool coverage', () => {
   it('every CLI command has at least one MCP tool', () => {
     // CLI commands that should have MCP tools
     // serve/test/dev are long-running interactive, contract MCP tools planned for later
-    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'serve' && n !== 'test' && n !== 'contract' && n !== 'dev');
+    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'serve' && n !== 'test' && n !== 'contract' && n !== 'dev' && n !== 'generate');
 
     for (const cmd of cliCommands) {
       // Normalize: dust → midnight_dust_register, midnight_dust_status
@@ -52,13 +51,13 @@ describe('MCP tool coverage', () => {
     }
   });
 
-  it('has 26 expected tools', () => {
-    expect(EXPECTED_TOOLS).toHaveLength(26);
+  it('has 25 expected tools', () => {
+    expect(EXPECTED_TOOLS).toHaveLength(25);
   });
 
   it('every COMMAND_SPEC with jsonFields is covered', () => {
     // serve/test are long-running, contract MCP tools planned for later
-    const commandsWithJson = COMMAND_SPECS.filter(s => s.jsonFields && s.name !== 'help' && s.name !== 'serve' && s.name !== 'test' && s.name !== 'contract');
+    const commandsWithJson = COMMAND_SPECS.filter(s => s.jsonFields && s.name !== 'help' && s.name !== 'serve' && s.name !== 'test' && s.name !== 'contract' && s.name !== 'generate');
     // Should have at least one tool per command
     expect(commandsWithJson.length).toBeGreaterThan(0);
     for (const spec of commandsWithJson) {

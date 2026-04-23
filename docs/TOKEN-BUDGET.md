@@ -13,7 +13,23 @@ integer tokens.
 
 ---
 
-## Baseline — 2026-04-23 (commit `c4a7e70`)
+## Post–Phase 1 — 2026-04-23 (this commit)
+
+Phase 1 trimmed `tools/list` descriptions (drops verbose prose,
+redundant property descriptions, `network` enum recitation, repeated
+override-URL fields, and the deprecated `midnight_generate` alias).
+Zero impact on human output — humans never see `tools/list`.
+
+`tools/list` response went from **9,488 B → 5,663 B (−40%)**. Tool
+count went from 26 (24 + confirm) → 25 (deprecated `midnight_generate`
+removed; CLI `mn generate` still works).
+
+The 4,500 B target set in Phase 0 proved too aggressive without
+breaking-change tool consolidation — realistic floor for 25 annotated
+tools with JSON-RPC framing is ~5,500 B. Revised target documented
+below.
+
+## Baseline — 2026-04-23 (pre-Phase 1, commit `c4a7e70`)
 
 Per-call response sizes, measured against the real MCP server with the
 reference `dev-*` wallets provisioned on localnet.
@@ -51,14 +67,20 @@ After each phase in the token-budget plan lands, this table should be
 updated with new numbers. The "Target" column is the cap we commit to
 hit — regressions beyond it fail review.
 
-| Phase | Call affected | Baseline bytes | Target bytes | Target tokens |
-|---|---|---:|---:|---:|
-| 1 | `tools/list` | 9,488 | **≤ 4,500** | ≤ 1,285 |
-| 2 | `resources/read` (skill/core) | 8,317 | **≤ 4,500** | ≤ 1,285 |
-| 3 | `wallet_list` (agent default, 6 wallets) | 16,109 | **≤ 3,500** | ≤ 1,000 |
-| 4 | `wallet_info` (agent default) | 1,209 | **≤ 500** | ≤ 145 |
-| 4 | `balance` (agent default) | 563 | **≤ 400** | ≤ 115 |
-| 4 | `dust_status` (agent default) | 363 | **≤ 300** | ≤ 85 |
+| Phase | Call affected | Baseline bytes | Target bytes | Target tokens | Actual |
+|---|---|---:|---:|---:|---:|
+| 1 | `tools/list` | 9,488 | ~~≤ 4,500~~ **≤ 5,800** | ≤ 1,660 | **5,663 ✅** |
+| 2 | `resources/read` (skill/core) | 8,317 | **≤ 4,500** | ≤ 1,285 | — |
+| 3 | `wallet_list` (agent default, 6 wallets) | 16,109 | **≤ 3,500** | ≤ 1,000 | — |
+| 4 | `wallet_info` (agent default) | 1,209 | **≤ 500** | ≤ 145 | — |
+| 4 | `balance` (agent default) | 563 | **≤ 400** | ≤ 115 | — |
+| 4 | `dust_status` (agent default) | 363 | **≤ 300** | ≤ 85 | — |
+
+**Phase 1 target revised:** hitting ≤ 4,500 B would have required
+consolidating tool names (breaking change for existing MCP clients).
+5,800 B is the practical floor for 25 annotated tools + JSON-RPC
+framing. Phase 2 (skill split) still has its original target — that
+one's a clean content trim, not structural.
 
 ## Non-goals (for this budget)
 

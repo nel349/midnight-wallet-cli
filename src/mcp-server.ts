@@ -42,7 +42,7 @@ interface ToolDef {
   annotations?: ToolAnnotations;
   inputSchema: {
     type: 'object';
-    properties: Record<string, { type: string; description: string; enum?: string[] }>;
+    properties: Record<string, { type: string; description?: string; enum?: string[] }>;
     required?: string[];
   };
   handler: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -104,39 +104,20 @@ async function importHandler(name: string) {
 }
 
 const TOOLS: ToolDef[] = [
-  {
-    name: 'midnight_generate',
-    description: 'Generate a new wallet (deprecated — use midnight_wallet_generate instead)',
-    annotations: { destructiveHint: true },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        network: { type: 'string', description: 'Network: preprod, preview, undeployed', enum: ['preprod', 'preview', 'undeployed'] },
-        seed: { type: 'string', description: 'Restore from existing seed (64-char hex)' },
-        mnemonic: { type: 'string', description: 'Restore from BIP-39 mnemonic (24 words)' },
-        output: { type: 'string', description: 'Custom output path (deprecated — use midnight_wallet_generate instead)' },
-        force: { type: 'string', description: 'Set to "true" to overwrite existing wallet file' },
-      },
-    },
-    async handler(params) {
-      const args = buildArgs('generate', params);
-      if (params.force === 'true' || params.force === true) args.flags.force = true;
-      const handler = await importHandler('generate');
-      return captureCommand(handler, args);
-    },
-  },
+  // midnight_generate (deprecated) removed from MCP surface — agents should use
+  // midnight_wallet_generate. The CLI `mn generate` command still exists for humans.
   {
     name: 'midnight_wallet_generate',
-    description: 'Create a new named wallet and set it as active',
+    description: 'Create wallet.',
     annotations: { destructiveHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Wallet name (e.g. "alice", "dev")' },
-        network: { type: 'string', description: 'Network: preprod, preview, undeployed', enum: ['preprod', 'preview', 'undeployed'] },
-        seed: { type: 'string', description: 'Restore from existing seed (64-char hex)' },
-        mnemonic: { type: 'string', description: 'Restore from BIP-39 mnemonic (24 words)' },
-        force: { type: 'string', description: 'Set to "true" to overwrite existing wallet' },
+        name: { type: 'string' },
+        network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
+        seed: { type: 'string', description: '64-char hex' },
+        mnemonic: { type: 'string', description: 'BIP-39 24 words' },
+        force: { type: 'string' },
       },
       required: ['name'],
     },
@@ -152,7 +133,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_wallet_list',
-    description: 'List all wallets with name, address, network, and active marker',
+    description: 'List wallets.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
@@ -171,12 +152,12 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_wallet_use',
-    description: 'Set the active wallet by name',
+    description: 'Set active wallet.',
     annotations: { idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Wallet name to activate' },
+        name: { type: 'string' },
       },
       required: ['name'],
     },
@@ -194,12 +175,12 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_wallet_info',
-    description: 'Show details for a named wallet or the active wallet',
+    description: 'Show wallet details.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Wallet name (default: active wallet)' },
+        name: { type: 'string' },
       },
     },
     async handler(params) {
@@ -216,12 +197,12 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_wallet_remove',
-    description: 'Remove a named wallet (refuses active or last wallet)',
+    description: 'Remove wallet.',
     annotations: { destructiveHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Wallet name to remove' },
+        name: { type: 'string' },
       },
       required: ['name'],
     },
@@ -239,12 +220,12 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_info',
-    description: 'Display wallet address, network, creation date (no secrets shown)',
+    description: 'Wallet metadata.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        wallet: { type: 'string', description: 'Wallet name or path' },
+        wallet: { type: 'string' },
       },
     },
     async handler(params) {
@@ -255,15 +236,15 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_balance',
-    description: 'Check unshielded + shielded NIGHT balance (full wallet sync when no address given)',
+    description: 'NIGHT balance.',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        address: { type: 'string', description: 'Address to check (or reads from wallet file)' },
-        wallet: { type: 'string', description: 'Wallet name or path' },
-        network: { type: 'string', description: 'Override network detection', enum: ['preprod', 'preview', 'undeployed'] },
-        'indexer-ws': { type: 'string', description: 'Custom indexer WebSocket URL' },
+        address: { type: 'string' },
+        wallet: { type: 'string' },
+        network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
+        'indexer-ws': { type: 'string' },
       },
     },
     async handler(params) {
@@ -277,14 +258,14 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_address',
-    description: 'Derive and display an unshielded address from a seed',
+    description: 'Derive address from seed.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        seed: { type: 'string', description: 'Seed to derive from (required, 64-char hex)' },
-        network: { type: 'string', description: 'Network for address prefix', enum: ['preprod', 'preview', 'undeployed'] },
-        index: { type: 'string', description: 'Key derivation index (default: 0)' },
+        seed: { type: 'string', description: '64-char hex' },
+        network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
+        index: { type: 'string' },
       },
       required: ['seed'],
     },
@@ -296,12 +277,12 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_genesis_address',
-    description: 'Display the genesis wallet address (seed 0x01) for a network',
+    description: 'Genesis address.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        network: { type: 'string', description: 'Network for address prefix', enum: ['preprod', 'preview', 'undeployed'] },
+        network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
       },
     },
     async handler(params) {
@@ -312,7 +293,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_inspect_cost',
-    description: 'Display current block limits derived from LedgerParameters',
+    description: 'Block limits.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
@@ -326,13 +307,13 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_airdrop',
-    description: 'Fund your wallet from the genesis wallet (undeployed network only)',
+    description: 'Fund from genesis (undeployed).',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        amount: { type: 'string', description: 'Amount in NIGHT to airdrop' },
-        wallet: { type: 'string', description: 'Wallet name or path' },
+        amount: { type: 'string', description: 'NIGHT' },
+        wallet: { type: 'string' },
       },
       required: ['amount'],
     },
@@ -346,17 +327,14 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_transfer',
-    description: 'Send NIGHT tokens to another address',
+    description: 'Send NIGHT (returns pending token; see skill).',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        to: { type: 'string', description: 'Recipient bech32m address' },
-        amount: { type: 'string', description: 'Amount in NIGHT to send' },
-        wallet: { type: 'string', description: 'Wallet name or path' },
-        'proof-server': { type: 'string', description: 'Override proof server URL' },
-        node: { type: 'string', description: 'Override substrate node RPC URL' },
-        'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
+        to: { type: 'string', description: 'bech32m' },
+        amount: { type: 'string', description: 'NIGHT' },
+        wallet: { type: 'string' },
       },
       required: ['to', 'amount'],
     },
@@ -373,15 +351,12 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_dust_register',
-    description: 'Register NIGHT UTXOs for dust (fee token) generation',
+    description: 'Register for dust.',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        wallet: { type: 'string', description: 'Wallet name or path' },
-        'proof-server': { type: 'string', description: 'Override proof server URL' },
-        node: { type: 'string', description: 'Override substrate node RPC URL' },
-        'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
+        wallet: { type: 'string' },
       },
     },
     async handler(params) {
@@ -392,16 +367,16 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_dust_status',
-    description: 'Check dust registration status. Fast pre-check via indexer: if not registered, returns immediately. If registered, runs a full sync to report dust balance.',
+    description: 'Dust status.',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        wallet: { type: 'string', description: 'Wallet name or path' },
-        'proof-server': { type: 'string', description: 'Override proof server URL' },
-        node: { type: 'string', description: 'Override substrate node RPC URL' },
-        'indexer-ws': { type: 'string', description: 'Override indexer WebSocket URL' },
-        'no-cache': { type: 'string', description: 'Set to "true" to bypass wallet state cache' },
+        wallet: { type: 'string' },
+        'proof-server': { type: 'string' },
+        node: { type: 'string' },
+        'indexer-ws': { type: 'string' },
+        'no-cache': { type: 'string' },
       },
     },
     async handler(params) {
@@ -412,12 +387,12 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_config_get',
-    description: 'Read a persistent config value',
+    description: 'Read config.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        key: { type: 'string', description: 'Config key to read (e.g. "network")' },
+        key: { type: 'string' },
       },
       required: ['key'],
     },
@@ -435,13 +410,13 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_config_set',
-    description: 'Write a persistent config value',
+    description: 'Write config.',
     annotations: { idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        key: { type: 'string', description: 'Config key to set (e.g. "network")' },
-        value: { type: 'string', description: 'Config value to set' },
+        key: { type: 'string' },
+        value: { type: 'string' },
       },
       required: ['key', 'value'],
     },
@@ -460,13 +435,13 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_cache_clear',
-    description: 'Clear cached wallet sync state',
+    description: 'Clear sync cache.',
     annotations: { destructiveHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        network: { type: 'string', description: 'Only clear cache for this network', enum: ['preprod', 'preview', 'undeployed'] },
-        wallet: { type: 'string', description: 'Only clear cache for this wallet (name or path)' },
+        network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
+        wallet: { type: 'string' },
       },
     },
     async handler(params) {
@@ -477,12 +452,12 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_config_unset',
-    description: 'Reset a persistent config value to its default',
+    description: 'Reset config.',
     annotations: { idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        key: { type: 'string', description: 'Config key to reset' },
+        key: { type: 'string' },
       },
       required: ['key'],
     },
@@ -500,7 +475,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_localnet_up',
-    description: 'Start a local Midnight network via Docker Compose',
+    description: 'Start localnet (Docker).',
     annotations: { openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -519,7 +494,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_localnet_stop',
-    description: 'Stop local network containers (preserves state for fast restart)',
+    description: 'Stop localnet (preserves state).',
     annotations: { idempotentHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -538,7 +513,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_localnet_down',
-    description: 'Remove local network containers, networks, and volumes (full teardown)',
+    description: 'Localnet teardown (removes volumes).',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -557,7 +532,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_localnet_status',
-    description: 'Show local network service status and ports',
+    description: 'Localnet status.',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -576,7 +551,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_localnet_clean',
-    description: 'Remove conflicting containers from other setups',
+    description: 'Remove stray containers.',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -614,12 +589,12 @@ const TOOLS: ToolDef[] = [
 
   {
     name: 'midnight_confirm_operation',
-    description: 'Redeem a pending operation token returned by a destructive tool (e.g. midnight_transfer). This is step 2 of the two-step confirmation flow: the first call returns { pending, token, description } without executing; show the description to the user, get explicit consent, then call this tool with the token to actually execute the operation. Tokens are single-use and expire after 5 minutes.',
+    description: 'Redeem a pending token (confirm step).',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        token: { type: 'string', description: 'The token returned by the pending tool call' },
+        token: { type: 'string' },
       },
       required: ['token'],
     },
