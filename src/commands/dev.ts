@@ -266,11 +266,8 @@ async function deployContract(project: ProjectInfo): Promise<void> {
 
 async function runProjectTests(project: ProjectInfo): Promise<void> {
   process.stderr.write(dim(`\n  Running npm run ${project.testScript}...\n`));
-  const previousCwd = process.cwd();
-  if (previousCwd !== project.projectRoot) {
-    try { process.chdir(project.projectRoot); } catch { /* best-effort */ }
-  }
   try {
+    // runTests passes cwd: project.projectRoot to spawn — no parent chdir needed.
     const result = await runTests({ project });
     if (result.success) {
       process.stderr.write(`  ${dim('─')} Tests passed ${dim(`(${formatDuration(result.durationMs)})`)}\n`);
@@ -280,10 +277,6 @@ async function runProjectTests(project: ProjectInfo): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(red('  Test runner error: ') + message + '\n');
-  } finally {
-    if (process.cwd() !== previousCwd) {
-      try { process.chdir(previousCwd); } catch { /* best-effort */ }
-    }
   }
 }
 
