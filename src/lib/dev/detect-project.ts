@@ -2,7 +2,7 @@
 // Finds .compact source files and determines how to invoke the Compact compiler.
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 export interface ProjectInfo {
   /** Absolute path to the project root (where package.json lives, or startDir if none). */
@@ -48,8 +48,6 @@ const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'managed'
 
 export function detectProject(startDir: string): ProjectInfo {
   const rootDir = resolve(startDir);
-  const packageJsonPath = join(rootDir, 'package.json');
-  const packageJson = parsePackageJson(packageJsonPath);
 
   const sourceFiles = new Set<string>();
   const sourceDirs = new Set<string>();
@@ -67,16 +65,64 @@ export function detectProject(startDir: string): ProjectInfo {
     );
   }
 
-  const compileScript = resolveCompileScript(packageJson);
+  // Walk up from each source dir looking for a package.json that exposes a
+  // recognised compile script. Supports monorepos like midnight-starship
+  // where .compact files live in a sub-package with its own package.json.
+  const located = locateCompilerPackageJson([...sourceDirs], rootDir);
+  const projectRoot = located?.dir ?? rootDir;
+  const packageJson = located?.packageJson ?? parsePackageJson(join(rootDir, 'package.json'));
+  const compileScript = located?.script ?? resolveCompileScript(packageJson);
+
+  // Restrict watched sources to what lives under projectRoot — keeps the
+  // watcher from recompiling when unrelated .compact files elsewhere in a
+  // monorepo (e.g. exercises/) change.
+  const scopedFiles = [...sourceFiles].filter((p) => isPathUnder(p, projectRoot)).sort();
+  const scopedDirs = [...sourceDirs].filter((d) => isPathUnder(d, projectRoot)).sort();
 
   return {
-    projectRoot: rootDir,
-    sourceFiles: [...sourceFiles].sort(),
-    sourceDirs: [...sourceDirs].sort(),
+    projectRoot,
+    sourceFiles: scopedFiles.length > 0 ? scopedFiles : [...sourceFiles].sort(),
+    sourceDirs: scopedDirs.length > 0 ? scopedDirs : [...sourceDirs].sort(),
     compileScript,
     hasNpmCompileScript: compileScript !== null,
     packageJson,
   };
+}
+
+function isPathUnder(child: string, parent: string): boolean {
+  if (child === parent) return true;
+  const prefix = parent.endsWith('/') ? parent : parent + '/';
+  return child.startsWith(prefix);
+}
+
+interface LocatedPackage {
+  dir: string;
+  packageJson: Record<string, unknown>;
+  script: string;
+}
+
+/**
+ * For each source dir, walk up toward rootDir looking for a package.json
+ * that defines one of the recognised compile scripts. Returns the first
+ * match (scanning is deterministic via the sorted sourceDirs order).
+ */
+function locateCompilerPackageJson(sourceDirs: string[], rootDir: string): LocatedPackage | null {
+  for (const sourceDir of sourceDirs) {
+    let dir = sourceDir;
+    // Bound the walk at rootDir; don't escape above where the user launched.
+    while (true) {
+      const pkgPath = join(dir, 'package.json');
+      const pkg = parsePackageJson(pkgPath);
+      const script = resolveCompileScript(pkg);
+      if (pkg && script) return { dir, packageJson: pkg, script };
+
+      if (dir === rootDir) break;
+      const parent = dirname(dir);
+      if (parent === dir) break; // reached filesystem root
+      dir = parent;
+    }
+  }
+  return null;
 }
 
 function resolveCompileScript(packageJson: Record<string, unknown> | null): string | null {

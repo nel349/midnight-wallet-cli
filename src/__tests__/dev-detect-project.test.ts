@@ -96,4 +96,47 @@ describe('detectProject', () => {
     expect(info.packageJson).toBeNull();
     expect(info.hasNpmCompileScript).toBe(false);
   });
+
+  it('scopes sources to projectRoot in a monorepo so unrelated .compact files elsewhere are ignored', () => {
+    // Monorepo: contract/ has the compile script, exercises/ has an unrelated .compact
+    writeFileSync(
+      join(TEST_DIR, 'package.json'),
+      JSON.stringify({ name: 'monorepo-root' }),
+    );
+    mkdirSync(join(TEST_DIR, 'contract', 'src'), { recursive: true });
+    writeFileSync(
+      join(TEST_DIR, 'contract', 'package.json'),
+      JSON.stringify({ name: 'c', scripts: { compact: 'compact compile src/x.compact src/managed/x' } }),
+    );
+    writeFileSync(join(TEST_DIR, 'contract', 'src', 'x.compact'), '');
+    mkdirSync(join(TEST_DIR, 'exercises', 'foo', 'contract', 'src'), { recursive: true });
+    writeFileSync(join(TEST_DIR, 'exercises', 'foo', 'contract', 'src', 'unrelated.compact'), '');
+
+    const info = detectProject(TEST_DIR);
+    expect(info.projectRoot).toBe(join(TEST_DIR, 'contract'));
+    expect(info.sourceFiles).toEqual([join(TEST_DIR, 'contract', 'src', 'x.compact')]);
+  });
+
+  it('finds the compile script in a sub-package when root package.json lacks one (monorepo)', () => {
+    // Root package.json without the compile script — mimics midnight-starship layout
+    writeFileSync(
+      join(TEST_DIR, 'package.json'),
+      JSON.stringify({ name: 'monorepo-root', workspaces: ['contract'] }),
+    );
+    // Sub-package with the script + source
+    mkdirSync(join(TEST_DIR, 'contract', 'src'), { recursive: true });
+    writeFileSync(
+      join(TEST_DIR, 'contract', 'package.json'),
+      JSON.stringify({
+        name: 'contract-pkg',
+        scripts: { compact: 'compact compile src/x.compact src/managed/x' },
+      }),
+    );
+    writeFileSync(join(TEST_DIR, 'contract', 'src', 'x.compact'), '');
+
+    const info = detectProject(TEST_DIR);
+    expect(info.compileScript).toBe('compact');
+    expect(info.projectRoot).toBe(join(TEST_DIR, 'contract'));
+    expect(info.sourceFiles).toContain(join(TEST_DIR, 'contract', 'src', 'x.compact'));
+  });
 });
