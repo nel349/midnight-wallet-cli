@@ -95,6 +95,34 @@ describe('detectProject', () => {
     const info = detectProject(TEST_DIR);
     expect(info.packageJson).toBeNull();
     expect(info.hasNpmCompileScript).toBe(false);
+    expect(info.testScript).toBeNull();
+  });
+
+  it('detects a "test:dev" script (preferred over "test")', () => {
+    writeFileSync(join(TEST_DIR, 'x.compact'), '');
+    writeFileSync(
+      join(TEST_DIR, 'package.json'),
+      JSON.stringify({ name: 'p', scripts: { 'test:dev': 'vitest', test: 'vitest run' } }),
+    );
+    expect(detectProject(TEST_DIR).testScript).toBe('test:dev');
+  });
+
+  it('falls back to "test" script when "test:dev" is missing', () => {
+    writeFileSync(join(TEST_DIR, 'x.compact'), '');
+    writeFileSync(
+      join(TEST_DIR, 'package.json'),
+      JSON.stringify({ name: 'p', scripts: { test: 'vitest run' } }),
+    );
+    expect(detectProject(TEST_DIR).testScript).toBe('test');
+  });
+
+  it('testScript is null when no recognised test script is defined', () => {
+    writeFileSync(join(TEST_DIR, 'x.compact'), '');
+    writeFileSync(
+      join(TEST_DIR, 'package.json'),
+      JSON.stringify({ name: 'p', scripts: { build: 'tsc' } }),
+    );
+    expect(detectProject(TEST_DIR).testScript).toBeNull();
   });
 
   it('scopes sources to projectRoot in a monorepo so unrelated .compact files elsewhere are ignored', () => {

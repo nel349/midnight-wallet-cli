@@ -21,6 +21,11 @@ export interface ProjectInfo {
    * equivalent to `compileScript !== null`.
    */
   hasNpmCompileScript: boolean;
+  /**
+   * Name of the npm script to invoke for tests (e.g. "test:dev" or "test"),
+   * or null if no recognised script is defined.
+   */
+  testScript: string | null;
   /** Parsed package.json contents if one was found, else null. */
   packageJson: Record<string, unknown> | null;
 }
@@ -31,6 +36,13 @@ export interface ProjectInfo {
  * convention, `compile` is generic.
  */
 const COMPILE_SCRIPT_CANDIDATES = ['compact', 'compile'] as const;
+
+/**
+ * Candidate npm script names for running tests, in priority order.
+ * `test:dev` for projects that define a fast dev-loop test target;
+ * `test` as the universal fallback (will still run whatever's wired).
+ */
+const TEST_SCRIPT_CANDIDATES = ['test:dev', 'test'] as const;
 
 /**
  * Directories we scan for .compact files, relative to the start dir.
@@ -79,14 +91,24 @@ export function detectProject(startDir: string): ProjectInfo {
   const scopedFiles = [...sourceFiles].filter((p) => isPathUnder(p, projectRoot)).sort();
   const scopedDirs = [...sourceDirs].filter((d) => isPathUnder(d, projectRoot)).sort();
 
+  const testScript = resolveTestScript(packageJson);
+
   return {
     projectRoot,
     sourceFiles: scopedFiles.length > 0 ? scopedFiles : [...sourceFiles].sort(),
     sourceDirs: scopedDirs.length > 0 ? scopedDirs : [...sourceDirs].sort(),
     compileScript,
     hasNpmCompileScript: compileScript !== null,
+    testScript,
     packageJson,
   };
+}
+
+function resolveTestScript(packageJson: Record<string, unknown> | null): string | null {
+  for (const candidate of TEST_SCRIPT_CANDIDATES) {
+    if (hasScript(packageJson, candidate)) return candidate;
+  }
+  return null;
 }
 
 function isPathUnder(child: string, parent: string): boolean {

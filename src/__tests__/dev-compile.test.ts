@@ -22,6 +22,7 @@ function project(extra: Partial<ProjectInfo> = {}): ProjectInfo {
     sourceDirs: [TEST_DIR],
     compileScript: null,
     hasNpmCompileScript: false,
+    testScript: null,
     packageJson: null,
     ...extra,
   };

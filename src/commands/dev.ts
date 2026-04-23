@@ -7,6 +7,7 @@ import { resolve, relative, join } from 'node:path';
 import { type ParsedArgs } from '../lib/argv.ts';
 import { detectProject, type ProjectInfo } from '../lib/dev/detect-project.ts';
 import { runCompile, type CompileResult } from '../lib/dev/compile.ts';
+import { runTests } from '../lib/dev/test.ts';
 import { startWatching, type WatchHandle } from '../lib/dev/watch.ts';
 import { ensureLocalnetRunning } from '../lib/dev/localnet-ready.ts';
 import {
@@ -94,6 +95,7 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
   // Shared state threaded through the watcher and keypress handlers.
   let lastCompile: CompileResult | null = null;
   let deployInFlight = false;
+  let testInFlight = false;
   let compileInFlight = false;
   let compileQueued = false;
 
@@ -105,8 +107,9 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
 
   // ── Phase 5: start watcher ────────────────────────────────
   const runPass = async () => {
-    if (deployInFlight) {
-      // Deploy is holding the line. The save will be picked up after it returns.
+    if (deployInFlight || testInFlight) {
+      // Another exclusive action is holding the line. The save will be picked
+      // up after it returns — the user can always save again to force a recompile.
       return;
     }
     if (compileInFlight) {
@@ -142,7 +145,8 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
   process.stderr.write('\n' + divider() + '\n');
   const watchedLabel = project.sourceDirs.map((d) => relative(project.projectRoot, d) || '.').join(', ');
   process.stderr.write(dim('  Watching ') + teal(watchedLabel) + dim(' — save to recompile.') + '\n');
-  process.stderr.write(dim('  ') + bold('[d]') + dim(' deploy   ') + bold('[q]') + dim(' quit\n\n'));
+  const testHint = project.testScript ? bold('[t]') + dim(` test (${project.testScript})   `) : '';
+  process.stderr.write(dim('  ') + bold('[d]') + dim(' deploy   ') + testHint + bold('[q]') + dim(' quit\n\n'));
 
   // ── Phase 6: keystroke dispatcher + wait until aborted ────
   const abortController = new AbortController();
@@ -157,6 +161,10 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
           process.stderr.write(dim('  Deploy already in flight — ignoring key press.\n'));
           return;
         }
+        if (testInFlight) {
+          process.stderr.write(dim('  Tests are running — wait for them to finish before deploying.\n'));
+          return;
+        }
         if (!lastCompile?.success) {
           process.stderr.write(yellow('  Cannot deploy — last compile did not succeed. Fix and save first.\n'));
           return;
@@ -166,6 +174,30 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
           await deployContract(project);
         } finally {
           deployInFlight = false;
+        }
+      },
+      t: async () => {
+        if (testInFlight) {
+          process.stderr.write(dim('  Tests already in flight — ignoring key press.\n'));
+          return;
+        }
+        if (deployInFlight) {
+          process.stderr.write(dim('  Deploy in flight — wait for it to finish before running tests.\n'));
+          return;
+        }
+        if (!project.testScript) {
+          process.stderr.write(yellow('  No test script found. Add "test:dev" or "test" to package.json.\n'));
+          return;
+        }
+        if (!lastCompile?.success) {
+          process.stderr.write(yellow('  Cannot run tests — last compile did not succeed. Fix and save first.\n'));
+          return;
+        }
+        testInFlight = true;
+        try {
+          await runProjectTests(project);
+        } finally {
+          testInFlight = false;
         }
       },
       q: () => stopRequest(),
@@ -225,6 +257,29 @@ async function deployContract(project: ProjectInfo): Promise<void> {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(red('  ' + message) + '\n');
     }
+  } finally {
+    if (process.cwd() !== previousCwd) {
+      try { process.chdir(previousCwd); } catch { /* best-effort */ }
+    }
+  }
+}
+
+async function runProjectTests(project: ProjectInfo): Promise<void> {
+  process.stderr.write(dim(`\n  Running npm run ${project.testScript}...\n`));
+  const previousCwd = process.cwd();
+  if (previousCwd !== project.projectRoot) {
+    try { process.chdir(project.projectRoot); } catch { /* best-effort */ }
+  }
+  try {
+    const result = await runTests({ project });
+    if (result.success) {
+      process.stderr.write(`  ${dim('─')} Tests passed ${dim(`(${formatDuration(result.durationMs)})`)}\n`);
+    } else {
+      process.stderr.write(`  ${dim('─')} ${red(`Tests failed`)} ${dim(`(exit ${result.exitCode}, ${formatDuration(result.durationMs)})`)}\n`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(red('  Test runner error: ') + message + '\n');
   } finally {
     if (process.cwd() !== previousCwd) {
       try { process.chdir(previousCwd); } catch { /* best-effort */ }

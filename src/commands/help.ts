@@ -360,6 +360,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '',
       'Keystrokes (while running):',
       '  d             Deploy the current compiled artifact (dev-alice on undeployed)',
+      '  t             Run the project\'s npm test script (test:dev preferred, then test)',
       '  q             Quit cleanly',
       '  Ctrl+C        Quit cleanly',
     ],
