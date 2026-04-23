@@ -1,6 +1,6 @@
 # CLI Developer Experience Plan
 
-## Status: Drafted 2026-04-21 — pending decisions on sequencing
+## Status: All 8 items shipped 2026-04-22. See Shipped section below.
 
 ## Positioning
 
@@ -38,18 +38,18 @@ This plan **complements**, does not replace:
 
 ## Proposed sequence
 
-| # | Item | Source | Effort | Rationale |
-|---|---|---|---|---|
-| 1 | MCP tool annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`) | agent-vision #1 | ~2h | Cheapest agent-safety win. Unblocks 3. |
-| 2 | `midnight-wallet` MCP skill file (Claude Code / Cursor / any MCP client) — conversational guide, intent routing, multi-step flows | agent-vision #2 | ~1 day | Makes any MCP client a Midnight power user. Sells the agent story. |
-| 3 | `mn dev` M1 — detects create-mn-app project, spins localnet + funded/dust-registered wallets, watches `*.compact`, compile-on-save via `compact compile` | new | ~1–2 days | The visible "start a new Midnight project" demo. Headline feature. |
-| 4 | Confirmation token flow for `midnight_transfer` MCP tool (Giza pattern) | agent-vision #3 | ~1 day | Safer agent writes. Required for serious agent use. |
-| 5 | `mn dev` M2 — `d` keypress deploys via existing `runDeploy`, `r` resets wallets, `q` quits | new | ~0.5 day | Completes the iteration loop. |
-| 6 | Day-0 sync UX — accurate progress (events applied / highest, ETA), resumable-on-Ctrl+C, "safe to interrupt" messaging | new ("Play 1") | ~1–2 days | Makes preprod first-sync tolerable. Aligns with Kuira Phase 9 "cheaper optimization #2". |
-| 7 | `mn dev` M3 — test runner (user-defined `npm run test:dev` script; baked scenarios later if demand) | new | ~1 day | Closes the dev loop. |
-| 8 | Agent Protocol Spec doc (policy, confirmation tokens, annotations, intent format) | agent-vision #4 | ~1–2 days | Turns the shipped behavior into an ecosystem proposal. |
+| # | Item | Status | Commit |
+|---|---|---|---|
+| 1 | MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on all 24 tools | ✅ | `dde2fa3` |
+| 2 | `midnight-wallet` MCP skill file exposed via `midnight-wallet://skill` Resource | ✅ | `c51a9b3` + `c26ac40` |
+| 3 | `mn dev` M1 + M1.5 — project detection, localnet auto-up, dev wallet provisioning, compile-on-save | ✅ | `4940792` + `9b2251c` |
+| 4 | Confirmation token flow for `midnight_transfer` (+ `midnight_confirm_operation`) | ✅ | `b00c717` |
+| 5 | `mn dev` M2 — `d` deploys, `q` quits via raw-mode keystrokes | ✅ | `d08a108` |
+| 6 | Day-0 sync UX — ETA + rate on `mn balance` shielded sync | ✅ (first pass) | `feee98c` |
+| 7 | `mn dev` M3 — `t` runs `npm run test:dev` / `test` with streaming output | ✅ | `1ceafac` + `a21929e` |
+| 8 | Agent Protocol Spec doc (annotations, skill resource, confirmation tokens) | ✅ | this commit |
 
-Order is not fixed — items 1, 2, 3 are the first-ship core. 4–7 close the obvious gaps. 8 is the narrative layer once there's working evidence. Effort numbers are rough; assume 1.5× for anything novel.
+All 8 items shipped. Follow-ups scoped out of the original plan are listed below.
 
 ## Open decisions
 
@@ -71,6 +71,18 @@ Before starting each item, resolve:
 **For MCP annotations (item 1):**
 - Map existing 24 tools to the three hints. Most are obvious; a few (like `localnet_up`) warrant discussion.
 
+## Follow-ups explicitly deferred during implementation
+
+These came up while shipping the 8 items and were consciously not bundled in,
+so future sessions don't rediscover them cold.
+
+- **Write-command ETA** — item 6 added ETA to `mn balance` only; `transfer`, `airdrop`, `dust register` still show pct-only. Pattern proven; rolling it out is mechanical.
+- **Mid-sync cache snapshots** — interrupted syncs currently lose progress because wallet-cache only persists at end-of-sync. Needed before we can truthfully claim "safe to interrupt" during Day-0. Non-trivial (need to snapshot a live facade without corrupting state).
+- **`mn contract deploy` witness generation** — auto-runner still requires a `witnesses.js` module on disk. For witness-less contracts we could auto-generate stubs; pre-flight now produces a clear error instead, which is good enough for now.
+- **`mn dev` `r` reset-wallets keystroke** — user can `mn wallet remove dev-alice && mn dev` to re-provision; in-process reset wasn't load-bearing for M2.
+- **Spinner migration of the remaining write-command sites** — item 5's cleanup fixed the 8 `spinner.stop(red('✗')+...)` anti-pattern sites; no new ones introduced since.
+- **Protocol v1** — `AGENT-PROTOCOL.md` ships as v0. Policy engine, agent identity, and intent format are flagged as out-of-scope for v0 there; v1 waits until there's shipped evidence from real agents using v0.
+
 ## What's explicitly out of scope here
 
 - **Viewing-key sync** — regardless of demand pressure. Privacy defaults.
@@ -83,6 +95,8 @@ Before starting each item, resolve:
 | Artifact | Path |
 |---|---|
 | This plan | `docs/tasks/cli-dev-ux-plan.md` |
+| Agent Protocol Spec (v0) | `docs/AGENT-PROTOCOL.md` |
+| MCP skill file | `docs/SKILL.md` |
 | Agent wallet vision | `tasks/agent-wallet-vision.md` |
 | Kuira PIR plan (Phase 9) | `/Users/norman/Development/android/projects/kuira-android-wallet/docs/PLAN.md` |
 | Contract runner (reusable for `mn dev`) | `src/lib/contract/runner.ts` |

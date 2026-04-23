@@ -195,9 +195,11 @@ Midnight Agent Wallet Standard
 
 ## Next Steps (If This Feels Right)
 
-1. Add tool annotations to the existing MCP server (low effort, high value)
-2. Build a proper `midnight-wallet` Claude Code skill (conversational guide)
-3. Prototype confirmation token flow for `midnight_transfer` MCP tool
-4. Write the Agent Protocol Spec as a standalone document
-5. Present to Midnight team (Nightforce, Charles)
-6. Decide if this becomes its own project or stays part of CLI + Kuira
+1. ✅ Add tool annotations to the existing MCP server — shipped `dde2fa3`
+2. ✅ Build a proper `midnight-wallet` MCP skill (conversational guide) — shipped `c51a9b3` (as an MCP Resource so it works with any MCP client, not Claude-Code-exclusive)
+3. ✅ Prototype confirmation token flow for `midnight_transfer` MCP tool — shipped `b00c717`
+4. ✅ Write the Agent Protocol Spec as a standalone document — shipped as `docs/AGENT-PROTOCOL.md` v0
+5. Present to Midnight team (Nightforce, Charles) — still open
+6. Decide if this becomes its own project or stays part of CLI + Kuira — still open
+
+See `docs/tasks/cli-dev-ux-plan.md` for the full shipped/deferred matrix.
