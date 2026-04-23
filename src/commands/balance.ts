@@ -11,6 +11,7 @@ import { getNetworkId } from '../lib/network-id.ts';
 import { checkBalance, isNativeToken } from '../lib/balance-subscription.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
 import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
+import { createEtaEstimator, formatSyncStatus } from '../lib/sync-eta.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatNight, formatAddress, toNight } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -166,17 +167,17 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
     bundle = await buildFacade(seedBuffer, networkConfig, cache);
     if (bundle.restoredFromCache) activeSpinner?.update('Restoring from cache...');
 
+    const eta = createEtaEstimator();
     const state = await startAndSyncFacade(bundle, {
       // Balance reads NIGHT from unshielded + shielded; dust isn't needed and
       // skipping it avoids the dust isConnected SDK hang on hosted networks.
       syncMode: 'no-dust',
       onProgress: (applied, highest) => {
-        if (highest > 0 && activeSpinner) {
-          const pct = Math.min(Math.round((applied / highest) * 100), 100);
-          activeSpinner.update(pct >= 100 ? 'Syncing shielded...' : `Syncing shielded... ${pct}%`);
-        }
+        if (!activeSpinner) return;
+        const snap = eta.sample({ applied, highest, t: Date.now() });
+        activeSpinner.update(formatSyncStatus(snap, 'Syncing shielded'));
       },
-      onSyncDetail: (detail) => activeSpinner?.update(`Syncing shielded... (waiting on: ${detail})`),
+      onSyncDetail: (detail) => activeSpinner?.update(`Syncing shielded (waiting on: ${detail})`),
     });
 
     // Save cache + shielded address (defensive write — backfill from load may
