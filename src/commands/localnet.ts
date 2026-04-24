@@ -55,16 +55,19 @@ async function handleUp(jsonMode: boolean): Promise<void> {
       spinner.stop(yellow('Services started but not all healthy yet'));
       process.stderr.write('\n' + dim('  Tip: run ') + bold('midnight localnet logs') + dim(' to check for errors') + '\n');
     } else {
-      // Docker healthy ≠ chain ready. Three layered waits are needed:
-      //  1. Node has produced block 1 (substrate chain_getHeader)
-      //  2. Indexer has ingested genesis state (shows non-zero balance for
-      //     the genesis address via GraphQL subscription)
-      // Without (2), an immediately-following airdrop sees genesis with
-      // zero UTXOs and bails with INSUFFICIENT_BALANCE.
+      // Docker healthy ≠ chain ready. Layered waits:
+      //  1. Node has produced block 1 (substrate chain_getHeader).
+      //  2. Indexer has ingested genesis state (non-zero UTXOs for genesis
+      //     via GraphQL), so subsequent balance/sync calls see the funds.
+      //  3. Proof server responds on its HTTP root. The proof-server container
+      //     has no Docker healthcheck, so it can report "running" while still
+      //     warming up — an immediately-following transfer then fails at
+      //     prove time with "Failed to prove transaction".
       spinner.update('Waiting for chain to produce first block...');
       try {
         const { waitForFirstBlock } = await import('../lib/node-ready.ts');
         const { waitForAddressFunded } = await import('../lib/indexer-ready.ts');
+        const { waitForProofServerReady } = await import('../lib/proof-server-ready.ts');
         const { getNetworkConfig } = await import('../lib/network.ts');
         const { deriveUnshieldedAddress } = await import('../lib/derive-address.ts');
         const { GENESIS_SEED } = await import('../lib/constants.ts');
@@ -76,9 +79,12 @@ async function handleUp(jsonMode: boolean): Promise<void> {
         const genesisAddress = deriveUnshieldedAddress(Buffer.from(GENESIS_SEED, 'hex'), 'undeployed');
         await waitForAddressFunded(netCfg.indexerWS, genesisAddress, { timeoutMs: 30_000 });
 
+        spinner.update('Waiting for proof server...');
+        await waitForProofServerReady(netCfg.proofServer, { timeoutMs: 30_000 });
+
         spinner.stop('Local network is running');
       } catch (err) {
-        spinner.stop(yellow('Services running but chain/indexer not fully ready yet'));
+        spinner.stop(yellow('Services running but chain/indexer/proof-server not fully ready yet'));
         process.stderr.write('\n' + dim('  Tip: give it a few more seconds then retry. Run ') + bold('midnight localnet logs') + dim(' if this persists.') + '\n');
       }
     }
