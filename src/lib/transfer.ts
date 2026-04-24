@@ -536,6 +536,12 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
   // path is too slow to be viable, so there's no user-facing `--no-cache`
   // flag. `mn cache clear` wipes the cache explicitly if needed.
   const useCache = walletAddress && networkName;
+  // S1: wipe caches whose stored chainId no longer matches this network's
+  // current genesis hash (remote reset / testnet reindex). Cheap, memoised.
+  if (useCache && networkName) {
+    const { validateNetworkCaches } = await import('./wallet-cache.ts');
+    await validateNetworkCaches(networkName, networkConfig.node);
+  }
   const cache = useCache ? loadWalletCache(walletAddress, networkName) : null;
 
   // Prime the dust-direct cache so the facade's dust wallet restores from a

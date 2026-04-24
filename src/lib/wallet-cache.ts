@@ -18,6 +18,13 @@ interface CacheFile {
   version: number;
   network: string;
   address: string;
+  /**
+   * Genesis block hash of the chain this cache was built against.
+   * Used to detect remote-testnet resets: a mismatch means the cache
+   * refers to a now-defunct chain and must be wiped. Optional for
+   * back-compat with pre-S1 cache files.
+   */
+  chainId?: string;
   timestamp: string;
   wallets: WalletCacheData;
 }
@@ -85,6 +92,7 @@ export async function saveWalletCache(
   network: string,
   facade: { shielded: { serializeState(): Promise<string> }; unshielded: { serializeState(): Promise<string> }; dust: { serializeState(): Promise<string> } },
   cacheDir?: string,
+  chainId?: string,
 ): Promise<void> {
   const [shielded, unshielded, dust] = await Promise.all([
     facade.shielded.serializeState(),
@@ -98,6 +106,7 @@ export async function saveWalletCache(
     address,
     timestamp: new Date().toISOString(),
     wallets: { shielded, unshielded, dust },
+    ...(chainId ? { chainId } : {}),
   };
 
   const path = getCachePath(address, network, cacheDir);
@@ -118,6 +127,73 @@ export async function saveWalletCache(
     try { unlinkSync(tmpPath); } catch { /* best-effort */ }
     throw err;
   }
+}
+
+/**
+ * Orchestrator: validate both wallet and dust-direct caches for a network.
+ * Called once per command from the command entry points. Logs a one-line
+ * summary to stderr when any caches were wiped so the user understands the
+ * delay on the first sync after a chain reset.
+ */
+export async function validateNetworkCaches(
+  network: string,
+  nodeWsUrl: string,
+  cacheDir?: string,
+): Promise<void> {
+  const { validateDustCacheChainId } = await import('./dust-direct-cache.ts');
+  const [walletWiped, dustWiped] = await Promise.all([
+    validateWalletCacheChainId(network, nodeWsUrl, cacheDir),
+    validateDustCacheChainId(network, nodeWsUrl, cacheDir),
+  ]);
+  const total = walletWiped.length + dustWiped.length;
+  if (total > 0) {
+    // Single, quiet line — same "one-liner" pattern the plan committed to.
+    process.stderr.write(`  Detected chain reset — cleared ${total} stale cache file(s) for ${network}\n`);
+  }
+}
+
+/**
+ * Wipe every wallet cache file for a network whose stored chainId doesn't
+ * match the chain's current genesis hash. Called at command startup so we
+ * catch remote-testnet resets (chain advanced past our cache, so the
+ * `applied > highest` detector never fires). Best-effort: if the node is
+ * unreachable, we skip validation rather than blocking the command.
+ *
+ * Returns the list of wiped cache file paths so callers can surface a
+ * one-line "cache invalidated" message to the user.
+ */
+export async function validateWalletCacheChainId(
+  network: string,
+  nodeWsUrl: string,
+  cacheDir?: string,
+): Promise<string[]> {
+  const { getChainGenesisHash } = await import('./chain-id.ts');
+  const currentChainId = await getChainGenesisHash(nodeWsUrl);
+  if (!currentChainId) return []; // node unreachable — skip validation
+
+  const base = cacheDir ?? join(homedir(), MIDNIGHT_DIR, CACHE_DIR_NAME);
+  const dir = join(base, network);
+  if (!existsSync(dir)) return [];
+
+  const wiped: string[] = [];
+  let entries: string[];
+  try { entries = readdirSync(dir); } catch { return []; }
+
+  for (const file of entries) {
+    if (!file.endsWith('.json')) continue;
+    const path = join(dir, file);
+    try {
+      const parsed: CacheFile = JSON.parse(readFileSync(path, 'utf-8'));
+      // Legacy caches (pre-S1) have no chainId — leave alone for back-compat;
+      // the next save writes the field.
+      if (!parsed.chainId) continue;
+      if (parsed.chainId !== currentChainId) {
+        unlinkSync(path);
+        wiped.push(path);
+      }
+    } catch { /* corrupt file — skip, loadWalletCache will reject it too */ }
+  }
+  return wiped;
 }
 
 /**

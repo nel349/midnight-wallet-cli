@@ -55,7 +55,18 @@ async function handleUp(jsonMode: boolean): Promise<void> {
       spinner.stop(yellow('Services started but not all healthy yet'));
       process.stderr.write('\n' + dim('  Tip: run ') + bold('midnight localnet logs') + dim(' to check for errors') + '\n');
     } else {
-      spinner.stop('Local network is running');
+      // Docker healthy ≠ chain producing blocks. Wait until block 1 exists so
+      // a follow-up airdrop sees the genesis UTXO instead of an empty chain.
+      spinner.update('Waiting for chain to produce first block...');
+      try {
+        const { waitForFirstBlock } = await import('../lib/node-ready.ts');
+        const { getNetworkConfig } = await import('../lib/network.ts');
+        await waitForFirstBlock(getNetworkConfig('undeployed').node, { timeoutMs: 30_000 });
+        spinner.stop('Local network is running');
+      } catch (err) {
+        spinner.stop(yellow('Services running but chain hasn\'t produced a block yet'));
+        process.stderr.write('\n' + dim('  Tip: give the node a few more seconds then retry. Run ') + bold('midnight localnet logs') + dim(' if this persists.') + '\n');
+      }
     }
   } catch (err) {
     spinner.fail('Failed to start local network');

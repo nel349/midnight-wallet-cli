@@ -78,6 +78,11 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   // of slowly catching up events from scratch. Owned UTXOs are typically 0
   // here (that's why we're registering) — priming still populates the global
   // commitment tree, which is what the register tx's proof needs.
+  // S1: validate caches vs chain genesis first — a stale dust cache would
+  // prime from an invalid checkpoint.
+  const { validateNetworkCaches } = await import('../lib/wallet-cache.ts');
+  await validateNetworkCaches(networkName, networkConfig.node);
+
   const primeSpinner = startSpinner(`Priming dust cache from ${networkName}...`);
   await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
     onStatus: (s) => primeSpinner.update(s),

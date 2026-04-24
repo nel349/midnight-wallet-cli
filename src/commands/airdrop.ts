@@ -182,6 +182,10 @@ async function shieldedAirdrop(
   let genesisBundle: FacadeBundle | undefined;
 
   try {
+    // S1: validate caches vs current chain genesis before any load.
+    const { validateNetworkCaches } = await import('../lib/wallet-cache.ts');
+    await validateNetworkCaches(networkName, networkConfig.node);
+
     // Step 1: Get user's shielded address (start facade, read first state emission, stop)
     const userCache = loadWalletCache(userUnshieldedAddress, networkName);
     userBundle = await buildFacade(userSeedBuffer, networkConfig, userCache);

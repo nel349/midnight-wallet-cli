@@ -75,6 +75,11 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
   const spinner = startSpinner('Building wallet facade...');
 
+  // S1: validate caches vs chain genesis — catches remote-testnet resets
+  // before we prime or restore from a now-stale checkpoint.
+  const { validateNetworkCaches } = await import('../lib/wallet-cache.ts');
+  await validateNetworkCaches(networkName, networkConfig.node);
+
   // Prime dust cache before building the facade so its dust wallet restores
   // from a near-tip checkpoint and strict-sync completes in seconds instead
   // of minutes. serve accepts write RPCs, so fast + correct dust state matters.

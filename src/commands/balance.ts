@@ -10,7 +10,8 @@ import { applyEndpointOverrides } from '../lib/network.ts';
 import { getNetworkId } from '../lib/network-id.ts';
 import { checkBalance, isNativeToken } from '../lib/balance-subscription.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
-import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
+import { loadWalletCache, saveWalletCache, validateNetworkCaches } from '../lib/wallet-cache.ts';
+import { getChainGenesisHash } from '../lib/chain-id.ts';
 import { createEtaEstimator, formatSyncStatus } from '../lib/sync-eta.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
 import { header, keyValue, divider, formatNight, formatAddress, toNight } from '../ui/format.ts';
@@ -123,6 +124,10 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
   let activeSpinner: Spinner | null = null;
 
   try {
+    // S1: wipe any cache whose stored chainId no longer matches this network's
+    // current genesis hash (remote reset, reindex, etc.). Cheap, memoised.
+    if (!noCache) await validateNetworkCaches(networkName, networkConfig.node);
+
     // Header + address chrome (we already have everything except live balances).
     if (!isJson) {
       process.stderr.write('\n' + header('Balance') + '\n\n');
@@ -183,7 +188,10 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
     // Save cache + shielded address (defensive write — backfill from load may
     // have already written this exact value).
     if (!noCache) {
-      try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
+      try {
+        const chainId = await getChainGenesisHash(networkConfig.node).catch(() => null);
+        await saveWalletCache(address, networkName, bundle.facade, undefined, chainId ?? undefined);
+      } catch { /* best-effort */ }
     }
     const networkId = getNetworkId(networkConfig.networkId);
     const liveShieldedAddrStr = MidnightBech32m.encode(networkId, state.shielded.address).asString();

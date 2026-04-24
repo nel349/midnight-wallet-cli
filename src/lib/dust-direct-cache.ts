@@ -26,6 +26,8 @@ interface DustCacheFile {
   network: string;
   dustPublicKeyHex: string;
   lastAppliedEventId: number;
+  /** Genesis block hash — see wallet-cache.ts for the rationale. Optional for back-compat. */
+  chainId?: string;
   timestamp: string;
   dustState: string; // hex-encoded DustLocalState.serialize()
 }
@@ -102,6 +104,7 @@ export function saveDustCache(
   state: ledger.DustLocalState,
   lastAppliedEventId: number,
   cacheDir?: string,
+  chainId?: string,
 ): void {
   const data: DustCacheFile = {
     version: DUST_CACHE_VERSION,
@@ -110,6 +113,7 @@ export function saveDustCache(
     lastAppliedEventId,
     timestamp: new Date().toISOString(),
     dustState: Buffer.from(state.serialize()).toString('hex'),
+    ...(chainId ? { chainId } : {}),
   };
 
   const path = getDustCachePath(network, pubkeyHex, cacheDir);
@@ -127,6 +131,43 @@ export function saveDustCache(
     try { unlinkSync(tmpPath); } catch { /* best-effort */ }
     throw err;
   }
+}
+
+/**
+ * Wipe every dust-direct cache file for a network whose stored chainId
+ * doesn't match the chain's current genesis hash. Paired with
+ * `validateWalletCacheChainId` — both get called at command startup.
+ * Returns wiped paths.
+ */
+export async function validateDustCacheChainId(
+  network: string,
+  nodeWsUrl: string,
+  cacheDir?: string,
+): Promise<string[]> {
+  const { getChainGenesisHash } = await import('./chain-id.ts');
+  const currentChainId = await getChainGenesisHash(nodeWsUrl);
+  if (!currentChainId) return [];
+
+  const dir = dustCacheDir(network, cacheDir);
+  if (!existsSync(dir)) return [];
+
+  const wiped: string[] = [];
+  let entries: string[];
+  try { entries = readdirSync(dir); } catch { return []; }
+
+  for (const file of entries) {
+    if (!file.startsWith('dust-') || !file.endsWith('.json')) continue;
+    const path = join(dir, file);
+    try {
+      const parsed: DustCacheFile = JSON.parse(readFileSync(path, 'utf-8'));
+      if (!parsed.chainId) continue; // legacy — back-compat
+      if (parsed.chainId !== currentChainId) {
+        unlinkSync(path);
+        wiped.push(path);
+      }
+    } catch { /* skip */ }
+  }
+  return wiped;
 }
 
 /**
