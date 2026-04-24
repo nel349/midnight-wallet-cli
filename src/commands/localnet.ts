@@ -121,9 +121,18 @@ async function handleDown(jsonMode: boolean): Promise<void> {
 
   try {
     dockerCompose('down --volumes');
-    spinner.stop('Local network removed (containers, networks, volumes)');
+    // Wipe every cache keyed to the undeployed chain — the volumes just got
+    // removed, so any wallet cache still referencing it is guaranteed stale
+    // and would trigger "applied > highest" on the next command. Clearing
+    // here means the next `mn <anything>` starts with a truthful cache.
+    const { clearWalletCache } = await import('../lib/wallet-cache.ts');
+    const { clearDustDirectCache } = await import('../lib/dust-direct-cache.ts');
+    clearWalletCache(undefined, 'undeployed');
+    clearDustDirectCache('undeployed');
+
+    spinner.stop('Local network removed (containers, networks, volumes, caches)');
     if (jsonMode) {
-      writeJsonResult({ subcommand: 'down', status: 'removed' });
+      writeJsonResult({ subcommand: 'down', status: 'removed', cachesCleared: true });
       return;
     }
   } catch (err) {

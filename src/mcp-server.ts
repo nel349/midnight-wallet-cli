@@ -513,7 +513,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_localnet_down',
-    description: 'Localnet teardown (removes volumes).',
+    description: 'Localnet teardown (volumes + undeployed cache).',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',

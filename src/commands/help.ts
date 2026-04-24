@@ -409,7 +409,7 @@ const COMMAND_SPECS: CommandSpec[] = [
     flags: [
       'up              Start the local network (node, indexer, proof server)',
       'stop            Stop containers (preserves state for fast restart)',
-      'down            Remove containers, networks, and volumes (full teardown)',
+      'down            Full teardown: containers, networks, volumes, + undeployed wallet cache',
       'status          Show service status and ports',
       'logs            Stream service logs (Ctrl+C to stop)',
       'clean           Remove conflicting containers from other setups',
@@ -784,7 +784,7 @@ AVAILABLE MCP TOOLS (25)
   Local Network
   midnight_localnet_up         Start local network (Docker)                         —
   midnight_localnet_stop       Stop local network (preserves state)                 —
-  midnight_localnet_down       Full teardown (removes volumes)                      —
+  midnight_localnet_down       Full teardown (volumes + undeployed cache)           —
   midnight_localnet_status     Show service status and ports                        —
   midnight_localnet_clean      Remove conflicting containers                        —
 
