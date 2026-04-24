@@ -7,6 +7,7 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 ### Fixed
 
 - **Cold-start race on fresh localnet** — `mn airdrop` (and other transfers) against a just-started localnet would retry tightly for 120s and then fail with `INSUFFICIENT_BALANCE`, even though the genesis address had funds. Root cause: the facade's state observable emits a snapshot with coins populated before the SDK's internal `#balanceSegment` coin index is built, so `transferTransaction` throws `Wallet.InsufficientFunds` at build time. Fix: new `isSdkInsufficientFundsError` distinguishes the SDK error from our own pre-flight balance check; on hit, `executeTransfer` performs a bounded outer retry that stops/rebuilds the facade and re-syncs with a short delay between attempts, forcing the SDK to repopulate its coin index. Cold airdrop now succeeds in ~30s; warm follow-ups are unaffected.
+- **Proof-server readiness gate in `mn localnet up`** — the proof-server container has no Docker healthcheck, so it could report "running" while still warming up. An immediately-following transfer would fail with `"Failed to prove transaction"` from the SDK's HTTP prover client. `mn localnet up` now polls `GET <proofServer>/` as a fourth readiness gate (after Docker-healthy, chain-first-block, indexer-funded) before declaring the network ready.
 
 ### Changed
 
