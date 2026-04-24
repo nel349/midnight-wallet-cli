@@ -71,6 +71,34 @@ cache + treat as cold start.
 4. **Best-effort on RPC failure** (skip check, don't block). Offline dev works.
 5. **Back-compat:** caches without `chainId` are treated as valid. Next save adds the field.
 
+## Known residual race: WalletFacade cold-start vs. localnet_up
+
+**Where it shows up:** a fresh MCP session fires `midnight_airdrop` within
+a second of `midnight_localnet_up` returning → airdrop's WalletFacade
+subscription resolves as `isStrictlyComplete()` with `unshielded.balance = 0`
+even though the indexer has already ingested the genesis UTXO. Direct
+CLI `mn balance <genesis-address>` (lightweight GraphQL path) sees the
+funds fine; `mn airdrop` after a ~60s settle also works.
+
+**Root cause (hypothesis):** the SDK's subscription-based sync has a
+narrow window where it signals completion before observing the first
+batch of events. Affects any cold-facade build that races the indexer's
+first emission, not something the CLI can fully eliminate without SDK
+changes.
+
+**Mitigation shipped in `lib/transfer.ts`:** after sync completes, if
+the network is `undeployed` and the balance reads 0 where we expected
+funds, retry the sync up to 2× with a 3-second delay before raising
+`INSUFFICIENT_BALANCE`. On remote networks (preprod/preview) the same
+zero-balance signal is a genuine "fund your wallet" error, so retry is
+suppressed there to avoid wasted latency.
+
+**Not mitigated:** the same race could in principle affect other
+facade-based reads on localnet. If it surfaces, apply the same
+bounded-retry pattern. A real fix requires the SDK to defer
+`isStrictlyComplete()` until at least one event batch has been
+processed.
+
 ## Separate but related: `mn localnet up` readiness gap
 
 Surfaced by the blank-start measurement — `localnet_up` returns when

@@ -638,9 +638,32 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
-    // Check balance
+    // Check balance — with a localnet-only "cold facade" retry. A fresh
+    // WalletFacade built immediately after `mn localnet up` returns can have
+    // its subscription resolve as "strictly complete" with balance=0 before
+    // the indexer has surfaced the wallet's UTXOs. Retry a couple of times
+    // with a short delay before declaring funds missing. On remote networks
+    // this is a real "fund me first" error, so we don't retry there.
     verbose('transfer', 'Sync complete, checking balance...');
-    const unshieldedBalance = syncedState.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
+    let unshieldedBalance = syncedState.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
+    const COLD_FACADE_MAX_RETRIES = 2;
+    const COLD_FACADE_DELAY_MS = 3_000;
+    if (!isRemote) {
+      for (let r = 0; r < COLD_FACADE_MAX_RETRIES && unshieldedBalance === 0n && unshieldedBalance < amount; r++) {
+        onDust?.(`Balance reads 0 — likely a cold-facade race, retrying in ${COLD_FACADE_DELAY_MS / 1000}s...`);
+        verbose('transfer', `Balance=0 after sync on localnet — retry ${r + 1}/${COLD_FACADE_MAX_RETRIES}`);
+        await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, COLD_FACADE_DELAY_MS));
+        if (signal?.aborted) throw new Error('Operation cancelled');
+        syncedState = await startAndSyncFacade(bundle, {
+          onProgress: onSync,
+          onSyncDetail,
+          timeoutMs: syncTimeoutMs,
+          syncMode: 'lite',
+          requireStrictSync: true,
+        });
+        unshieldedBalance = syncedState.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
+      }
+    }
     verbose('transfer', `Balance: ${Number(unshieldedBalance) / TOKEN_MULTIPLIER} NIGHT`);
     if (unshieldedBalance < amount) {
       const haveNight = Number(unshieldedBalance) / TOKEN_MULTIPLIER;
