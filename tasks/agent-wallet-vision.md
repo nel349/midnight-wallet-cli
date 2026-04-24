@@ -202,4 +202,4 @@ Midnight Agent Wallet Standard
 5. Present to Midnight team (Nightforce, Charles) — still open
 6. Decide if this becomes its own project or stays part of CLI + Kuira — still open
 
-See `docs/tasks/cli-dev-ux-plan.md` for the full shipped/deferred matrix.
+See `docs/tasks/archived/cli-dev-ux-plan.md` for the full shipped/deferred matrix.

@@ -111,4 +111,4 @@ Each phase ships independently, with a measurement re-run in its PR.
 | MCP skill file | `docs/SKILL.md` |
 | MCP wrapper | `src/lib/run-command.ts` |
 | MCP server | `src/mcp-server.ts` |
-| CLI dev-ux plan | `docs/tasks/cli-dev-ux-plan.md` |
+| CLI dev-ux plan (shipped) | `docs/tasks/archived/cli-dev-ux-plan.md` |
