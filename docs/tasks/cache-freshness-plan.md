@@ -1,6 +1,6 @@
 # Cache Freshness Detection Plan
 
-## Status: S1 in flight 2026-04-23. S2 + S3 deferred.
+## Status: S1 shipped 2026-04-23. Residual-race fix shipped 2026-04-23. S2 + S3 deferred.
 
 ## Goal
 
@@ -71,33 +71,45 @@ cache + treat as cold start.
 4. **Best-effort on RPC failure** (skip check, don't block). Offline dev works.
 5. **Back-compat:** caches without `chainId` are treated as valid. Next save adds the field.
 
-## Known residual race: WalletFacade cold-start vs. localnet_up
+## Residual race: WalletFacade cold-start vs. localnet_up (fixed 2026-04-23)
 
-**Where it shows up:** a fresh MCP session fires `midnight_airdrop` within
-a second of `midnight_localnet_up` returning → airdrop's WalletFacade
-subscription resolves as `isStrictlyComplete()` with `unshielded.balance = 0`
-even though the indexer has already ingested the genesis UTXO. Direct
-CLI `mn balance <genesis-address>` (lightweight GraphQL path) sees the
-funds fine; `mn airdrop` after a ~60s settle also works.
+**Where it shows up:** a fresh MCP session or shell fires `mn airdrop`
+within a second of `mn localnet up` returning. The facade's state
+observable emits a snapshot with coins populated (balance reads 5 UTXOs
+correctly), but `transferTransaction`'s internal `#balanceSegment` coin
+index is still empty → throws `Wallet.InsufficientFunds` at tx-build
+time. Direct `mn balance <genesis>` (lightweight GraphQL path) sees the
+funds fine; `mn airdrop` after a ~30s settle also works.
 
-**Root cause (hypothesis):** the SDK's subscription-based sync has a
-narrow window where it signals completion before observing the first
-batch of events. Affects any cold-facade build that races the indexer's
-first emission, not something the CLI can fully eliminate without SDK
-changes.
+**Root cause:** the SDK's `shareReplay` cache on the state observable
+lags the internal coin index. Once the index is stale, `quickSync` is a
+no-op — it returns the already-cached state. The only recovery is
+`stopFacade` → `buildFacade` → `startAndSyncFacade` to get a fresh
+subscription, with a small pause so the indexer can stabilise.
 
-**Mitigation shipped in `lib/transfer.ts`:** after sync completes, if
-the network is `undeployed` and the balance reads 0 where we expected
-funds, retry the sync up to 2× with a 3-second delay before raising
-`INSUFFICIENT_BALANCE`. On remote networks (preprod/preview) the same
-zero-balance signal is a genuine "fund your wallet" error, so retry is
-suppressed there to avoid wasted latency.
+**Earlier mitigation (insufficient):** a balance-reads-0 retry after
+sync. Didn't trigger in this bug because the state snapshot *did* show
+coins — the zero only appeared inside the SDK at tx-build time.
 
-**Not mitigated:** the same race could in principle affect other
-facade-based reads on localnet. If it surfaces, apply the same
-bounded-retry pattern. A real fix requires the SDK to defer
-`isStrictlyComplete()` until at least one event batch has been
-processed.
+**Fix shipped in `lib/transfer.ts`:**
+- New `isSdkInsufficientFundsError` distinguishes the SDK's
+  `Wallet.InsufficientFunds` (raised as `_tag` or bare message) from our
+  own pre-flight `Insufficient balance:` error.
+- `buildAndSubmitTransfer` bubbles that error up instead of looping on
+  `quickSync` (which used to spin ~870k iterations over 2 min before
+  failing).
+- `executeTransfer` wraps `ensureDust + buildAndSubmitTransfer` in a
+  bounded outer retry (5 attempts × 5s delay). On `InsufficientFunds`:
+  `stopFacade`, wait, rebuild the facade from the cache, re-sync, retry.
+- Happy path unaffected — the retry only fires on the specific SDK error.
+
+**Measured:** cold localnet + `mn airdrop --json` succeeds in ~30s (was
+120s failure). Warm follow-up succeeds in ~19s with no retry overhead.
+
+**Not mitigated:** the same race could affect other facade-based writes
+on a cold localnet. Apply the same bounded-retry pattern if it surfaces.
+A real fix still requires the SDK to defer its sync-complete signal
+until the coin index is populated.
 
 ## Separate but related: `mn localnet up` readiness gap
 

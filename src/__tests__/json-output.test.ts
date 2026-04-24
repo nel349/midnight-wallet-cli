@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { parseArgs } from '../lib/argv.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
 import { classifyError, EXIT_WALLET_NOT_FOUND, EXIT_INVALID_ARGS, EXIT_CANCELLED, EXIT_NETWORK_ERROR, EXIT_INSUFFICIENT_BALANCE, EXIT_TX_REJECTED, EXIT_GENERAL_ERROR, ERROR_CODES } from '../lib/exit-codes.ts';
-import { suppressStderr, writeJsonResult, writeJsonError } from '../lib/json-output.ts';
+import { writeJsonResult, writeJsonError } from '../lib/json-output.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -109,34 +109,6 @@ describe('classifyError', () => {
     const { exitCode, errorCode } = classifyError(new Error('Something unexpected happened'));
     expect(exitCode).toBe(EXIT_GENERAL_ERROR);
     expect(errorCode).toBe(ERROR_CODES.UNKNOWN);
-  });
-});
-
-// ── suppressStderr ────────────────────────────────────────
-describe('suppressStderr', () => {
-  it('suppresses stderr writes', () => {
-    io.restore(); // Need real stderr for this test
-    const realIo = captureOutput();
-    const restore = suppressStderr();
-    process.stderr.write('should be suppressed');
-    restore();
-    // After restore, the captureOutput mock was removed by suppressStderr
-    // so we verify the suppression happened by checking that
-    // the stderr captured nothing while suppressed
-    expect(realIo.stderr()).toBe('');
-    realIo.restore();
-    io = captureOutput(); // Re-capture for afterEach
-  });
-
-  it('restores stderr when called', () => {
-    io.restore();
-    const restore = suppressStderr();
-    restore();
-    const realIo = captureOutput();
-    process.stderr.write('after restore');
-    expect(realIo.stderr()).toBe('after restore');
-    realIo.restore();
-    io = captureOutput();
   });
 });
 

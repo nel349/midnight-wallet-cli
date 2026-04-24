@@ -163,6 +163,22 @@ export function isDustRelatedError(err: any): boolean {
     isTransactionRejectedError(err);
 }
 
+/**
+ * Match the SDK's `Wallet.InsufficientFunds` error surfaced from
+ * `transferTransaction`. Distinct from our own pre-flight "Insufficient
+ * balance" (that message starts with "Insufficient balance:"). The SDK
+ * raises this from `#balanceSegment` when its internal coin index is
+ * empty — which on a freshly-started localnet can happen even though the
+ * state snapshot the facade just emitted shows UTXOs. Recovery is a full
+ * facade restart, not an in-place quick-sync.
+ */
+export function isSdkInsufficientFundsError(err: any): boolean {
+  const msg = err?.message?.toLowerCase() ?? '';
+  const tag = err?._tag;
+  if (tag === 'Wallet.InsufficientFunds') return true;
+  return msg === 'insufficient funds' || msg.startsWith('insufficient funds');
+}
+
 /** Format dust specks to human-readable DUST string (e.g. "0.300000"). Lib-layer safe (no UI import). */
 function dustToString(specks: bigint): string {
   const abs = specks < 0n ? -specks : specks;
@@ -461,6 +477,13 @@ async function buildAndSubmitTransfer(
         continue;
       }
 
+      // SDK "insufficient funds" means the internal coin index is empty
+      // even though we pre-flight-checked the balance. Bubble up — the
+      // outer retry in executeTransfer will restart the facade.
+      if (isSdkInsufficientFundsError(err)) {
+        throw err;
+      }
+
       // Dust-related: check sufficiency, re-ensure dust, then retry
       if (isDustRelatedError(err) && Date.now() < dustDeadline) {
         const elapsed = formatElapsed(Date.now() - startTime);
@@ -638,33 +661,10 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
-    // Check balance — with a localnet-only "cold facade" retry. A fresh
-    // WalletFacade built immediately after `mn localnet up` returns can have
-    // its subscription resolve as "strictly complete" with balance=0 before
-    // the indexer has surfaced the wallet's UTXOs. Retry a couple of times
-    // with a short delay before declaring funds missing. On remote networks
-    // this is a real "fund me first" error, so we don't retry there.
     verbose('transfer', 'Sync complete, checking balance...');
-    let unshieldedBalance = syncedState.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
-    const COLD_FACADE_MAX_RETRIES = 2;
-    const COLD_FACADE_DELAY_MS = 3_000;
-    if (!isRemote) {
-      for (let r = 0; r < COLD_FACADE_MAX_RETRIES && unshieldedBalance === 0n && unshieldedBalance < amount; r++) {
-        onDust?.(`Balance reads 0 — likely a cold-facade race, retrying in ${COLD_FACADE_DELAY_MS / 1000}s...`);
-        verbose('transfer', `Balance=0 after sync on localnet — retry ${r + 1}/${COLD_FACADE_MAX_RETRIES}`);
-        await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, COLD_FACADE_DELAY_MS));
-        if (signal?.aborted) throw new Error('Operation cancelled');
-        syncedState = await startAndSyncFacade(bundle, {
-          onProgress: onSync,
-          onSyncDetail,
-          timeoutMs: syncTimeoutMs,
-          syncMode: 'lite',
-          requireStrictSync: true,
-        });
-        unshieldedBalance = syncedState.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
-      }
-    }
-    verbose('transfer', `Balance: ${Number(unshieldedBalance) / TOKEN_MULTIPLIER} NIGHT`);
+    const unshieldedBalance = syncedState.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
+    const availableCoinCount = syncedState.unshielded.availableCoins?.length ?? 0;
+    verbose('transfer', `Balance: ${Number(unshieldedBalance) / TOKEN_MULTIPLIER} NIGHT, coins: ${availableCoinCount}`);
     if (unshieldedBalance < amount) {
       const haveNight = Number(unshieldedBalance) / TOKEN_MULTIPLIER;
       throw new Error(
@@ -673,40 +673,70 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
       );
     }
 
-    if (signal?.aborted) throw new Error('Operation cancelled');
-
-    // Ensure dust — pass syncedState to avoid shareReplay stale-read
-    verbose('transfer', 'Ensuring dust availability...');
-    await ensureDust(bundle, onDust, syncedState);
-    verbose('transfer', 'Dust available');
-
-    // Pre-flight: fail fast if dust exists but is below the minimum for a transfer.
-    // The actual fee = feesWithMargin(tx, params, 5) + DUST_COST_OVERHEAD (~0.5 DUST total).
-    // Without this check, the transfer would fail inside the SDK and enter a 2-minute
-    // retry loop that can never succeed (ensureDust keeps returning alreadyAvailable
-    // because dust > 0, but the SDK can't build transactions with insufficient dust).
-    const dustBalance = syncedState.dust.balance(new Date());
-    if (dustBalance > 0n && dustBalance < MIN_DUST_FOR_TRANSFER) {
+    // Pre-flight dust-below-threshold check using the initial synced state.
+    // Facade restart won't change this outcome, so fail fast here.
+    const initialDustBalance = syncedState.dust.balance(new Date());
+    if (initialDustBalance > 0n && initialDustBalance < MIN_DUST_FOR_TRANSFER) {
       throw new Error(
         `Insufficient dust for transaction fees.\n` +
-        `Available: ${dustToString(dustBalance)} DUST, need ≥${dustToString(MIN_DUST_FOR_TRANSFER)} DUST.\n` +
+        `Available: ${dustToString(initialDustBalance)} DUST, need ≥${dustToString(MIN_DUST_FOR_TRANSFER)} DUST.\n` +
         `Dust regenerates over time from registered NIGHT UTXOs.\n` +
         `Check status: midnight dust status`
       );
     }
 
-    if (signal?.aborted) throw new Error('Operation cancelled');
+    // Cold-start race: on a freshly-started localnet the facade's state
+    // observable emits a snapshot with coins *before* the SDK's internal
+    // coin index (used by transferTransaction's #balanceSegment) is
+    // populated. Result: InsufficientFunds at tx-build time even though
+    // the pre-flight balance check just saw N coins. In-place retry via
+    // quickSync doesn't help — the stale index is in the subscription's
+    // shareReplay buffer. A full facade stop/rebuild re-primes it, but
+    // needs a small pause to let the indexer catch up between attempts.
+    const MAX_COLD_START_ATTEMPTS = 5;
+    const COLD_START_DELAY_MS = 5_000;
+    let txHash: string | undefined;
+    for (let attempt = 1; attempt <= MAX_COLD_START_ATTEMPTS; attempt++) {
+      if (signal?.aborted) throw new Error('Operation cancelled');
 
-    // Build, sign, prove, submit (re-ensures dust on retry)
-    verbose('transfer', 'Building and submitting transaction...');
-    const txHash = await buildAndSubmitTransfer(
-      bundle,
-      decodedAddress,
-      amount,
-      onProving,
-      onSubmitting,
-      onDust,
-    );
+      try {
+        verbose('transfer', 'Ensuring dust availability...');
+        await ensureDust(bundle, onDust, syncedState);
+        verbose('transfer', 'Dust available');
+
+        if (signal?.aborted) throw new Error('Operation cancelled');
+
+        verbose('transfer', 'Building and submitting transaction...');
+        txHash = await buildAndSubmitTransfer(
+          bundle,
+          decodedAddress,
+          amount,
+          onProving,
+          onSubmitting,
+          onDust,
+        );
+        break;
+      } catch (err) {
+        if (!isSdkInsufficientFundsError(err) || attempt >= MAX_COLD_START_ATTEMPTS) throw err;
+
+        verbose('transfer', `SDK insufficient funds despite ${availableCoinCount} coins in state — facade restart ${attempt + 1}/${MAX_COLD_START_ATTEMPTS} after ${COLD_START_DELAY_MS / 1000}s`);
+        onDust?.(`Refreshing wallet state (attempt ${attempt + 1}/${MAX_COLD_START_ATTEMPTS})...`);
+        await stopFacade(bundle).catch(() => {});
+        await new Promise((r) => setTimeout(r, COLD_START_DELAY_MS));
+        if (signal?.aborted) throw new Error('Operation cancelled');
+        const retryCache = useCache ? loadWalletCache(walletAddress, networkName) : null;
+        bundle = await buildFacade(seedBuffer, networkConfig, retryCache);
+        syncedState = await startAndSyncFacade(bundle, {
+          onProgress: onSync,
+          onSyncDetail,
+          timeoutMs: syncTimeoutMs,
+          syncMode: 'lite',
+          requireStrictSync: true,
+        });
+      }
+    }
+
+    if (!txHash) throw new Error('Transfer failed: no transaction hash returned');
 
     // Save cache after successful transfer (post-tx state has updated UTXOs)
     if (useCache) {

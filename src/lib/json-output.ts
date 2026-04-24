@@ -1,18 +1,16 @@
 // JSON output utilities for --json mode
-// Handles stderr suppression, structured JSON output, and JSON error formatting
+// Structured JSON result/error output to stdout. Stderr stays untouched:
+// spinners and chrome continue to flow to stderr under --json, which matches
+// the UNIX convention (stdout = data, stderr = chrome/progress) and lets
+// pipes like `cmd --json | jq` work without extra wiring.
+//
+// An earlier version monkey-patched process.stderr.write to hide chrome in
+// --json mode. That violated Node's stream.write() callback contract in
+// subtle ways (libraries awaiting writes could hang) and provided no real
+// benefit — stderr output doesn't pollute the stdout JSON that consumers
+// actually read. Simpler to not suppress stderr at all.
 
 import { type ErrorCode } from './exit-codes.ts';
-
-/**
- * Replace process.stderr.write with a no-op to suppress all stderr output
- * (spinners, headers, animations, formatted details).
- * Returns a function that restores the original stderr.write.
- */
-export function suppressStderr(): () => void {
-  const original = process.stderr.write;
-  process.stderr.write = (() => true) as typeof process.stderr.write;
-  return () => { process.stderr.write = original; };
-}
 
 // ── Capture target ───────────────────────────────────────
 // When set, writeJsonResult sends output to this callback instead of stdout.

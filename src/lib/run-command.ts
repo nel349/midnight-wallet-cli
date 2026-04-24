@@ -14,9 +14,12 @@ type CommandHandler = (args: ParsedArgs, signal?: AbortSignal) => Promise<void>;
  * This avoids hijacking process.stdout.write, which would conflict with
  * the MCP StdioServerTransport that also writes to stdout.
  *
- * Suppresses all stderr (spinners, formatting).
- * Returns the parsed JSON object.
- * Throws the original error if the handler throws.
+ * Stderr is left untouched — chrome/spinners flow to the MCP server's
+ * stderr, which clients typically log separately. See lib/json-output.ts
+ * header for why monkey-patching process.stderr.write was removed.
+ *
+ * Returns the parsed JSON object. Throws the original error if the
+ * handler throws.
  */
 export async function captureCommand(
   handler: CommandHandler,
@@ -24,16 +27,9 @@ export async function captureCommand(
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const chunks: string[] = [];
-
-  // Redirect writeJsonResult output to our buffer
   setCaptureTarget((json) => chunks.push(json));
 
-  // Suppress stderr (spinners, headers, etc.)
-  const originalStderr = process.stderr.write;
-  process.stderr.write = (() => true) as typeof process.stderr.write;
-
   try {
-    // Inject --json flag
     args.flags.json = true;
     await handler(args, signal);
 
@@ -42,6 +38,5 @@ export async function captureCommand(
     return JSON.parse(raw);
   } finally {
     setCaptureTarget(null);
-    process.stderr.write = originalStderr;
   }
 }

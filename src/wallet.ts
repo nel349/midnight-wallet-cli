@@ -6,7 +6,7 @@
 import { parseArgs, hasFlag } from './lib/argv.ts';
 import { errorBox } from './ui/format.ts';
 import { classifyError } from './lib/exit-codes.ts';
-import { suppressStderr, writeJsonError } from './lib/json-output.ts';
+import { writeJsonError } from './lib/json-output.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
 import { migrateOldWallet } from './lib/wallet-config.ts';
 
@@ -34,12 +34,6 @@ const command = args.command ?? 'help';
 
 // Auto-migrate old ~/.midnight/wallet.json → wallets/default.json (silent, one-time)
 migrateOldWallet();
-
-// Suppress stderr in JSON mode (spinners, headers, animations)
-let restoreStderr: (() => void) | undefined;
-if (jsonMode) {
-  restoreStderr = suppressStderr();
-}
 
 // Global AbortController for clean shutdown on SIGINT/SIGTERM
 const abortController = new AbortController();
@@ -154,8 +148,6 @@ run().then(() => {
   }
 }).catch((err: Error) => {
   if (jsonMode) {
-    // Restore stderr so writeJsonError can work if needed
-    restoreStderr?.();
     const { exitCode, errorCode } = classifyError(err);
     writeJsonError(err, errorCode, exitCode);
     process.exit(exitCode);
