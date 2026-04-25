@@ -19,8 +19,16 @@ export const ERROR_CODES = {
   INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',
   TX_REJECTED: 'TX_REJECTED',
   STALE_UTXO: 'STALE_UTXO',
+  /** Local wallet cache disagrees with chain state (e.g. localnet reset, remote testnet re-index). Recovery: `mn cache clear --wallet <name>` then retry. */
+  STALE_CACHE: 'STALE_CACHE',
   PROOF_TIMEOUT: 'PROOF_TIMEOUT',
+  /** Proof server rejected or failed to generate the ZK proof for a write transaction. Often a stale commitment tree or an unreachable proof server. Recovery: ensure proof server is running, then retry; if persistent, `mn cache clear` to force a fresh sync. */
+  PROOF_FAILURE: 'PROOF_FAILURE',
+  /** Chain rejected the dust spend proof as malformed (substrate "Custom error 170" / `InvalidDustSpendProof`). Almost always a stale commitment tree. Recovery: `mn cache clear --wallet <name>` then retry. */
+  INVALID_DUST_PROOF: 'INVALID_DUST_PROOF',
   DUST_REQUIRED: 'DUST_REQUIRED',
+  /** Long-running wallet sync exceeded its deadline. On hosted networks this is most common during the first cold sync; retrying usually progresses since the cache resumes from the last applied event. */
+  SYNC_TIMEOUT: 'SYNC_TIMEOUT',
   CANCELLED: 'CANCELLED',
   UNKNOWN: 'UNKNOWN',
 } as const;
@@ -75,6 +83,34 @@ export function classifyError(err: Error): ClassifiedError {
   // Stale UTXO — match the specific error code from the Midnight node
   if (msg.includes('stale utxo') || msg.includes('error code 115') || msg.includes('errorcode: 115')) {
     return { exitCode: EXIT_TX_REJECTED, errorCode: ERROR_CODES.STALE_UTXO };
+  }
+
+  // Invalid dust spend proof — substrate "Custom error 170". Distinct from
+  // PROOF_FAILURE because the recovery is "clear cache" not "retry".
+  if (msg.includes('error 170') || msg.includes('errorcode: 170') || msg.includes('invaliddustspendproof')) {
+    return { exitCode: EXIT_TX_REJECTED, errorCode: ERROR_CODES.INVALID_DUST_PROOF };
+  }
+
+  // Stale local cache (e.g. `applied > highest`, `chainId mismatch`)
+  if (msg.includes('stale cache') || msg.includes('chain reset') || msg.includes('chainid mismatch') || msg.includes('applied > highest')) {
+    return { exitCode: EXIT_TX_REJECTED, errorCode: ERROR_CODES.STALE_CACHE };
+  }
+
+  // Proof server failure — SDK ClientError "Failed to prove transaction".
+  if (msg.includes('failed to prove')) {
+    return { exitCode: EXIT_TX_REJECTED, errorCode: ERROR_CODES.PROOF_FAILURE };
+  }
+
+  // Sync timeouts — wallet sync, dust waits, indexer waits.
+  if (
+    msg.includes('wallet sync timed out') ||
+    msg.includes('sync timed out') ||
+    msg.includes('timed out waiting for dust') ||
+    msg.includes('did not respond within') ||
+    msg.includes('did not produce a block') ||
+    msg.includes('did not report funds')
+  ) {
+    return { exitCode: EXIT_NETWORK_ERROR, errorCode: ERROR_CODES.SYNC_TIMEOUT };
   }
 
   // Dust required — match specific dust-related failures

@@ -13,7 +13,19 @@ integer tokens.
 
 ---
 
-## Post–Phase 4 — 2026-04-24 (this commit)
+## Post–Phase 5 — 2026-04-24 (this commit)
+
+Two adjacent improvements:
+
+1. **More structured error codes.** Added `PROOF_FAILURE`, `STALE_CACHE`, `INVALID_DUST_PROOF`, `SYNC_TIMEOUT` to `ERROR_CODES`. Several error categories that previously fell through to `UNKNOWN` (e.g. `"Failed to prove transaction"`, `"Wallet sync timed out"`, `"error 170 InvalidDustSpendProof"`) now classify into their own actionable code. Documented the full code taxonomy + recovery recipes in `docs/SKILL.md`.
+
+2. **Trim CLI suggestions out of MCP error messages.** `lib/error-trim.ts` extracts the agent-relevant prefix of an error message: drops everything after a blank line, plus any trailing line that looks like a CLI command (`midnight ...` / `mn ...`) or starts with `Try:`/`Run:`/`See:`/`Open:`. Multi-line FACT context (`"Available: 0.3 DUST, need ≥0.5 DUST"`) is preserved.
+
+**Per-error saving (representative):** `WALLET_NOT_FOUND` response 309 → 233 B (−76 B / ~22 tokens). Multi-paragraph errors (e.g. `INSUFFICIENT_BALANCE` from airdrop) save more — the suggestion suffix can be 80+ tokens.
+
+The CLI human path (`mn <cmd> --json` and the formatted `errorBox` print) is unaffected — `writeJsonError` and `errorBox` still emit the full message.
+
+## Post–Phase 4 — 2026-04-24
 
 Rolled the `_minimal` slim-shape pattern from Phase 3 out to three more
 tools. New `isMinimalMode(args)` helper in `lib/argv.ts` (with

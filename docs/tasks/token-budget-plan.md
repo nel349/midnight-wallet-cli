@@ -1,6 +1,6 @@
 # Token Budget Plan for Agent MCP Surface
 
-## Status: Phase 0+1+2+3+4 shipped. Phase 5 pending.
+## Status: All phases shipped 2026-04-24. Plan can be archived.
 
 ## Goal
 

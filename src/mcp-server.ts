@@ -14,6 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { captureCommand } from './lib/run-command.ts';
 import { classifyError, ERROR_CODES } from './lib/exit-codes.ts';
+import { trimAgentMessage } from './lib/error-trim.ts';
 import { FULL_FLAG, type ParsedArgs } from './lib/argv.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
 import { createConfirmationStore } from './lib/mcp/confirmation.ts';
@@ -773,7 +774,7 @@ function errorResponse(error: Error) {
   return {
     content: [{
       type: 'text' as const,
-      text: JSON.stringify({ error: true, code: errorCode, message: error.message }),
+      text: JSON.stringify({ error: true, code: errorCode, message: trimAgentMessage(error.message) }),
     }],
     isError: true,
   };

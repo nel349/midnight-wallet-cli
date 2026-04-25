@@ -110,6 +110,42 @@ describe('classifyError', () => {
     expect(exitCode).toBe(EXIT_GENERAL_ERROR);
     expect(errorCode).toBe(ERROR_CODES.UNKNOWN);
   });
+
+  it('classifies "Failed to prove transaction" as PROOF_FAILURE', () => {
+    const { exitCode, errorCode } = classifyError(new Error('Failed to prove transaction'));
+    expect(exitCode).toBe(EXIT_TX_REJECTED);
+    expect(errorCode).toBe(ERROR_CODES.PROOF_FAILURE);
+  });
+
+  it('classifies "Custom error 170" as INVALID_DUST_PROOF', () => {
+    const { exitCode, errorCode } = classifyError(new Error('Transaction failed: error 170 InvalidDustSpendProof'));
+    expect(exitCode).toBe(EXIT_TX_REJECTED);
+    expect(errorCode).toBe(ERROR_CODES.INVALID_DUST_PROOF);
+  });
+
+  it('classifies stale-cache messages as STALE_CACHE', () => {
+    const { exitCode, errorCode } = classifyError(new Error('Stale cache: applied > highest'));
+    expect(exitCode).toBe(EXIT_TX_REJECTED);
+    expect(errorCode).toBe(ERROR_CODES.STALE_CACHE);
+  });
+
+  it('classifies "Wallet sync timed out" as SYNC_TIMEOUT', () => {
+    const { exitCode, errorCode } = classifyError(new Error('Wallet sync timed out'));
+    expect(exitCode).toBe(EXIT_NETWORK_ERROR);
+    expect(errorCode).toBe(ERROR_CODES.SYNC_TIMEOUT);
+  });
+
+  it('classifies "Timed out waiting for dust tokens" as SYNC_TIMEOUT', () => {
+    const { exitCode, errorCode } = classifyError(new Error('Timed out waiting for dust tokens'));
+    expect(exitCode).toBe(EXIT_NETWORK_ERROR);
+    expect(errorCode).toBe(ERROR_CODES.SYNC_TIMEOUT);
+  });
+
+  it('classifies "did not respond within 30s" (proof-server gate) as SYNC_TIMEOUT', () => {
+    const { exitCode, errorCode } = classifyError(new Error('Proof server at http://localhost:6300/ did not respond within 30s'));
+    expect(exitCode).toBe(EXIT_NETWORK_ERROR);
+    expect(errorCode).toBe(ERROR_CODES.SYNC_TIMEOUT);
+  });
 });
 
 // ── writeJsonResult ───────────────────────────────────────

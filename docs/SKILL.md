@@ -73,14 +73,24 @@ Use `mn contract` commands (not MCP tools yet). Flow: `compact compile` in the p
 
 ## Error recovery recipes
 
-| Symptom | Recipe |
-|---|---|
-| "InsufficientFunds" or "could not balance dust" | Run `midnight_dust_register()` then retry once dust has accumulated (dust regenerates passively over time — exact wait depends on network parameters; check `midnight_dust_status()` until balance is non-zero). |
-| "Custom error 170" / "InvalidDustSpendProof" | Stale commitment tree (laptop slept between sync and submit). Run `midnight_cache_clear({ wallet: "<name>" })` then retry. |
-| "Wallet sync timed out" | On preprod/preview this can happen on Day 0. Retry with `mn balance` — caches progressively. Avoid `--no-cache` on hosted networks. |
-| "Unknown network" / invalid network name | Networks are `undeployed`, `preprod`, `preview`. Check `midnight_config_get({ key: "network" })`. |
-| "Wallet not found" | Check `midnight_wallet_list()` — user may have removed it. |
-| Write command hangs on preprod | Cache may be stale from a previous chain reset. `midnight_cache_clear({ wallet: "<name>" })` then retry once. |
+Every MCP tool error returns `{ error: true, code: <ERROR_CODE>, message: <human prose> }`. **Index on the `code`** — the message is human-targeted and may change. Stable codes:
+
+| Code | Meaning | Recovery |
+|---|---|---|
+| `INSUFFICIENT_BALANCE` | Wallet doesn't have enough NIGHT to cover the requested amount. | Show the user. On localnet: `midnight_airdrop({ amount: "..." })`. On hosted networks: tell user to fund the address. |
+| `DUST_REQUIRED` | Wallet has NIGHT but no DUST to pay fees (or insufficient DUST). | Run `midnight_dust_register()` then wait for dust to regenerate (passive, on-chain — check `midnight_dust_status()` until `dustAvailable: true`). |
+| `INVALID_DUST_PROOF` | Chain rejected the dust spend proof as malformed (substrate "Custom error 170"). Stale commitment tree. | `midnight_cache_clear({ wallet: "<name>" })` then retry. |
+| `STALE_CACHE` | Local wallet cache disagrees with chain (e.g. localnet reset, remote testnet re-indexed). | `midnight_cache_clear({ wallet: "<name>" })` then retry. |
+| `STALE_UTXO` | UTXO was already spent on-chain (substrate "error code 115"). | Re-sync (the next call will refresh state) and retry. |
+| `PROOF_FAILURE` | Proof server rejected or failed to generate the ZK proof. Often a stale commitment tree or unreachable proof server. | Check `midnight_status()`; if proof server healthy, `midnight_cache_clear({ wallet: "<name>" })` then retry. |
+| `PROOF_TIMEOUT` | ZK proof generation didn't finish within the deadline. | Retry — proofs can be slow under load. |
+| `SYNC_TIMEOUT` | Long-running wallet sync hit its deadline. Common on a hosted-network first-cold-sync. | Retry; the cache resumes from the last applied event so progress is preserved. |
+| `NETWORK_ERROR` | Indexer/node/proof-server connection refused or DNS failure. | Check `midnight_status()`; if localnet, `midnight_localnet_up()`. |
+| `WALLET_NOT_FOUND` | Named wallet doesn't exist on disk. | `midnight_wallet_list()` — user may have removed it. |
+| `INVALID_ARGS` | Missing/invalid argument. | Show the message to the user verbatim — it names the missing field. |
+| `TX_REJECTED` | Chain rejected the submitted transaction (catch-all when no more specific code applies). | Read the message; usually a state mismatch resolved by re-sync + retry. |
+| `CANCELLED` | Operation was aborted (SIGINT). | Don't retry without confirming with the user. |
+| `UNKNOWN` | Error didn't match any known classifier. | Surface the message to the user. If reproducible, a new code may be warranted. |
 
 ## When to use which network
 
