@@ -1,6 +1,6 @@
 # Token Budget Plan for Agent MCP Surface
 
-## Status: Drafted 2026-04-23 — decisions locked, implementation pending.
+## Status: Phase 0+1+2 shipped. Phase 3+4+5 pending.
 
 ## Goal
 

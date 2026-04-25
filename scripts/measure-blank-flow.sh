@@ -52,7 +52,7 @@ measure() {
 
 echo "=== Blank-start agent flow (wallet=$WALLET, network=$NETWORK) ==="
 measure "tools_list"        '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-measure "skill_read"        '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"midnight-wallet://skill"}}'
+measure "skill_core"        '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"midnight-wallet://skill/core"}}'
 measure "localnet_up"       '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"midnight_localnet_up"}}'
 measure "airdrop"           "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"midnight_airdrop\",\"arguments\":{\"amount\":\"1000\",\"wallet\":\"$WALLET\",\"network\":\"$NETWORK\"}}}"
 measure "dust_register"     "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"midnight_dust_register\",\"arguments\":{\"wallet\":\"$WALLET\",\"network\":\"$NETWORK\"}}}"

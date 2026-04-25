@@ -11,6 +11,7 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ### Changed
 
+- **MCP skill resource split into `/core` + `/full`.** The full skill (intent routing + safety + canonical flows + error recovery + concepts) was 8.3 KB / ~2.4k tokens — fetched on every agent session start. Now `midnight-wallet://skill/core` (~3.1 KB / ~890 tokens) carries just the routing table + non-negotiable safety rules and is the default fetch; `midnight-wallet://skill/full` (~8.3 KB) is fetched on demand for canonical flows, error recovery, and concept primers. The original `midnight-wallet://skill` URI stays as a deprecated alias to `/full` so existing MCP clients keep working without changes. Cuts ~1,500 tokens / session on the default path. Verified via `scripts/measure-blank-flow.sh`: full cold-start agent session (tools_list → skill → localnet_up → airdrop → dust_register → balance) drops from 4,518 → 3,034 tokens.
 - **Stderr no longer suppressed in `--json` mode.** Chrome (spinners, headers, progress) now flows to stderr during `--json` runs. Stdout remains JSON-only, so pipes like `mn cmd --json | jq` and redirects like `mn cmd --json 2>/dev/null` keep working. The previous `process.stderr.write` monkey-patch violated Node's stream-write callback contract in subtle ways and provided no benefit that a standard UNIX consumer actually depended on.
 
 ## [0.3.0] - 2026-04-14

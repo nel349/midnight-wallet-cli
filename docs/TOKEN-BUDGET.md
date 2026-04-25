@@ -13,7 +13,23 @@ integer tokens.
 
 ---
 
-## Post–Phase 1 — 2026-04-23 (this commit)
+## Post–Phase 2 — 2026-04-24 (this commit)
+
+Skill split per token-budget-plan D2. New URIs:
+
+- `midnight-wallet://skill/core` — intent routing + safety rules. **3,123 B / ~892 tokens.** Default fetch on session start.
+- `midnight-wallet://skill/full` — canonical flows, error recovery, concept primers. **8,322 B / ~2,378 tokens.** On-demand fetch.
+- `midnight-wallet://skill` — deprecated alias → `/full`. Not advertised in `resources/list`; existing clients keep working.
+
+`resources/list` grew slightly (302 → 656 B) since it now lists two resources instead of one.
+
+**Default-path saving: 8,317 → 3,123 B (−5,194 B / −1,484 tokens per session, −62% on the skill fetch.)**
+
+End-to-end blank-flow agent session (cold localnet → airdrop → dust register → balance) now totals **3,034 tokens** (down from 4,518 — −33%). Verified with `scripts/measure-blank-flow.sh`.
+
+If an agent fetches BOTH /core and /full in the same session (e.g. hits an error), it pays 3,123 + 8,322 = 11,445 B (net +3,128 B vs. the legacy single fetch). The core skill explicitly directs agents to fetch /full only on errors / multi-step flows / concept questions, so the savings hold for the common path.
+
+## Post–Phase 1 — 2026-04-23
 
 Phase 1 trimmed `tools/list` descriptions (drops verbose prose,
 redundant property descriptions, `network` enum recitation, repeated
@@ -70,7 +86,7 @@ hit — regressions beyond it fail review.
 | Phase | Call affected | Baseline bytes | Target bytes | Target tokens | Actual |
 |---|---|---:|---:|---:|---:|
 | 1 | `tools/list` | 9,488 | ~~≤ 4,500~~ **≤ 5,800** | ≤ 1,660 | **5,663 ✅** |
-| 2 | `resources/read` (skill/core) | 8,317 | **≤ 4,500** | ≤ 1,285 | — |
+| 2 | `resources/read` (skill/core) | 8,317 | **≤ 4,500** | ≤ 1,285 | **3,123 ✅** |
 | 3 | `wallet_list` (agent default, 6 wallets) | 16,109 | **≤ 3,500** | ≤ 1,000 | — |
 | 4 | `wallet_info` (agent default) | 1,209 | **≤ 500** | ≤ 145 | — |
 | 4 | `balance` (agent default) | 563 | **≤ 400** | ≤ 115 | — |

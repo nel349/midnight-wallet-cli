@@ -18,10 +18,18 @@ import type { ParsedArgs } from './lib/argv.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
 import { createConfirmationStore } from './lib/mcp/confirmation.ts';
 
-// Skill file — teaches MCP clients how to use this CLI conversationally.
-// Exposed as an MCP resource so any client can fetch it via resources/read.
-const SKILL_URI = 'midnight-wallet://skill';
-const SKILL_PATH = fileURLToPath(new URL('../docs/SKILL.md', import.meta.url));
+// Skill resources — teach MCP clients how to use this CLI conversationally.
+// Split into:
+//   - /core: intent routing + safety rules. ~830 tokens. Fetch on session start.
+//   - /full: canonical flows, error recovery, concept primers. ~2.3k tokens.
+//           Fetch on demand (errors, multi-step flows, concept questions).
+// The original `midnight-wallet://skill` URI stays as a deprecated alias for
+// /full so existing MCP clients keep working.
+const SKILL_CORE_URI = 'midnight-wallet://skill/core';
+const SKILL_FULL_URI = 'midnight-wallet://skill/full';
+const SKILL_LEGACY_URI = 'midnight-wallet://skill';
+const SKILL_CORE_PATH = fileURLToPath(new URL('../docs/SKILL-CORE.md', import.meta.url));
+const SKILL_FULL_PATH = fileURLToPath(new URL('../docs/SKILL.md', import.meta.url));
 
 // ── Tool definitions ────────────────────────────────────────
 
@@ -633,26 +641,38 @@ const server = new Server(
   { capabilities: { tools: {}, resources: {} } },
 );
 
-// ── Resource: skill file ───────────────────────────────────
+// ── Resources: skill files (core + full + deprecated alias) ───
 server.setRequestHandler(ListResourcesRequestSchema, async () => ({
   resources: [
     {
-      uri: SKILL_URI,
-      name: 'midnight-wallet skill',
-      description: 'Conversational guide for using midnight-wallet-cli. Read this first to learn intent routing, canonical flows, safety rules, and error recovery.',
+      uri: SKILL_CORE_URI,
+      name: 'midnight-wallet skill (core)',
+      description: 'Read this first. Intent routing table + non-negotiable safety rules. ~830 tokens. Fetch /full on demand for canonical flows, error recovery, and concept primers.',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: SKILL_FULL_URI,
+      name: 'midnight-wallet skill (full)',
+      description: 'Canonical multi-step flows, error-recovery recipes, concept primers (NIGHT/DUST/shielded), network selection. Fetch on demand when you hit an error, start a multi-step flow, or need to explain a concept.',
       mimeType: 'text/markdown',
     },
   ],
 }));
 
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  if (request.params.uri !== SKILL_URI) {
-    throw new Error(`Unknown resource: ${request.params.uri}`);
+  const uri = request.params.uri;
+  if (uri === SKILL_CORE_URI) {
+    const text = readFileSync(SKILL_CORE_PATH, 'utf-8');
+    return { contents: [{ uri, mimeType: 'text/markdown', text }] };
   }
-  const text = readFileSync(SKILL_PATH, 'utf-8');
-  return {
-    contents: [{ uri: SKILL_URI, mimeType: 'text/markdown', text }],
-  };
+  // Legacy `midnight-wallet://skill` aliases to /full so existing clients keep
+  // working. Not advertised in resources/list — new clients should use
+  // /core + /full explicitly.
+  if (uri === SKILL_FULL_URI || uri === SKILL_LEGACY_URI) {
+    const text = readFileSync(SKILL_FULL_PATH, 'utf-8');
+    return { contents: [{ uri, mimeType: 'text/markdown', text }] };
+  }
+  throw new Error(`Unknown resource: ${uri}`);
 });
 
 // List available tools
