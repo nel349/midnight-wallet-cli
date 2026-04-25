@@ -18,6 +18,15 @@ type CommandHandler = (args: ParsedArgs, signal?: AbortSignal) => Promise<void>;
  * stderr, which clients typically log separately. See lib/json-output.ts
  * header for why monkey-patching process.stderr.write was removed.
  *
+ * Also opts every MCP-invoked command into agent-slim mode by injecting
+ * `_minimal: true` into args.flags. Handlers that opt in (currently:
+ * wallet list) emit a smaller JSON shape for agents while keeping
+ * `mn <cmd> --json` (human path) byte-for-byte identical, since humans
+ * never go through captureCommand. Tool handlers expose a `full: true`
+ * escape hatch by setting `_full: true` in args.flags — handlers treat
+ * that as "agent explicitly wants the full shape" and emit the human
+ * shape instead.
+ *
  * Returns the parsed JSON object. Throws the original error if the
  * handler throws.
  */
@@ -31,6 +40,9 @@ export async function captureCommand(
 
   try {
     args.flags.json = true;
+    if (!('_minimal' in args.flags)) {
+      args.flags._minimal = true;
+    }
     await handler(args, signal);
 
     const raw = chunks.join('').trim();

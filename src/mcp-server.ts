@@ -141,18 +141,25 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_wallet_list',
-    description: 'List wallets.',
+    description: 'List wallets. Default: per-wallet { name, active, network, address, shieldedAddress } scoped to the active network. Pass { full: true } for the 3-network addresses + shieldedAddresses maps.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        full: {
+          type: 'boolean',
+          description: 'Return full per-network addresses + shieldedAddresses maps (the same shape `mn wallet list --json` emits). Default false (slim).',
+        },
+      },
     },
-    async handler() {
+    async handler({ full }: { full?: boolean } = {}) {
+      const flags: Record<string, string | true> = { json: true };
+      if (full) flags._full = true;
       const args: ParsedArgs = {
         command: 'wallet',
         subcommand: 'list',
         positionals: [],
-        flags: { json: true },
+        flags,
       };
       const handler = await importHandler('wallet');
       return captureCommand(handler, args);

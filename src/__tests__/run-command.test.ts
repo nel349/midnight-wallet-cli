@@ -119,4 +119,32 @@ describe('captureCommand', () => {
     expect(io.stdout()).toBe('test-stdout');
     expect(io.stderr()).toBe('test-stderr');
   });
+
+  describe('_minimal flag injection', () => {
+    // Use a no-op handler so we can observe the args object after captureCommand
+    // mutates it, without depending on any real command's behavior.
+    const captureArgs = (sink: { args?: ParsedArgs }) =>
+      async (a: ParsedArgs) => { sink.args = a; };
+
+    it('injects _minimal: true by default', async () => {
+      const sink: { args?: ParsedArgs } = {};
+      await captureCommand(captureArgs(sink), { command: 'x', subcommand: undefined, positionals: [], flags: {} });
+      expect(sink.args?.flags._minimal).toBe(true);
+    });
+
+    it('also sets json: true', async () => {
+      const sink: { args?: ParsedArgs } = {};
+      await captureCommand(captureArgs(sink), { command: 'x', subcommand: undefined, positionals: [], flags: {} });
+      expect(sink.args?.flags.json).toBe(true);
+    });
+
+    it('does not override an explicitly-set _minimal flag', async () => {
+      const sink: { args?: ParsedArgs } = {};
+      // Tool handler may want to opt out (e.g. when an agent passes full:true,
+      // it sets _full:true; the wallet-list handler reads both flags).
+      await captureCommand(captureArgs(sink), { command: 'x', subcommand: undefined, positionals: [], flags: { _minimal: true, _full: true } });
+      expect(sink.args?.flags._minimal).toBe(true);
+      expect(sink.args?.flags._full).toBe(true);
+    });
+  });
 });

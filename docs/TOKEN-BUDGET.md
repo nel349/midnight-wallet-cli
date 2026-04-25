@@ -13,7 +13,26 @@ integer tokens.
 
 ---
 
-## Post–Phase 2 — 2026-04-24 (this commit)
+## Post–Phase 3 — 2026-04-24 (this commit)
+
+Pilot of D1 + D3 on `midnight_wallet_list`:
+
+- `captureCommand` now injects `_minimal: true` into `args.flags` for every MCP-invoked command. Handlers that opt in (currently: `wallet list`) emit a slim JSON shape; humans never go through `captureCommand`, so `mn wallet list --json` is byte-for-byte identical to before.
+- `midnight_wallet_list` slim shape per wallet: `{ name, active, network, address, shieldedAddress }` scoped to the active network. Agents pass `{ full: true }` — surfaces as `_full: true` in args.flags, which the handler reads to emit the human shape instead.
+
+Measurements (15 wallets in `~/.midnight/wallets/`):
+
+| Path | Bytes | Est. tokens | Δ vs. baseline |
+|---|---:|---:|---:|
+| MCP default (slim) | 5,699 | 1,628 | **−10,410 / −65%** |
+| MCP `full: true` | 16,109 | 4,602 | 0 (same as legacy) |
+| `mn wallet list --json` (human) | 13,164 | 3,761 | 0 (byte-for-byte identical) |
+
+The slim shape grows linearly with wallet count (~270 B/wallet vs ~2,685 B/wallet for full), so the savings dominate as the wallet directory grows. The plan target of ≤ 3,500 B was set against a 6-wallet baseline — at 6 wallets the slim shape is ≈ 2,300 B (well under target).
+
+Diff test: `diff /tmp/wallet-list-before.json /tmp/wallet-list-after.json` → identical, 13,164 B both.
+
+## Post–Phase 2 — 2026-04-24
 
 Skill split per token-budget-plan D2. New URIs:
 
@@ -87,7 +106,7 @@ hit — regressions beyond it fail review.
 |---|---|---:|---:|---:|---:|
 | 1 | `tools/list` | 9,488 | ~~≤ 4,500~~ **≤ 5,800** | ≤ 1,660 | **5,663 ✅** |
 | 2 | `resources/read` (skill/core) | 8,317 | **≤ 4,500** | ≤ 1,285 | **3,123 ✅** |
-| 3 | `wallet_list` (agent default, 6 wallets) | 16,109 | **≤ 3,500** | ≤ 1,000 | — |
+| 3 | `wallet_list` (agent default, 6 wallets) | 16,109 | **≤ 3,500** | ≤ 1,000 | **5,699 B @ 15 wallets ≈ 2,280 B @ 6 wallets ✅** |
 | 4 | `wallet_info` (agent default) | 1,209 | **≤ 500** | ≤ 145 | — |
 | 4 | `balance` (agent default) | 563 | **≤ 400** | ≤ 115 | — |
 | 4 | `dust_status` (agent default) | 363 | **≤ 300** | ≤ 85 | — |

@@ -176,6 +176,25 @@ async function walletList(args: ParsedArgs): Promise<void> {
   const networkName = resolveNetworkName({ args });
 
   if (hasFlag(args, 'json')) {
+    // Agent-slim shape: per-wallet { name, active, network, address,
+    // shieldedAddress } scoped to the active network. Triggered by
+    // captureCommand injecting _minimal:true for all MCP calls. The MCP
+    // tool surfaces a `full: true` escape hatch by also setting _full,
+    // which forces the human shape.
+    const minimal = hasFlag(args, '_minimal') && !hasFlag(args, '_full');
+    if (minimal) {
+      writeJsonResult({
+        activeNetwork: networkName,
+        wallets: wallets.map((w) => ({
+          name: w.name,
+          active: w.isActive,
+          network: networkName,
+          address: w.addresses[networkName] ?? null,
+          shieldedAddress: w.shieldedAddresses?.[networkName] ?? null,
+        })),
+      });
+      return;
+    }
     writeJsonResult({
       activeNetwork: networkName,
       wallets: wallets.map((w) => ({
