@@ -144,8 +144,8 @@ midnight transfer alice 100 --json
 ```
 
 When `--json` is active:
-- stdout receives a single line of JSON
-- stderr is fully suppressed (no spinners, no formatting)
+- stdout receives a single line of JSON (the data)
+- stderr keeps showing chrome (spinners, headers, progress) — pipe through `2>/dev/null` if you need it gone
 - Errors produce: `{"error":true,"code":"...","message":"...","exitCode":N}`
 
 Run `midnight help --json` for a full capability manifest, or `midnight help --agent` for a comprehensive AI agent reference.
@@ -229,34 +229,59 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 ### Available MCP Tools
 
-Once connected, your AI agent gets access to 24 tools:
+Once connected, your AI agent gets access to 25 tools:
 
 | Tool | Description |
 |------|-------------|
 | `midnight_wallet_generate` | Create a named wallet |
-| `midnight_wallet_list` | List all wallets |
+| `midnight_wallet_list` | List all wallets (slim by default — see "Agent-slim responses" below) |
 | `midnight_wallet_use` | Set active wallet |
-| `midnight_wallet_info` | Show wallet details |
+| `midnight_wallet_info` | Show wallet details (slim by default) |
 | `midnight_wallet_remove` | Remove a wallet |
-| `midnight_generate` | Generate a wallet (deprecated) |
 | `midnight_info` | Show wallet info (no secrets) |
-| `midnight_balance` | Check NIGHT balance |
+| `midnight_balance` | Check NIGHT balance (slim by default) |
 | `midnight_address` | Derive address from seed |
 | `midnight_genesis_address` | Show genesis wallet address |
 | `midnight_inspect_cost` | Show block cost limits |
 | `midnight_airdrop` | Fund wallet from genesis |
-| `midnight_transfer` | Send NIGHT tokens |
+| `midnight_transfer` | Send NIGHT tokens (returns a pending token; confirm with `midnight_confirm_operation`) |
+| `midnight_confirm_operation` | Execute a previously-returned pending operation (transfer confirmation flow) |
 | `midnight_dust_register` | Register UTXOs for dust generation |
-| `midnight_dust_status` | Check dust status |
+| `midnight_dust_status` | Check dust status (slim by default) |
 | `midnight_config_get` | Read config value |
 | `midnight_config_set` | Write config value |
 | `midnight_config_unset` | Remove config value |
 | `midnight_cache_clear` | Clear wallet state cache |
+| `midnight_status` | Network health check (indexer + node + proof server latency) |
 | `midnight_localnet_up` | Start local network |
 | `midnight_localnet_stop` | Stop local network |
 | `midnight_localnet_down` | Remove local network |
 | `midnight_localnet_status` | Show service status |
 | `midnight_localnet_clean` | Remove conflicting containers |
+
+#### Agent-slim responses
+
+`wallet_list`, `wallet_info`, `balance`, and `dust_status` return a slim JSON shape by default — agents pay roughly half the tokens of the legacy `--json` shape. Pass `{ full: true }` to get the same shape `mn <cmd> --json` emits (per-network address maps, sync internals, etc.):
+
+```js
+midnight_wallet_list()              // slim: { name, active, network, address, shieldedAddress } per wallet
+midnight_wallet_list({ full: true }) // full: per-network addresses + shieldedAddresses maps (legacy shape)
+```
+
+The CLI human paths (`mn wallet list --json`, etc.) are unchanged.
+
+#### Skill resources
+
+Two markdown resources teach agents how to use the CLI:
+
+- `midnight-wallet://skill/core` — intent routing + safety rules. ~890 tokens. Fetch on session start.
+- `midnight-wallet://skill/full` — canonical flows, error recovery, concept primers. ~2.4k tokens. Fetch on demand (errors, multi-step flows).
+
+The legacy `midnight-wallet://skill` URI still works as an alias for `/full`.
+
+#### Structured error codes
+
+Every tool error returns `{ error: true, code: <CODE>, message: <human prose> }`. Agents should index on the stable `code` (`INSUFFICIENT_BALANCE`, `DUST_REQUIRED`, `INVALID_DUST_PROOF`, `STALE_CACHE`, `PROOF_FAILURE`, `SYNC_TIMEOUT`, `NETWORK_ERROR`, `WALLET_NOT_FOUND`, `INVALID_ARGS`, `TX_REJECTED`, `STALE_UTXO`, `PROOF_TIMEOUT`, `CANCELLED`, `UNKNOWN`) — full taxonomy + recovery recipes are in `docs/SKILL.md`.
 
 ## Issues & Feedback
 

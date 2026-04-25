@@ -4,10 +4,24 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`mn dev` — iteration loop for Compact contract development.** Detects the project, ensures localnet is running, provisions reusable `dev-alice`/`dev-bob`/`dev-carol` wallets (with airdrop + dust register), watches `.compact` files and recompiles on save. Three keystrokes: `d` deploys the current artifact (uses `dev-alice` on `undeployed`), `t` runs the project's npm test script (`test:dev` if defined, else `test`), `q` quits cleanly. Works in monorepo layouts where the compile script lives in a sub-package.
+- **`midnight_status` MCP tool + Agent Protocol Spec.** `midnight_status` exposes the same network-health view as `mn status` (indexer + node + proof-server latency). `docs/AGENT-PROTOCOL.md` documents the contract MCP clients can rely on across releases.
+- **Two-step transfer confirmation in MCP** (`midnight_confirm_operation`). `midnight_transfer` now returns `{ pending: true, token, description, expiresAt }` instead of executing immediately. Agents must show the description to the user verbatim, then redeem the token via `midnight_confirm_operation` after explicit consent. Tokens expire in 5 minutes.
+- **`mn dust register` MCP tool, `midnight_dust_register`** — was previously CLI-only.
+- **Day-0 sync ETA in `mn balance`** — long first-time shielded syncs now show an estimated time so users don't think the command is hung.
+- **Cache freshness — chain-id fingerprint (S1 of cache-freshness-plan).** Every cache file (wallet + dust-direct) records the chain's genesis block hash. On load, the CLI fetches the chain's current genesis hash and wipes the cache on mismatch. Catches cases the existing `applied > highest` detector can't (remote testnet re-index, chain switch).
+- **Layered readiness gates in `mn localnet up`.** After Docker reports healthy, the CLI now also waits for: (1) the substrate node to produce block 1, (2) the indexer to ingest the genesis address's UTXOs, and (3) the proof server's HTTP root to respond. Eliminates a class of "Failed to prove transaction" / `INSUFFICIENT_BALANCE` failures from immediately-following commands.
+- **Token-budget measurement scripts.** `scripts/measure-mcp-tokens.sh` (per-tool) and `scripts/measure-blank-flow.sh` (full cold-start agent path). Used as regression checks for MCP response sizes.
+
 ### Fixed
 
 - **Cold-start race on fresh localnet** — `mn airdrop` (and other transfers) against a just-started localnet would retry tightly for 120s and then fail with `INSUFFICIENT_BALANCE`, even though the genesis address had funds. Root cause: the facade's state observable emits a snapshot with coins populated before the SDK's internal `#balanceSegment` coin index is built, so `transferTransaction` throws `Wallet.InsufficientFunds` at build time. Fix: new `isSdkInsufficientFundsError` distinguishes the SDK error from our own pre-flight balance check; on hit, `executeTransfer` performs a bounded outer retry that stops/rebuilds the facade and re-syncs with a short delay between attempts, forcing the SDK to repopulate its coin index. Cold airdrop now succeeds in ~30s; warm follow-ups are unaffected.
 - **Proof-server readiness gate in `mn localnet up`** — the proof-server container has no Docker healthcheck, so it could report "running" while still warming up. An immediately-following transfer would fail with `"Failed to prove transaction"` from the SDK's HTTP prover client. `mn localnet up` now polls `GET <proofServer>/` as a fourth readiness gate (after Docker-healthy, chain-first-block, indexer-funded) before declaring the network ready.
+- **Auto-wipe undeployed wallet caches on `mn localnet down`.** Tearing down localnet removes the chain's volumes, but cached wallet state on disk still pointed at event ids that no longer exist. The next command would hang on `applied > highest`. `mn localnet down` now clears wallet + dust-direct caches scoped to `undeployed` so the next run starts truthfully.
+- **`mn dev` deploy with witnesses.** Contracts that declare witnesses now load `dist/witnesses.js` (or `src/witnesses.js`, monorepo variants) when deploying via the `d` keystroke; pre-flight check refuses early with an actionable message if the contract declares witnesses but no implementation file exists.
+- **`q` / Ctrl+C exits `mn dev` immediately** instead of waiting for the facade to drain.
 
 ### Changed
 
@@ -16,6 +30,11 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 - **MCP `midnight_wallet_list` returns a slim per-wallet shape by default.** Each wallet entry is now `{ name, active, network, address, shieldedAddress }` scoped to the active network — `~5,700 B / ~1,628 tokens` at 15 wallets vs. `~16,100 B / ~4,602 tokens` for the legacy 3-network shape (−65%). Agents that need the full per-network maps pass `{ full: true }`. The CLI human path `mn wallet list --json` is byte-for-byte unchanged. Implemented via a new `_minimal: true` flag that `captureCommand` injects into `args.flags` for every MCP-invoked command; handlers opt in by reading the flag (currently only `wallet list`). Phase 4 will roll the same pattern out to `wallet_info`, `balance`, and `dust_status`.
 - **MCP skill resource split into `/core` + `/full`.** The full skill (intent routing + safety + canonical flows + error recovery + concepts) was 8.3 KB / ~2.4k tokens — fetched on every agent session start. Now `midnight-wallet://skill/core` (~3.1 KB / ~890 tokens) carries just the routing table + non-negotiable safety rules and is the default fetch; `midnight-wallet://skill/full` (~8.3 KB) is fetched on demand for canonical flows, error recovery, and concept primers. The original `midnight-wallet://skill` URI stays as a deprecated alias to `/full` so existing MCP clients keep working without changes. Cuts ~1,500 tokens / session on the default path. Verified via `scripts/measure-blank-flow.sh`: full cold-start agent session (tools_list → skill → localnet_up → airdrop → dust_register → balance) drops from 4,518 → 3,034 tokens.
 - **Stderr no longer suppressed in `--json` mode.** Chrome (spinners, headers, progress) now flows to stderr during `--json` runs. Stdout remains JSON-only, so pipes like `mn cmd --json | jq` and redirects like `mn cmd --json 2>/dev/null` keep working. The previous `process.stderr.write` monkey-patch violated Node's stream-write callback contract in subtle ways and provided no benefit that a standard UNIX consumer actually depended on.
+- **MCP `tools/list` trimmed by ~40%** (9,488 → 5,663 B). Drops verbose prose from tool descriptions, redundant property descriptions, the `network` enum recitation, repeated override-URL fields, and the deprecated `midnight_generate` MCP tool (CLI `mn generate` still works). Saves ~1,090 tokens per agent session bootstrap.
+
+### Removed
+
+- **`midnight_generate` MCP tool** (deprecated alias). Use `midnight_wallet_generate` instead; the CLI `mn generate` is unchanged.
 
 ## [0.3.0] - 2026-04-14
 
