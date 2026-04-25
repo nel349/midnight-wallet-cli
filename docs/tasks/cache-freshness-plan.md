@@ -130,6 +130,6 @@ substrate JSON-RPC via `ws`).
 | Artifact | Path |
 |---|---|
 | This plan | `docs/tasks/cache-freshness-plan.md` |
-| Token-budget plan | `docs/tasks/token-budget-plan.md` |
+| Token-budget plan (shipped) | `docs/tasks/archived/token-budget-plan.md` |
 | Existing StaleCacheError detector | `src/lib/facade.ts` |
 | localnet teardown cache wipe | commit `3da6f43` |

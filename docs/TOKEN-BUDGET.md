@@ -2,7 +2,7 @@
 
 Running baseline for tokens consumed when an agent uses
 `midnight-wallet-cli` via MCP. See
-[`docs/tasks/token-budget-plan.md`](./tasks/token-budget-plan.md) for the
+[`docs/tasks/archived/token-budget-plan.md`](./tasks/archived/token-budget-plan.md) for the
 policy this file tracks against.
 
 **Token estimate** = `bytes / 3.5` (conservative mid-point for JSON-heavy
