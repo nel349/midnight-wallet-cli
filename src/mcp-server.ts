@@ -14,7 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { captureCommand } from './lib/run-command.ts';
 import { classifyError, ERROR_CODES } from './lib/exit-codes.ts';
-import type { ParsedArgs } from './lib/argv.ts';
+import { FULL_FLAG, type ParsedArgs } from './lib/argv.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
 import { createConfirmationStore } from './lib/mcp/confirmation.ts';
 
@@ -71,7 +71,7 @@ function buildArgs(
     // "give me the human shape, not the slim agent shape". Translate to
     // the internal `_full` flag so handlers reading isMinimalMode pick
     // it up. No CLI command uses `--full` directly, so the rename is safe.
-    const flagKey = key === 'full' ? '_full' : key;
+    const flagKey = key === 'full' ? FULL_FLAG : key;
     if (typeof value === 'boolean') {
       if (value) flags[flagKey] = true;
     } else {
@@ -159,7 +159,7 @@ const TOOLS: ToolDef[] = [
     },
     async handler({ full }: { full?: boolean } = {}) {
       const flags: Record<string, string | true> = { json: true };
-      if (full) flags._full = true;
+      if (full) flags[FULL_FLAG] = true;
       const args: ParsedArgs = {
         command: 'wallet',
         subcommand: 'list',
@@ -211,7 +211,7 @@ const TOOLS: ToolDef[] = [
       const name = params.name as string | undefined;
       const full = params.full as boolean | undefined;
       const flags: Record<string, string | true> = { json: true };
-      if (full) flags._full = true;
+      if (full) flags[FULL_FLAG] = true;
       const args: ParsedArgs = {
         command: 'wallet',
         subcommand: 'info',
