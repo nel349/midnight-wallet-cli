@@ -67,10 +67,15 @@ function buildArgs(
 
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null) continue;
+    // Standard agent escape hatch: an MCP arg of `full: true` means
+    // "give me the human shape, not the slim agent shape". Translate to
+    // the internal `_full` flag so handlers reading isMinimalMode pick
+    // it up. No CLI command uses `--full` directly, so the rename is safe.
+    const flagKey = key === 'full' ? '_full' : key;
     if (typeof value === 'boolean') {
-      if (value) flags[key] = true;
+      if (value) flags[flagKey] = true;
     } else {
-      flags[key] = String(value);
+      flags[flagKey] = String(value);
     }
   }
 
@@ -190,21 +195,28 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_wallet_info',
-    description: 'Show wallet details.',
+    description: 'Show wallet details. Default: { name, active, network, address, shieldedAddress } scoped to the active network. Pass { full: true } for the per-network maps + createdAt + file path.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string' },
+        full: {
+          type: 'boolean',
+          description: 'Return the full per-network addresses + shieldedAddresses maps and bookkeeping fields (matches `mn wallet info <name> --json`). Default false (slim).',
+        },
       },
     },
     async handler(params) {
       const name = params.name as string | undefined;
+      const full = params.full as boolean | undefined;
+      const flags: Record<string, string | true> = { json: true };
+      if (full) flags._full = true;
       const args: ParsedArgs = {
         command: 'wallet',
         subcommand: 'info',
         positionals: name ? [name] : [],
-        flags: { json: true },
+        flags,
       };
       const handler = await importHandler('wallet');
       return captureCommand(handler, args);
@@ -251,7 +263,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_balance',
-    description: 'NIGHT balance.',
+    description: 'NIGHT balance. Default: { network, unshielded, shielded } — no echoed addresses. Pass { full: true } for the human shape including address + shieldedAddress.',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -260,6 +272,10 @@ const TOOLS: ToolDef[] = [
         wallet: { type: 'string' },
         network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
         'indexer-ws': { type: 'string' },
+        full: {
+          type: 'boolean',
+          description: 'Include the queried address + shieldedAddress in the response (matches `mn balance --json`). Default false (slim).',
+        },
       },
     },
     async handler(params) {
@@ -382,7 +398,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_dust_status',
-    description: 'Dust status.',
+    description: 'Dust status. Default: { network, registered, registeredUtxos, unregisteredUtxos, dustBalance, dustAvailable }. Pass { full: true } for sync internals (eventsApplied, ownedUtxos, cached).',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -392,6 +408,10 @@ const TOOLS: ToolDef[] = [
         node: { type: 'string' },
         'indexer-ws': { type: 'string' },
         'no-cache': { type: 'string' },
+        full: {
+          type: 'boolean',
+          description: 'Include sync internals (eventsApplied, ownedUtxos, cached) in the response (matches `mn dust status --json`). Default false (slim).',
+        },
       },
     },
     async handler(params) {

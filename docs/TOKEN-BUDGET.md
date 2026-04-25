@@ -13,7 +13,37 @@ integer tokens.
 
 ---
 
-## Post–Phase 3 — 2026-04-24 (this commit)
+## Post–Phase 4 — 2026-04-24 (this commit)
+
+Rolled the `_minimal` slim-shape pattern from Phase 3 out to three more
+tools. New `isMinimalMode(args)` helper in `lib/argv.ts` (with
+`MINIMAL_FLAG` / `FULL_FLAG` constants) replaces the inline
+`hasFlag(args, '_minimal') && !hasFlag(args, '_full')` check. The MCP
+server's `buildArgs` now translates the public `full` arg → internal
+`_full` flag automatically, so per-tool handlers just need to forward.
+
+| Tool | Slim | Full | Δ vs. legacy | Plan target |
+|---|---:|---:|---:|---:|
+| `midnight_wallet_info` | 413 B / 118 tok | 1,208 B | **−66%** | ≤ 500 B ✅ |
+| `midnight_balance` | 298 B / 85 tok | 562 B | **−47%** | ≤ 400 B ✅ |
+| `midnight_dust_status` | 261 B / 75 tok | 360 B | **−27%** | ≤ 300 B ✅ |
+
+All three `mn <cmd> --json` human paths verified byte-for-byte
+identical (or schema-identical for `dust status`, where the regenerating
+`dustBalance` value naturally varies).
+
+Slim-shape choices:
+- `wallet_info`: `{ name, active, network, address, shieldedAddress }` —
+  drops the per-network maps, `createdAt`, `file`. Agent already knows
+  which wallet it queried.
+- `balance`: `{ network, unshielded, shielded }` — drops the (long)
+  unshielded + shielded address echo and `txCount`. Agent already knows
+  which address it queried.
+- `dust_status`: `{ network, registered, registeredUtxos,
+  unregisteredUtxos, dustBalance, dustAvailable }` — drops
+  `eventsApplied`, `ownedUtxos`, `cached`, `subcommand` (sync internals).
+
+## Post–Phase 3 — 2026-04-24
 
 Pilot of D1 + D3 on `midnight_wallet_list`:
 
@@ -107,9 +137,9 @@ hit — regressions beyond it fail review.
 | 1 | `tools/list` | 9,488 | ~~≤ 4,500~~ **≤ 5,800** | ≤ 1,660 | **5,663 ✅** |
 | 2 | `resources/read` (skill/core) | 8,317 | **≤ 4,500** | ≤ 1,285 | **3,123 ✅** |
 | 3 | `wallet_list` (agent default, 6 wallets) | 16,109 | **≤ 3,500** | ≤ 1,000 | **5,699 B @ 15 wallets ≈ 2,280 B @ 6 wallets ✅** |
-| 4 | `wallet_info` (agent default) | 1,209 | **≤ 500** | ≤ 145 | — |
-| 4 | `balance` (agent default) | 563 | **≤ 400** | ≤ 115 | — |
-| 4 | `dust_status` (agent default) | 363 | **≤ 300** | ≤ 85 | — |
+| 4 | `wallet_info` (agent default) | 1,209 | **≤ 500** | ≤ 145 | **413 ✅** |
+| 4 | `balance` (agent default) | 563 | **≤ 400** | ≤ 115 | **298 ✅** |
+| 4 | `dust_status` (agent default) | 363 | **≤ 300** | ≤ 85 | **261 ✅** |
 
 **Phase 1 target revised:** hitting ≤ 4,500 B would have required
 consolidating tool names (breaking change for existing MCP clients).

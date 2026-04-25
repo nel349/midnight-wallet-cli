@@ -4,7 +4,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
-import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isMinimalMode } from '../lib/argv.ts';
 import { generateMnemonic, mnemonicToSeedSync, mnemonicToEntropy, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
@@ -178,11 +178,9 @@ async function walletList(args: ParsedArgs): Promise<void> {
   if (hasFlag(args, 'json')) {
     // Agent-slim shape: per-wallet { name, active, network, address,
     // shieldedAddress } scoped to the active network. Triggered by
-    // captureCommand injecting _minimal:true for all MCP calls. The MCP
-    // tool surfaces a `full: true` escape hatch by also setting _full,
-    // which forces the human shape.
-    const minimal = hasFlag(args, '_minimal') && !hasFlag(args, '_full');
-    if (minimal) {
+    // captureCommand injecting _minimal for MCP calls. Tool exposes
+    // `full: true` (→ _full flag) to opt back into the human shape.
+    if (isMinimalMode(args)) {
       writeJsonResult({
         activeNetwork: networkName,
         wallets: wallets.map((w) => ({
@@ -273,6 +271,19 @@ async function walletInfo(args: ParsedArgs): Promise<void> {
   const activeAddress = config.addresses[networkName];
 
   if (hasFlag(args, 'json')) {
+    // Agent-slim shape: drops the per-network addresses map (3× repetition
+    // of long strings) and bookkeeping fields. Agents pass `full: true` to
+    // get the human shape (per-network maps, createdAt, file).
+    if (isMinimalMode(args)) {
+      writeJsonResult({
+        name,
+        active: isActive,
+        network: networkName,
+        address: activeAddress,
+        shieldedAddress: config.shieldedAddresses?.[networkName] ?? null,
+      });
+      return;
+    }
     const result: Record<string, unknown> = {
       name,
       addresses: config.addresses,

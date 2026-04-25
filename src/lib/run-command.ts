@@ -1,7 +1,7 @@
 // Run a command handler and capture its JSON output
 // Used by the MCP server to invoke CLI commands programmatically
 
-import { type ParsedArgs } from './argv.ts';
+import { type ParsedArgs, MINIMAL_FLAG } from './argv.ts';
 import { setCaptureTarget } from './json-output.ts';
 
 type CommandHandler = (args: ParsedArgs, signal?: AbortSignal) => Promise<void>;
@@ -40,8 +40,8 @@ export async function captureCommand(
 
   try {
     args.flags.json = true;
-    if (!('_minimal' in args.flags)) {
-      args.flags._minimal = true;
+    if (!(MINIMAL_FLAG in args.flags)) {
+      args.flags[MINIMAL_FLAG] = true;
     }
     await handler(args, signal);
 

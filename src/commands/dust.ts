@@ -3,7 +3,7 @@
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 
-import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isVerbose, isMinimalMode, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
@@ -51,6 +51,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
 
   if (isVerbose(args)) enableVerbose();
   const isJson = hasFlag(args, 'json');
+  const minimal = isMinimalMode(args);
 
   // status: pre-check registration via the indexer before paying for a full sync.
   // If the wallet isn't registered, no point doing anything else — return fast.
@@ -62,13 +63,13 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
       signal,
     );
     if (!preCheck.isRegistered) {
-      printUnregisteredStatus(networkName, preCheck, isJson);
+      printUnregisteredStatus(networkName, preCheck, isJson, minimal);
       return;
     }
     // Registered → read balance directly from indexer (bypasses the dust-wallet
     // SDK's `isConnected` hang). No facade needed for a read-only query.
     const useCache = !hasFlag(args, 'no-cache');
-    await dustStatusDirect(seedBuffer, networkName, networkConfig.indexerWS, preCheck, isJson, useCache, signal);
+    await dustStatusDirect(seedBuffer, networkName, networkConfig.indexerWS, preCheck, isJson, minimal, useCache, signal);
     return;
   }
 
@@ -169,11 +170,21 @@ function printUnregisteredStatus(
   networkName: string,
   preCheck: PreCheckResult,
   jsonMode: boolean,
+  minimal: boolean,
 ): void {
   const { registeredUtxos, unregisteredUtxos } = preCheck;
   const totalUtxos = registeredUtxos + unregisteredUtxos;
 
   if (jsonMode) {
+    if (minimal) {
+      writeJsonResult({
+        network: networkName,
+        registered: false,
+        registeredUtxos,
+        unregisteredUtxos,
+      });
+      return;
+    }
     writeJsonResult({
       subcommand: 'status',
       registered: false,
@@ -299,6 +310,7 @@ async function dustStatusDirect(
   indexerWS: string,
   preCheck: PreCheckResult,
   jsonMode: boolean,
+  minimal: boolean,
   useCache: boolean,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -345,6 +357,19 @@ async function dustStatusDirect(
     const { registeredUtxos, unregisteredUtxos } = preCheck;
 
     if (jsonMode) {
+      // Slim drops eventsApplied/ownedUtxos/cached/subcommand — internal
+      // sync details an agent doesn't need to act on.
+      if (minimal) {
+        writeJsonResult({
+          network: networkName,
+          registered: true,
+          registeredUtxos,
+          unregisteredUtxos,
+          dustBalance: toDust(result.balance),
+          dustAvailable: result.availableCoins > 0,
+        });
+        return;
+      }
       writeJsonResult({
         subcommand: 'status',
         registered: true,

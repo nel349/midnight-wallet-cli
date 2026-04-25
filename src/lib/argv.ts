@@ -82,6 +82,26 @@ export function isVerbose(args: ParsedArgs): boolean {
 }
 
 /**
+ * Internal flag names for the agent-slim JSON contract. See
+ * lib/run-command.ts for the full contract.
+ *   - MINIMAL_FLAG: captureCommand sets this on every MCP-invoked command
+ *     so handlers default to a slim shape for agents.
+ *   - FULL_FLAG: an MCP tool sets this when the agent passes `full: true`,
+ *     telling the handler to emit the human shape instead.
+ * Underscore prefix marks them as internal — humans never set these.
+ */
+export const MINIMAL_FLAG = '_minimal';
+export const FULL_FLAG = '_full';
+
+/**
+ * True when the handler should emit the agent-slim JSON shape: an MCP
+ * caller asked us through captureCommand AND didn't pass `full: true`.
+ */
+export function isMinimalMode(args: ParsedArgs): boolean {
+  return hasFlag(args, MINIMAL_FLAG) && !hasFlag(args, FULL_FLAG);
+}
+
+/**
  * Reject `--no-cache` on commands that don't support it (write commands).
  * The SDK's fresh-sync path is too slow on hosted networks to be viable, so
  * writes always use the cache. Users who want a clean state should

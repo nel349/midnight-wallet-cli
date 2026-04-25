@@ -3,7 +3,7 @@
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
-import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isMinimalMode } from '../lib/argv.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
@@ -58,6 +58,12 @@ async function addressBalance(args: ParsedArgs): Promise<void> {
       for (const [tokenType, amount] of result.balances) {
         const key = isNativeToken(tokenType) ? 'NIGHT' : tokenType;
         balances[key] = isNativeToken(tokenType) ? toNight(amount) : amount.toString();
+      }
+      // Slim drops the (long) address echo and txCount — agents already
+      // know what they asked for, and txCount is an internal sync detail.
+      if (isMinimalMode(args)) {
+        writeJsonResult({ network: networkName, balances, utxoCount: result.utxoCount });
+        return;
       }
       writeJsonResult({ address, network: networkName, balances, utxoCount: result.utxoCount, txCount: result.txCount });
       return;
@@ -213,6 +219,16 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
     }
 
     if (isJson) {
+      // Slim drops the unshielded + shielded address strings (~220 chars
+      // combined). Agents already know which wallet they queried.
+      if (isMinimalMode(args)) {
+        writeJsonResult({
+          network: networkName,
+          unshielded: { NIGHT: toNight(unshieldedBalance), utxoCount: unshieldedUtxos },
+          shielded: { NIGHT: toNight(shieldedBalance), availableCoins: shieldedCoins, pendingCoins },
+        });
+        return;
+      }
       writeJsonResult({
         address,
         shieldedAddress: liveShieldedAddrStr,
