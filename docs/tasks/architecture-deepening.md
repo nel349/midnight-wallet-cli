@@ -36,29 +36,52 @@ the repo. Repo decides: in-memory hit? on-disk + tip unchanged? else fetch.
 6. Network-down tolerant — reads return on-disk value with `lastSyncedAt`, not an error.
 7. Two-layer cache — in-memory layer for the long-lived MCP server process, disk layer shared across `mn` shell invocations.
 
-### Chosen design — hybrid (ergonomic surface + ports & adapters internals)
+### Chosen design — Option Z (ergonomic surface, two constructor seams)
 
-**Public surface** is ergonomic: trivial 1-line defaults for the 95% case, options object for the rest.
+After a stress-test of the hybrid (3+4) against CLAUDE.md's "minimal impact" rule, we
+went lighter. Same user-facing wins, much smaller blast radius, easier to evolve
+to full ports & adapters later if a concrete trigger appears.
+
+**Public surface** (Design 3, locked):
 
 ```
-repo.dust(seed, network, opts?)        → DustView
-repo.unshielded(addr, network, opts?)  → UnshieldedView
-repo.withFacade(seed, network, fn, opts?)  → T  // borrow pattern, auto-stop, auto-invalidate
-repo.invalidate(scope)                 → void
+repo.dust(seed, network, opts?)            → DustView
+repo.unshielded(identity, network, opts?)  → UnshieldedView   // identity = address | seed
+repo.withFacade(seed, network, fn, opts?)  → T                // borrow; auto-stop, auto-invalidate
+repo.invalidate(scope)                     → void
 ```
 
-**Internals** are ports-and-adapters: `ChainRpcPort`, `IndexerSubscriptionPort`, `FacadePort`, `CacheStoragePort`, `ClockPort`. Production adapters wrap existing modules (`node-rpc.ts`, `balance-subscription.ts` + `dust-direct.ts`, `facade.ts`, `wallet-cache.ts` + `dust-direct-cache.ts`). Test adapters are in-memory.
+**Internals — minimal seam version:** the repo is one new file (`src/lib/wallet-data-repository.ts`) that orchestrates existing functions (`loadDustCache`, `loadWalletCache`, `primeDustCache`, `buildFacade`, `startAndSyncFacade`, `stopFacade`, etc). It adds:
 
-**Why this hybrid:** Design 3 wins on day-1 ergonomics (1-line call sites). Design 4 wins on testability (cache+tip+invalidation logic becomes unit-testable for the first time, no localnet needed). Combining gives both. Designs 1 and 2 over-rotated (1: elegance over usability; 2: over-engineered for needs we don't have today).
+- An in-memory `Map<key, { value, fetchedAt, tipAtFetch }>` layer (lives for the process lifetime — important for the long-lived MCP server).
+- A `getCurrentTip()` helper that asks the substrate node for its current head (cheap, ~50ms; uses existing `node-rpc.ts`).
+- An `invalidate()` method that clears the in-memory map and marks disk entries stale.
+
+**Two constructor seams for testability** (no full P&A):
+
+```
+new WalletDataRepository(deps: {
+  now?: () => number;                      // default: Date.now
+  fetchTip?: (n: NetworkConfig) => Promise<TipFingerprint>;  // default: substrate RPC
+})
+```
+
+Tests inject a fake `now()` and a fake `fetchTip()`. That's enough to exercise the cache + tip + invalidation logic without spinning up Docker, the SDK, or the indexer. Cache-policy tests become unit tests for the first time.
+
+**Why Option Z over the hybrid:** the hybrid's 5 ports + 5 production adapters + 5 test adapters (~16 files) was over-engineering. Option Z gets the same user-facing wins (tip-aware invalidation, in-memory layer, write-invalidation, force-fresh, ergonomic call sites) and keeps cache-policy logic unit-testable, with one new file and ~150 lines.
+
+If we later need pluggable storage backends, alternative RPC transports, or finer-grained ports, we refactor. By then we'll know what we actually need vs. what we're guessing about today.
 
 **Defaults locked in:**
 - `freshness = 'tip-aware'` — cache hit valid iff chain tip unchanged. Cheap RPC tip-check beats arbitrary TTL.
 - `forceFresh = false` — opt-in.
 - `withFacade` defaults to `syncMode: 'full'` and `requireStrictSync: true` — matches the dominant write path; readers opt out.
 - `withFacade` auto-invalidates on resolve — write callers were doing this manually anyway.
-- In-memory layer wins over disk; disk wins over network. One read in the same MCP-process tip is free after the first.
+- In-memory layer wins over disk; disk wins over network. Repeat reads in the same MCP-process tip cost zero.
 
-**Acknowledged leak:** `withFacade(fn(lease))` exposes the SDK's `FacadeBundle` so callers can build/sign/submit. Defining an opaque handle would require wrapping the SDK's transferTransaction/signRecipe/finalizeRecipe surface — premature. Accept the leak; tests through `withFacade` are integration tests against localnet.
+**Acknowledged leak:** `withFacade(fn(lease))` exposes the SDK's `FacadeBundle` so callers can build/sign/submit. Defining an opaque handle would require wrapping the SDK's `transferTransaction` / `signRecipe` / `finalizeRecipe` surface — premature. Accept the leak; tests through `withFacade` are integration tests against localnet.
+
+**Validation lock-in moment:** Step 4 (migrating `executeTransfer` to `withFacade`) is when the write-side semantics get committed. Pause and review after Step 4 before fanning out to other write paths.
 
 ### TODO
 
