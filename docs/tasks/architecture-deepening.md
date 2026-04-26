@@ -105,9 +105,17 @@ If we later need pluggable storage backends, alternative RPC transports, or fine
       semantic from "reject" to "resolve with `partial: true`", adding an
       `onCheckpoint` callback the repo wires to `saveDustCache` (persists every
       ~500 events), and auto-retrying on partial in `repo.dust()` (bounded to 6
-      iterations = ~60min total). Verified: alice on preprod (243k events) now
-      cold-syncs in 235s where it previously never completed; warm second call
-      3.85s (delta-resume of 4 new events).
+      iterations = ~60min total). Off-by-one in `lastEventId` update order
+      (caught by interrupt+resume verification on preprod) fixed in `f86a7dd`.
+      Verified end-to-end on preprod:
+      - alice (243k events): cold 235s, warm 3.85s.
+      - bob (different wallet, 234k events): cold 232s.
+      - Mid-sync interrupt at 20s: 26.6KB checkpoint persisted; next call
+        resumed from checkpoint and applied the remaining ~213k events,
+        balance matches uninterrupted-sync result.
+      - `mn transfer bob → alice 1 NIGHT --network preprod`: 28s
+        end-to-end (warm cache; 9 delta events to prime); transfer landed
+        correctly (alice +1, bob -1).
 - [ ] **Step 3** — migrate `balance` (both lightweight and full-facade paths)
 - [ ] **Step 3** — migrate `balance` (both lightweight and full-facade paths)
 - [ ] Migrate `wallet info` (where it touches caches)
