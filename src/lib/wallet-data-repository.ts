@@ -229,7 +229,7 @@ export class WalletDataRepository {
     let cached = opts.forceFresh ? null : loadDustCache(networkName, pubkeyHex, this.cacheDir);
     const startedFromCache = cached !== null;
     let totalEventsApplied = 0;
-    let result: DustDirectResult;
+    let result: DustDirectResult | null = null;
 
     // Auto-retry on `partial: true`. Cold preprod has ~250k dust events;
     // the underlying fetcher resolves with `partial` after its soft timeout
@@ -276,12 +276,13 @@ export class WalletDataRepository {
       cached = loadDustCache(networkName, pubkeyHex, this.cacheDir);
     }
 
+    if (!result) throw new Error('Dust sync exhausted retries without producing a result');
     const view: DustView = {
-      state: result!.state,
-      balance: result!.balance,
-      availableCoins: result!.availableCoins,
-      ownedUtxoCount: result!.ownedUtxoCount,
-      syncTime: result!.syncTime,
+      state: result.state,
+      balance: result.balance,
+      availableCoins: result.availableCoins,
+      ownedUtxoCount: result.ownedUtxoCount,
+      syncTime: result.syncTime,
       fromCache: startedFromCache,
       eventsApplied: totalEventsApplied,
       fetchedAt: this.now(),
@@ -548,7 +549,7 @@ export class WalletDataRepository {
 
 // ── Default seam implementations ──────────────────────────
 
-async function defaultTipFetcher(network: NetworkConfig): Promise<TipFingerprint> {
+function defaultTipFetcher(network: NetworkConfig): Promise<TipFingerprint> {
   return callNodeRpc<string>({ url: network.node, timeoutMs: 3_000 }, 'chain_getBlockHash', []);
 }
 
