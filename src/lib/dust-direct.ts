@@ -48,12 +48,32 @@ export interface DustDirectResult {
   state: ledger.DustLocalState;
   /** Id of the last event applied in this run. -1 if none arrived. */
   lastAppliedEventId: number;
+  /**
+   * True iff the sync stopped before catching up to the indexer's tip
+   * (timeout or abort). The returned state + lastAppliedEventId are still
+   * valid — the caller should persist them and re-call to resume from the
+   * checkpoint. False means we caught up to the chain head (or there were
+   * no events to apply).
+   */
+  partial: boolean;
 }
 
 export interface DustDirectOptions {
   /** Called with (eventsApplied, maxIdSeen) whenever a new event arrives. */
   onProgress?: (eventsApplied: number, maxIdSeen: number) => void;
-  /** Hard ceiling for the whole subscription. Default: 180s. */
+  /**
+   * Called after every chunk of events is applied to the local state, with
+   * the current state + last applied event id. Lets the caller persist a
+   * checkpoint so a Ctrl+C / timeout doesn't lose 100k events of work.
+   * Note: invoked synchronously after `replayEvents`; keep the callback
+   * cheap (file write is fine, network is not).
+   */
+  onCheckpoint?: (state: ledger.DustLocalState, lastAppliedEventId: number) => void;
+  /**
+   * Soft ceiling for the whole subscription. On expiry the call resolves
+   * with `partial: true` and whatever state has been applied so far —
+   * never throws away progress. Default: 600s. Set very high to disable.
+   */
   timeoutMs?: number;
   /** If no event arrives for this long (and we've received some), treat as caught up. Default: 5s. */
   idleMs?: number;
@@ -95,7 +115,8 @@ export function readDustBalanceDirect(
 ): Promise<DustDirectResult> {
   const {
     onProgress,
-    timeoutMs = 180_000,
+    onCheckpoint,
+    timeoutMs = 600_000,
     idleMs = 5_000,
     initialSilenceMs = 3_000,
     signal,
@@ -134,6 +155,11 @@ export function readDustBalanceDirect(
       state = state.replayEvents(dustSecretKey, pending);
       eventsAppliedCount += pending.length;
       pending.length = 0;
+      // Checkpoint after each chunk so a timeout / abort / crash doesn't
+      // lose the work. Caller decides cost (typically a small JSON write).
+      if (onCheckpoint && lastEventId >= 0) {
+        try { onCheckpoint(state, lastEventId); } catch { /* best-effort */ }
+      }
     };
 
     // Reset the idle timer on every event. If `idleMs` elapses with no new
@@ -146,7 +172,7 @@ export function readDustBalanceDirect(
       }, idleMs);
     };
 
-    const finishOk = () => {
+    const finishOk = (partial = false) => {
       if (settled) return;
       settled = true;
       cleanup();
@@ -162,6 +188,7 @@ export function readDustBalanceDirect(
           syncTime: state.syncTime,
           state,
           lastAppliedEventId: lastEventId,
+          partial,
         });
       } catch (err) {
         reject(new Error(`Failed to build dust state: ${(err as Error).message}`));
@@ -175,6 +202,11 @@ export function readDustBalanceDirect(
       reject(err);
     };
 
+    // Abort still rejects — the user pressed Ctrl+C and the caller (which
+    // may be orchestrating multiple steps) needs to know to stop. The
+    // periodic onCheckpoint inside flushPending means at most one chunk
+    // (~500 events) of work is lost; the next call resumes from the last
+    // saved checkpoint.
     const onAbort = () => finishErr(new Error('Operation cancelled'));
     signal?.addEventListener('abort', onAbort, { once: true });
 
@@ -272,7 +304,11 @@ export function readDustBalanceDirect(
     });
 
     timeoutId = setTimeout(() => {
-      finishErr(new Error(`Dust sync timed out after ${timeoutMs / 1000}s (${eventsAppliedCount + pending.length} events applied, last id ${lastEventId} / max ${maxIdSeen})`));
+      // Don't throw away progress. Resolve with `partial: true` so the caller
+      // persists the checkpoint and can resume from `lastAppliedEventId` next
+      // call. Pre-existing behavior was reject — that lost 100k+ events of
+      // work on cold preprod syncs.
+      finishOk(true);
     }, timeoutMs);
   });
 }

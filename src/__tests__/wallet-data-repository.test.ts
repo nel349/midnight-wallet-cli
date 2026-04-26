@@ -39,7 +39,7 @@ function fakeBalanceSummary(extra: Partial<BalanceSummary> = {}): BalanceSummary
   };
 }
 
-function fakeDustResult(): DustDirectResult {
+function fakeDustResult(overrides: Partial<DustDirectResult> = {}): DustDirectResult {
   // Build a minimal real DustLocalState — repo doesn't introspect it, just
   // holds a reference and serializes it via saveDustCache.
   const params = new ledger.DustParameters(5_000_000_000n, 8_267n, 10_800n);
@@ -52,6 +52,8 @@ function fakeDustResult(): DustDirectResult {
     syncTime: state.syncTime,
     state,
     lastAppliedEventId: 5,
+    partial: false,
+    ...overrides,
   };
 }
 
@@ -159,6 +161,37 @@ describe('WalletDataRepository — dust reads', () => {
     const second = await repo.dust(SEED, NETWORK);
     expect(second.fromCache).toBe(true);
     expect(fetchCalls).toBe(1);
+  });
+
+  it('auto-resumes when fetchDust returns partial: true (cold preprod path)', async () => {
+    // Simulate: indexer streams 250 events per call, returns partial: true
+    // until we've consumed 1000 events worth (4 calls). Each returns the
+    // fakeDustResult with lastAppliedEventId advancing by 250 each time.
+    const startIds: number[] = [];
+    let nextLastEventId = 249;
+    const repo = new WalletDataRepository({
+      now: () => 1_000_000,
+      fetchTip: async () => 'tip-A',
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchDust: async (_seed, _net, opts) => {
+        startIds.push(opts.startFromId);
+        const result = fakeDustResult({
+          lastAppliedEventId: nextLastEventId,
+          eventCount: 250,
+          partial: nextLastEventId < 999, // catch up after id 999
+        });
+        // Persist via the checkpoint callback the repo wires in.
+        opts.onCheckpoint?.(result.state, result.lastAppliedEventId);
+        nextLastEventId += 250;
+        return result;
+      },
+      cacheDir: TMP,
+    });
+
+    const view = await repo.dust(SEED, NETWORK);
+    expect(startIds).toEqual([0, 250, 500, 750]); // each call resumed from prior checkpoint
+    expect(view.eventsApplied).toBe(1000);         // sum across 4 calls
+    expect(view.fromCache).toBe(false);            // we started cold
   });
 
   it('forceFresh on dust bypasses both memos and disk cache', async () => {

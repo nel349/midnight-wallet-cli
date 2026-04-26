@@ -122,7 +122,14 @@ export interface RepoDeps {
   fetchDust?: (
     seed: Buffer,
     network: NetworkConfig,
-    opts: { startFromId: number; initialState?: ledger.DustLocalState; signal?: AbortSignal; onProgress?: (applied: number, max: number) => void },
+    opts: {
+      startFromId: number;
+      initialState?: ledger.DustLocalState;
+      signal?: AbortSignal;
+      onProgress?: (applied: number, max: number) => void;
+      /** Repo passes a callback to persist incremental progress during long syncs. */
+      onCheckpoint?: (state: ledger.DustLocalState, lastAppliedEventId: number) => void;
+    },
   ) => Promise<DustDirectResult>;
   /** Override cache directory (tests use a tmp dir). */
   cacheDir?: string;
@@ -138,6 +145,15 @@ interface MemoEntry<T> {
 
 /** Re-fetching the chain tip on every cache check is overkill; memo it briefly. */
 const TIP_PROBE_TTL_MS = 5_000;
+
+/**
+ * Max iterations of the partial-resume loop in `dust()`. Each iteration covers
+ * one full `timeoutMs` window of the underlying fetcher (default 600s). With
+ * 6 iterations and the default timeout, total wall-time ceiling is ~60min —
+ * enough to fully cold-sync any preprod wallet from event 0 even at a slow
+ * indexer. A misbehaving indexer that streams events forever still terminates.
+ */
+const DUST_PARTIAL_RETRIES = 6;
 
 export class WalletDataRepository {
   private readonly now: () => number;
@@ -173,36 +189,64 @@ export class WalletDataRepository {
     // Validate disk cache against chain genesis hash (cheap once memoised).
     await validateDustCacheChainId(networkName, pubkeyHex, network.node);
 
-    const cached = opts.forceFresh ? null : loadDustCache(networkName, pubkeyHex, this.cacheDir);
-    const startFromId = cached ? cached.lastAppliedEventId + 1 : 0;
-    opts.onStatus?.(cached ? `Resuming dust from event ${startFromId}…` : 'Reading dust events…');
+    let cached = opts.forceFresh ? null : loadDustCache(networkName, pubkeyHex, this.cacheDir);
+    const startedFromCache = cached !== null;
+    let totalEventsApplied = 0;
+    let result: DustDirectResult;
 
-    const result = await this.fetchDust(seed, network, {
-      startFromId,
-      initialState: cached?.state,
-      signal: opts.signal,
-      onProgress: (applied, max) => {
-        const target = Math.max(1, max + 1 - startFromId);
-        opts.onStatus?.(`Reading dust events… ${applied}/${target}`);
-      },
-    });
+    // Auto-retry on `partial: true`. Cold preprod has ~250k dust events;
+    // the underlying fetcher resolves with `partial` after its soft timeout
+    // (default 600s) instead of throwing. Each call's `onCheckpoint` saves
+    // intermediate state to disk, so retries resume from where we left off
+    // and never re-process events. Bounded so a broken indexer doesn't
+    // loop forever.
+    for (let attempt = 0; attempt < DUST_PARTIAL_RETRIES; attempt++) {
+      if (opts.signal?.aborted) throw new Error('Operation cancelled');
+      const startFromId = cached ? cached.lastAppliedEventId + 1 : 0;
+      opts.onStatus?.(
+        attempt > 0
+          ? `Resuming dust from event ${startFromId} (continuation ${attempt + 1})…`
+          : (cached ? `Resuming dust from event ${startFromId}…` : 'Reading dust events…'),
+      );
 
-    // Persist if we advanced; back-compat: also persist the first-prime case.
-    if (result.lastAppliedEventId >= 0 || !cached) {
-      const savedId = result.lastAppliedEventId >= 0
-        ? result.lastAppliedEventId
-        : (cached?.lastAppliedEventId ?? -1);
-      try { saveDustCache(networkName, pubkeyHex, result.state, savedId, this.cacheDir); } catch { /* best-effort */ }
+      result = await this.fetchDust(seed, network, {
+        startFromId,
+        initialState: cached?.state,
+        signal: opts.signal,
+        onProgress: (applied, max) => {
+          const target = Math.max(1, max + 1 - startFromId);
+          opts.onStatus?.(`Reading dust events… ${applied}/${target}`);
+        },
+        // Persist after each chunk so a Ctrl+C / process kill / SIGTERM
+        // doesn't lose 100k events of work.
+        onCheckpoint: (state, lastAppliedEventId) => {
+          try { saveDustCache(networkName, pubkeyHex, state, lastAppliedEventId, this.cacheDir); } catch { /* best-effort */ }
+        },
+      });
+
+      // Final save (covers the last sub-chunk that didn't trip onCheckpoint).
+      if (result.lastAppliedEventId >= 0 || !cached) {
+        const savedId = result.lastAppliedEventId >= 0
+          ? result.lastAppliedEventId
+          : (cached?.lastAppliedEventId ?? -1);
+        try { saveDustCache(networkName, pubkeyHex, result.state, savedId, this.cacheDir); } catch { /* best-effort */ }
+      }
+
+      totalEventsApplied += result.eventCount;
+      if (!result.partial) break;
+
+      // Reload for the next iteration so cached.state is the latest checkpoint.
+      cached = loadDustCache(networkName, pubkeyHex, this.cacheDir);
     }
 
     const view: DustView = {
-      state: result.state,
-      balance: result.balance,
-      availableCoins: result.availableCoins,
-      ownedUtxoCount: result.ownedUtxoCount,
-      syncTime: result.syncTime,
-      fromCache: cached !== null,        // disk-resume counts as cached
-      eventsApplied: result.eventCount,
+      state: result!.state,
+      balance: result!.balance,
+      availableCoins: result!.availableCoins,
+      ownedUtxoCount: result!.ownedUtxoCount,
+      syncTime: result!.syncTime,
+      fromCache: startedFromCache,
+      eventsApplied: totalEventsApplied,
       fetchedAt: this.now(),
     };
     const tip = await this.getTip(network, opts.signal);

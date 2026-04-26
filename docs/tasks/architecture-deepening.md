@@ -99,6 +99,15 @@ If we later need pluggable storage backends, alternative RPC transports, or fine
       schema-identical to baseline (only the time-varying `dustBalance` /
       `eventsApplied` / `cached` fields shift, as expected). MCP slim shape
       preserved. In-process back-to-back: cold 3050ms → memo hits 2–4ms (~1000×).
+- [x] **Step 2.5** — preprod cold-sync was broken pre-existing (180s timeout
+      rejected and lost 184k events of work). Fixed by: bumping
+      `readDustBalanceDirect` default timeout to 600s, changing the timeout
+      semantic from "reject" to "resolve with `partial: true`", adding an
+      `onCheckpoint` callback the repo wires to `saveDustCache` (persists every
+      ~500 events), and auto-retrying on partial in `repo.dust()` (bounded to 6
+      iterations = ~60min total). Verified: alice on preprod (243k events) now
+      cold-syncs in 235s where it previously never completed; warm second call
+      3.85s (delta-resume of 4 new events).
 - [ ] **Step 3** — migrate `balance` (both lightweight and full-facade paths)
 - [ ] **Step 3** — migrate `balance` (both lightweight and full-facade paths)
 - [ ] Migrate `wallet info` (where it touches caches)
