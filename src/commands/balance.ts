@@ -8,7 +8,8 @@ import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { getNetworkId } from '../lib/network-id.ts';
-import { checkBalance, isNativeToken } from '../lib/balance-subscription.ts';
+import { isNativeToken } from '../lib/balance-subscription.ts';
+import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
 import { loadWalletCache, saveWalletCache, validateNetworkCaches } from '../lib/wallet-cache.ts';
 import { getChainGenesisHash } from '../lib/chain-id.ts';
@@ -44,11 +45,13 @@ async function addressBalance(args: ParsedArgs): Promise<void> {
   const spinner = startSpinner(`Checking balance on ${networkName}...`);
 
   try {
-    const result = await checkBalance(address, networkConfig.indexerWS, (current, highest) => {
-      if (highest > 0) {
-        const pct = Math.round((current / highest) * 100);
-        spinner.update(`Syncing transactions... ${pct}%`);
-      }
+    const result = await defaultRepository().unshielded(address, networkConfig, {
+      onProgress: (current, highest) => {
+        if (highest > 0) {
+          const pct = Math.round((current / highest) * 100);
+          spinner.update(`Syncing transactions... ${pct}%`);
+        }
+      },
     });
 
     spinner.stop(`Synced ${result.txCount} transactions`);
@@ -147,8 +150,9 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
 
     // ── Phase 1: fast unshielded via GraphQL (no facade, no proof server) ──
     if (!isJson) activeSpinner = startSpinner('Checking unshielded...');
-    const unshieldedResult = await checkBalance(address, networkConfig.indexerWS, () => {
-      // Progress callback intentionally quiet — this finishes in <1s on most networks.
+    const unshieldedResult = await defaultRepository().unshielded(address, networkConfig, {
+      forceFresh: noCache,
+      // Quiet by design — this finishes in <1s on most networks.
     });
     const unshieldedBalance = unshieldedResult.balances.get(nightToken) ?? 0n;
     const unshieldedUtxos = unshieldedResult.utxoCount;

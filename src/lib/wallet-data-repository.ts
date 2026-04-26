@@ -96,6 +96,13 @@ export interface ReadOptions {
   signal?: AbortSignal;
   /** Status hook for spinner wiring. */
   onStatus?: (s: string) => void;
+  /**
+   * Raw progress signal during the underlying network fetch. For dust this
+   * fires per-chunk (events applied vs max event id); for unshielded it
+   * fires per-UTXO-batch (current tx vs highest tx id). Callers that already
+   * have a spinner usually use this to render a percentage.
+   */
+  onProgress?: (current: number, highest: number) => void;
 }
 
 export interface FacadeOptions extends ReadOptions {
@@ -270,7 +277,7 @@ export class WalletDataRepository {
       if (hit) return { ...hit, fromCache: true };
     }
 
-    const summary = await this.fetchUnshielded(address, network);
+    const summary = await this.fetchUnshielded(address, network, opts.onProgress);
     const view: UnshieldedView = { ...summary, fromCache: false, fetchedAt: this.now() };
     const tip = await this.getTip(network, opts.signal);
     this.unshieldedMemo.set(memoKey, { value: view, fetchedAt: view.fetchedAt, tipAtFetch: tip });

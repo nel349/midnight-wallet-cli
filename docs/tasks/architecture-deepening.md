@@ -116,8 +116,13 @@ If we later need pluggable storage backends, alternative RPC transports, or fine
       - `mn transfer bob → alice 1 NIGHT --network preprod`: 28s
         end-to-end (warm cache; 9 delta events to prime); transfer landed
         correctly (alice +1, bob -1).
-- [ ] **Step 3** — migrate `balance` (both lightweight and full-facade paths)
-- [ ] **Step 3** — migrate `balance` (both lightweight and full-facade paths)
+- [x] **Step 3** — `balance` migrated to `repo.unshielded(...)` for both
+      paths (positional address + wallet's unshielded portion). Shielded
+      portion stays inside the existing facade lifecycle until Step 4
+      collapses it into `withFacade`. Both `mn balance --json` outputs
+      verified byte-for-byte identical on undeployed (positional + wallet).
+      `ReadOptions` gained `onProgress?: (current, highest) => void` so
+      callers can wire spinner percentages through the repo.
 - [ ] Migrate `wallet info` (where it touches caches)
 - [ ] **Step 4 (lock-in moment)** — migrate `executeTransfer` → `withFacade`. Pause and review.
 - [ ] Migrate `airdrop`, `dust register`, `serve`, `contract`
