@@ -112,6 +112,13 @@ export interface FacadeOptions extends ReadOptions {
   requireStrictSync?: boolean;
   /** If true, skip the post-resolve invalidation (read-only borrowers). */
   readOnly?: boolean;
+  /**
+   * If true, skip the automatic post-resolve `saveWalletCache`. For callers
+   * that have nuanced save logic — e.g. `mn serve` skips the save if there
+   * are pending in-flight transactions, because the SDK drops `pendingDustTokens`
+   * on serialization and persisting that state corrupts the dust balance.
+   */
+  skipAutoSave?: boolean;
   /** Per-attempt sync deadline. Default: SYNC_ATTEMPT_TIMEOUT_MS (local) or SYNC_ATTEMPT_REMOTE_TIMEOUT_MS (remote). */
   syncTimeoutMs?: number;
   /** Per-emission sync progress hook (forwards startAndSyncFacade onProgress). */
@@ -458,7 +465,9 @@ export class WalletDataRepository {
         }
       }
 
-      try { await saveWalletCache(address, networkName, bundle.facade, this.cacheDir); } catch { /* best-effort */ }
+      if (!opts.skipAutoSave) {
+        try { await saveWalletCache(address, networkName, bundle.facade, this.cacheDir); } catch { /* best-effort */ }
+      }
       if (!opts.readOnly) this.invalidate({ network, seed });
       return result;
     } finally {

@@ -130,29 +130,6 @@ export async function saveWalletCache(
 }
 
 /**
- * Orchestrator: validate both wallet and dust-direct caches for a network.
- * Called once per command from the command entry points. Logs a one-line
- * summary to stderr when any caches were wiped so the user understands the
- * delay on the first sync after a chain reset.
- */
-export async function validateNetworkCaches(
-  network: string,
-  nodeWsUrl: string,
-  cacheDir?: string,
-): Promise<void> {
-  const { validateDustCacheChainId } = await import('./dust-direct-cache.ts');
-  const [walletWiped, dustWiped] = await Promise.all([
-    validateWalletCacheChainId(network, nodeWsUrl, cacheDir),
-    validateDustCacheChainId(network, nodeWsUrl, cacheDir),
-  ]);
-  const total = walletWiped.length + dustWiped.length;
-  if (total > 0) {
-    // Single, quiet line — same "one-liner" pattern the plan committed to.
-    process.stderr.write(`  Detected chain reset — cleared ${total} stale cache file(s) for ${network}\n`);
-  }
-}
-
-/**
  * Wipe every wallet cache file for a network whose stored chainId doesn't
  * match the chain's current genesis hash. Called at command startup so we
  * catch remote-testnet resets (chain advanced past our cache, so the

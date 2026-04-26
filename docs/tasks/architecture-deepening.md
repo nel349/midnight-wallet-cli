@@ -173,11 +173,21 @@ If we later need pluggable storage backends, alternative RPC transports, or fine
       **Plus correctness:** pre-repo the cold case never completed
       (180s timeout, 0 events saved). The repo's partial-resume +
       checkpoint fix made cold succeed at all.
-- [ ] Migrate `serve` (long-lived facade — different pattern)
-- [ ] Delete cache utilities + their tests once nothing imports them
-      (note: the cache modules `wallet-cache.ts`, `dust-direct-cache.ts`,
-      `dust-prime.ts` are still legitimately used — by the repo internally
-      and by `mn serve`. Real deletion blocked on the serve migration.)
+- [x] **`mn serve` migrated.** Long-lived facade pattern fits `withFacade`
+      after all — the borrow's `fn` runs the entire RPC server loop.
+      New `skipAutoSave: true` option added to FacadeOptions because
+      serve's save logic is conditional (skip on pending txs to avoid
+      persisting dust=0 corruption). Verified: serve startup → sync →
+      dust ready → "Server ready" → SIGINT → graceful shutdown, exit 0.
+- [x] Deleted now-orphaned utilities:
+      - `src/lib/dust-prime.ts` (entire file). Repo subsumed
+        `primeDustCacheWithFeedback` via the in-method pre-prime.
+      - `validateNetworkCaches` from `wallet-cache.ts`. Repo's `dust()`
+        and `withFacade()` already call `validateDustCacheChainId` and
+        `validateWalletCacheChainId` directly per kind.
+      The underlying single-purpose cache modules (`wallet-cache.ts`,
+      `dust-direct-cache.ts`) are still used by the repo internally —
+      they stay.
 
 ## #3 — Facade lifecycle (next)
 

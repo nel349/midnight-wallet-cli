@@ -7,9 +7,9 @@ import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../lib/facade.ts';
-import { primeDustCacheWithFeedback } from '../lib/dust-prime.ts';
-import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
+import { suppressSdkTransientErrors, waitForDustAvailable } from '../lib/facade.ts';
+import { saveWalletCache } from '../lib/wallet-cache.ts';
+import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
 import { createDAppConnector, type DAppConnectorCallbacks } from '../lib/dapp-connector.ts';
 import type { PhaseTiming } from '../lib/phase-tracker.ts';
@@ -71,53 +71,15 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
   if (isVerbose(args)) enableVerbose();
 
-  // ── Build & sync facade ──
+  // ── Build & sync facade via repo.withFacade ──
+  // The repo owns: validateNetworkCaches → primeDustCache → buildFacade →
+  // sync (with retry) → stopFacade. We pass `skipAutoSave: true` because
+  // serve has nuanced save logic (skip on pending txs to avoid persisting
+  // dust=0 corruption — see `connector.hasPendingTxs()` check below).
 
-  const spinner = startSpinner('Building wallet facade...');
+  const spinner = startSpinner('Syncing wallet...');
 
-  // S1: validate caches vs chain genesis — catches remote-testnet resets
-  // before we prime or restore from a now-stale checkpoint.
-  const { validateNetworkCaches } = await import('../lib/wallet-cache.ts');
-  await validateNetworkCaches(networkName, networkConfig.node);
-
-  // Prime dust cache before building the facade so its dust wallet restores
-  // from a near-tip checkpoint and strict-sync completes in seconds instead
-  // of minutes. serve accepts write RPCs, so fast + correct dust state matters.
-  await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
-    onStatus: (s) => spinner.update(s),
-  });
-
-  const cache = loadWalletCache(address, networkName);
-  const bundle = await buildFacade(seedBuffer, networkConfig, cache);
-  if (bundle.restoredFromCache) {
-    spinner.update('Restoring from cache...');
-  }
-
-  // Cleanup helper — stops facade and restores console
-  const cleanup = async () => {
-    restoreRpc();
-    unsuppress();
-    try { await stopFacade(bundle); } catch { /* best-effort */ }
-  };
-
-  let server: RpcServer | undefined;
-  let connector: ReturnType<typeof createDAppConnector> | undefined;
-
-  try {
-    spinner.update('Syncing wallet...');
-    await startAndSyncFacade(bundle, {
-      // serve accepts write requests from dApps — must be strictly synced.
-      requireStrictSync: true,
-      onProgress: (applied, highest) => {
-        if (highest > 0) {
-          const pct = Math.min(Math.round((applied / highest) * 100), 100);
-          spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
-        }
-      },
-      onSyncDetail: (detail) => {
-        spinner.update(`Syncing wallet... (waiting on: ${detail})`);
-      },
-    });
+  await defaultRepository().withFacade(seedBuffer, networkConfig, async ({ bundle }) => {
     spinner.stop('Wallet synced');
 
     // Wait for dust coins to actually be available before accepting write requests.
@@ -127,12 +89,15 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     const hasDust = (dustState.dust as any)?.availableCoins?.length > 0;
     dustSpinner.stop(hasDust ? 'Dust ready' : 'Dust not yet available (writes may fail)');
 
-    // Save cache after successful sync
+    // Save cache after successful sync (checkpoint before opening RPC).
     try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
 
     if (signal?.aborted) throw new Error('Operation cancelled');
 
-    // ── Create DApp Connector ──
+    let server: RpcServer | undefined;
+    let connector: ReturnType<typeof createDAppConnector> | undefined;
+    try {
+      // ── Create DApp Connector ──
 
     // Phase labels for human-readable spinner messages
     const PHASE_LABELS: Record<string, string> = {
@@ -253,29 +218,45 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       // keeps the event loop alive. Process will exit via external SIGKILL.
     });
 
-    // ── Shutdown ──
+      // ── Shutdown ──
 
-    process.stderr.write('\n' + dim('  Shutting down...') + '\n');
-    // Save cache on graceful shutdown — but NOT if transactions are pending.
-    // The SDK drops pendingDustTokens on serialization, so saving while coins
-    // are locked in pending would persist a corrupted state (dust=0).
-    if (!connector.hasPendingTxs()) {
-      try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
+      process.stderr.write('\n' + dim('  Shutting down...') + '\n');
+      // Save cache on graceful shutdown — but NOT if transactions are pending.
+      // The SDK drops pendingDustTokens on serialization, so saving while coins
+      // are locked in pending would persist a corrupted state (dust=0).
+      if (!connector.hasPendingTxs()) {
+        try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
+      }
+      try { await server.close(); } catch { /* best-effort */ }
+      connector.dispose();
+      connector = undefined;
+      server = undefined;
+      process.stderr.write(dim('  Server stopped.') + '\n\n');
+    } catch (err) {
+      spinner.stop('Failed');
+      if (server) { try { await server.close(); } catch { /* best-effort */ } }
+      connector?.dispose();
+      throw err;
     }
-    try { await server.close(); } catch { /* best-effort */ }
-    connector.dispose();
-    connector = undefined;
-    server = undefined;
-    process.stderr.write(dim('  Server stopped.') + '\n\n');
-  } catch (err) {
-    spinner.stop('Failed');
-    // Clean up anything that was started
-    if (server) { try { await server.close(); } catch { /* best-effort */ } }
-    connector?.dispose();
-    throw err;
-  } finally {
-    await cleanup();
-  }
+  }, {
+    syncMode: 'full',
+    // serve accepts write requests from dApps — must be strictly synced.
+    requireStrictSync: true,
+    // Save logic is conditional (skip if pending txs) — done manually above.
+    skipAutoSave: true,
+    signal,
+    onStatus: (s) => spinner.update(s),
+    onSyncProgress: (applied, highest) => {
+      if (highest > 0) {
+        const pct = Math.min(Math.round((applied / highest) * 100), 100);
+        spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
+      }
+    },
+    onSyncDetail: (detail) => spinner.update(`Syncing wallet... (waiting on: ${detail})`),
+  }).finally(() => {
+    restoreRpc();
+    unsuppress();
+  });
 }
 
 // ── Helpers ──
