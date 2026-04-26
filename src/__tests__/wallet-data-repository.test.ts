@@ -225,9 +225,12 @@ describe('WalletDataRepository — invalidation', () => {
 
     const dustAgain = await repo.dust(SEED, NETWORK);
     const unshieldedAgain = await repo.unshielded(SEED, NETWORK);
-    expect(dustAgain.fromCache).toBe(false);   // re-fetched
+    // Network was hit again for dust (memo dropped), but the disk checkpoint
+    // from the first call survived → fromCache is true (delta-resume counts).
+    expect(dustCalls).toBe(2);                    // network hit, memo was dropped
+    expect(dustAgain.fromCache).toBe(true);       // disk-resume from prior save
+    expect(dustAgain.eventsApplied).toBe(0);      // fakeDustResult returns 0 new events
     expect(unshieldedAgain.fromCache).toBe(true); // still memo'd
-    expect(dustCalls).toBe(2);
-    expect(unshieldedCalls).toBe(1);
+    expect(unshieldedCalls).toBe(1);              // no network hit
   });
 });

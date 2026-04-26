@@ -95,7 +95,11 @@ If we later need pluggable storage backends, alternative RPC transports, or fine
       8 boundary tests passing in 66ms; smoke-tested against real localnet
       (cold dust read 241ms → memo hit 3ms; cold unshielded 13ms → memo hit 7ms).
       No callers migrated yet.
-- [ ] **Step 2** — migrate `dust status` end-to-end as the canonical example
+- [x] **Step 2** — `dust status` migrated to `repo.dust(...)`. CLI human path
+      schema-identical to baseline (only the time-varying `dustBalance` /
+      `eventsApplied` / `cached` fields shift, as expected). MCP slim shape
+      preserved. In-process back-to-back: cold 3050ms → memo hits 2–4ms (~1000×).
+- [ ] **Step 3** — migrate `balance` (both lightweight and full-facade paths)
 - [ ] **Step 3** — migrate `balance` (both lightweight and full-facade paths)
 - [ ] Migrate `wallet info` (where it touches caches)
 - [ ] **Step 4 (lock-in moment)** — migrate `executeTransfer` → `withFacade`. Pause and review.
@@ -148,3 +152,15 @@ of the five — defer until adding a new tool starts to hurt.
 - Multi-process distributed cache (not needed; single-user CLI).
 - Replacing the SDK's facade with our own implementation.
 - Anything that breaks the byte-for-byte `mn <cmd> --json` contract.
+
+## Surfaced during Step 2 (file as separate work)
+
+- **`captureCommand` concurrency bug.** `setCaptureTarget(fn)` is module-global
+  state. When an MCP client batches three `tools/call` requests and the SDK
+  dispatches them concurrently, all three handlers race to overwrite the same
+  global; only the last one's caller sees the `writeJsonResult` payload, the
+  other two get `{}`. Pre-existing — masked because tool calls used to be slow
+  enough they finished before the next started. Memo-hit reads now complete in
+  microseconds and surface the race. Fix: associate the captureTarget with each
+  invocation (e.g. async-local-storage or pass a captureBuffer through the call
+  chain). Out of scope for Step 2; track in a follow-up.

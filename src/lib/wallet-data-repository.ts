@@ -57,8 +57,14 @@ export interface DustView {
   availableCoins: number;
   ownedUtxoCount: number;
   syncTime: Date;
-  /** True iff this read came from a cache layer rather than the network. */
+  /**
+   * True iff any cache layer participated — either an in-memory memo hit, OR a
+   * disk-cache resume (delta sync from a previous checkpoint). False only for
+   * a true cold scan from event 0.
+   */
   fromCache: boolean;
+  /** Number of events applied by this call (0 on memo hits; delta count on disk-resume; full count on cold). */
+  eventsApplied: number;
   /** Wall-clock millis when this value was last refreshed from the network. */
   fetchedAt: number;
 }
@@ -161,7 +167,7 @@ export class WalletDataRepository {
 
     if (!opts.forceFresh) {
       const hit = await this.tryMemo(memoKey, network, this.dustMemo, opts.signal);
-      if (hit) return { ...hit, fromCache: true };
+      if (hit) return { ...hit, fromCache: true, eventsApplied: 0 };
     }
 
     // Validate disk cache against chain genesis hash (cheap once memoised).
@@ -195,7 +201,8 @@ export class WalletDataRepository {
       availableCoins: result.availableCoins,
       ownedUtxoCount: result.ownedUtxoCount,
       syncTime: result.syncTime,
-      fromCache: false,
+      fromCache: cached !== null,        // disk-resume counts as cached
+      eventsApplied: result.eventCount,
       fetchedAt: this.now(),
     };
     const tip = await this.getTip(network, opts.signal);

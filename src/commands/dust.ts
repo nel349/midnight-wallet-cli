@@ -7,7 +7,7 @@ import { type ParsedArgs, getFlag, hasFlag, isVerbose, isMinimalMode, rejectNoCa
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
-import { applyEndpointOverrides } from '../lib/network.ts';
+import { applyEndpointOverrides, type NetworkConfig } from '../lib/network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForLiteSyncedState, type FacadeBundle } from '../lib/facade.ts';
 import { deriveDustSeed } from '../lib/derivation.ts';
 import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
@@ -16,6 +16,7 @@ import { checkBalance } from '../lib/balance-subscription.ts';
 import { readDustBalanceDirect } from '../lib/dust-direct.ts';
 import { loadDustCache, saveDustCache, dustPublicKeyHex } from '../lib/dust-direct-cache.ts';
 import { primeDustCacheWithFeedback } from '../lib/dust-prime.ts';
+import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { header, keyValue, divider, formatDust, successMessage, toDust } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
@@ -69,7 +70,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     // Registered → read balance directly from indexer (bypasses the dust-wallet
     // SDK's `isConnected` hang). No facade needed for a read-only query.
     const useCache = !hasFlag(args, 'no-cache');
-    await dustStatusDirect(seedBuffer, networkName, networkConfig.indexerWS, preCheck, isJson, minimal, useCache, signal);
+    await dustStatusDirect(seedBuffer, networkConfig, preCheck, isJson, minimal, useCache, signal);
     return;
   }
 
@@ -296,63 +297,29 @@ async function dustRegister(
   }
 }
 
-// Registered-status path: read dust balance directly from the indexer by
-// subscribing to `dustLedgerEvents`, deserializing each raw event, and replaying
-// into a DustLocalState. Bypasses the dust-wallet SDK facade entirely —
-// no proof server, no keystore, no `isConnected` hang.
-//
-// Caching: persists the serialized DustLocalState + lastAppliedEventId between
-// runs (keyed by network + dust pubkey). Subsequent runs resume from the
-// checkpoint, subscribing to only new events since last sync.
+// Registered-status path: indexer-direct dust read via the wallet data
+// repository. Repo handles cache load/save, in-memory memo, tip-aware
+// invalidation, and force-fresh — see lib/wallet-data-repository.ts.
 async function dustStatusDirect(
   seedBuffer: Buffer,
-  networkName: string,
-  indexerWS: string,
+  networkConfig: NetworkConfig,
   preCheck: PreCheckResult,
   jsonMode: boolean,
   minimal: boolean,
   useCache: boolean,
   signal?: AbortSignal,
 ): Promise<void> {
-  const dustSeed = deriveDustSeed(seedBuffer);
-  const dustSecretKey = ledger.DustSecretKey.fromSeed(dustSeed);
-  const pubkeyHex = dustPublicKeyHex(dustSecretKey.publicKey);
-
-  const cached = useCache ? loadDustCache(networkName, pubkeyHex) : null;
-  const startFromId = cached ? cached.lastAppliedEventId + 1 : 0;
-
-  const spinner = startSpinner(
-    cached
-      ? `Resuming from cache (last event ${cached.lastAppliedEventId})...`
-      : `Reading dust events from ${networkName}...`,
-  );
+  const networkName = networkConfig.networkId.toLowerCase();
+  const spinner = startSpinner(`Reading dust events from ${networkName}...`);
 
   try {
-    const result = await readDustBalanceDirect(dustSecretKey, indexerWS, {
-      initialState: cached?.state,
-      startFromId,
-      onProgress: (applied, maxId) => {
-        if (maxId > 0) {
-          spinner.update(`Reading dust events... ${applied}/${maxId + 1 - startFromId}`);
-        } else {
-          spinner.update(`Reading dust events... ${applied}`);
-        }
-      },
+    const view = await defaultRepository().dust(seedBuffer, networkConfig, {
+      forceFresh: !useCache,
       signal,
+      onStatus: (msg) => spinner.update(msg),
     });
 
-    // Save cache for next run (only if we actually advanced, or no cache existed).
-    if (useCache && (result.lastAppliedEventId >= 0 || !cached)) {
-      try {
-        // When no new events arrived but we had a cache, preserve the prior id.
-        const savedId = result.lastAppliedEventId >= 0
-          ? result.lastAppliedEventId
-          : (cached?.lastAppliedEventId ?? -1);
-        saveDustCache(networkName, pubkeyHex, result.state, savedId);
-      } catch { /* best-effort */ }
-    }
-
-    spinner.stop(cached && result.eventCount === 0 ? 'Cache up to date' : 'Dust events applied');
+    spinner.stop(view.fromCache && view.eventsApplied === 0 ? 'Cache up to date' : 'Dust events applied');
 
     const { registeredUtxos, unregisteredUtxos } = preCheck;
 
@@ -365,8 +332,8 @@ async function dustStatusDirect(
           registered: true,
           registeredUtxos,
           unregisteredUtxos,
-          dustBalance: toDust(result.balance),
-          dustAvailable: result.availableCoins > 0,
+          dustBalance: toDust(view.balance),
+          dustAvailable: view.availableCoins > 0,
         });
         return;
       }
@@ -375,11 +342,11 @@ async function dustStatusDirect(
         registered: true,
         registeredUtxos,
         unregisteredUtxos,
-        dustBalance: toDust(result.balance),
-        dustAvailable: result.availableCoins > 0,
-        eventsApplied: result.eventCount,
-        ownedUtxos: result.ownedUtxoCount,
-        cached: cached !== null,
+        dustBalance: toDust(view.balance),
+        dustAvailable: view.availableCoins > 0,
+        eventsApplied: view.eventsApplied,
+        ownedUtxos: view.ownedUtxoCount,
+        cached: view.fromCache,
         network: networkName,
       });
       return;
@@ -387,16 +354,16 @@ async function dustStatusDirect(
 
     // Machine-readable to stdout
     process.stdout.write('registered=yes\n');
-    process.stdout.write(`dust=${result.balance}\n`);
+    process.stdout.write(`dust=${view.balance}\n`);
     process.stdout.write(`registered_utxos=${registeredUtxos}\n`);
     process.stdout.write(`unregistered_utxos=${unregisteredUtxos}\n`);
 
     // Formatted to stderr
     process.stderr.write(keyValue('Registered', bold('yes')) + '\n');
     process.stderr.write(keyValue('UTXOs', `${registeredUtxos} registered, ${unregisteredUtxos} unregistered`) + '\n');
-    process.stderr.write(keyValue('Dust Balance', bold(formatDust(result.balance))) + '\n');
-    process.stderr.write(keyValue('Dust Available', result.availableCoins > 0 ? 'yes' : 'no') + '\n');
-    process.stderr.write(keyValue('Events applied', result.eventCount.toString() + (cached ? ' (delta)' : '')) + '\n');
+    process.stderr.write(keyValue('Dust Balance', bold(formatDust(view.balance))) + '\n');
+    process.stderr.write(keyValue('Dust Available', view.availableCoins > 0 ? 'yes' : 'no') + '\n');
+    process.stderr.write(keyValue('Events applied', view.eventsApplied.toString() + (view.fromCache ? ' (delta)' : '')) + '\n');
     if (unregisteredUtxos > 0) {
       process.stderr.write('\n' + dim(`${unregisteredUtxos} UTXO(s) not yet registered. Run: midnight dust register`) + '\n');
     }
