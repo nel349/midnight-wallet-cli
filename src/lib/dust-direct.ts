@@ -266,6 +266,15 @@ export function readDustBalanceDirect(
         return;
       }
 
+      // Update lastEventId BEFORE flushPending so onCheckpoint sees the id
+      // of the most recent event included in the chunk it just applied. If
+      // we update after flush, the saved checkpoint claims it covers id N
+      // when it actually contains events through id N+CHUNK_SIZE-1 — the
+      // next call resumes at N+1 and re-applies events already in the
+      // state, corrupting the dust commitment tree.
+      lastEventId = evt.id;
+      if (evt.maxId > maxIdSeen) maxIdSeen = evt.maxId;
+
       // Flush to the state in chunks so the final step is cheap and the
       // event loop can breathe between WASM calls.
       if (pending.length >= CHUNK_SIZE) {
@@ -276,9 +285,6 @@ export function readDustBalanceDirect(
           return;
         }
       }
-
-      lastEventId = evt.id;
-      if (evt.maxId > maxIdSeen) maxIdSeen = evt.maxId;
       onProgress?.(eventsAppliedCount + pending.length, maxIdSeen);
       resetIdleTimer();
 
