@@ -123,8 +123,20 @@ If we later need pluggable storage backends, alternative RPC transports, or fine
       verified byte-for-byte identical on undeployed (positional + wallet).
       `ReadOptions` gained `onProgress?: (current, highest) => void` so
       callers can wire spinner percentages through the repo.
-- [ ] Migrate `wallet info` (where it touches caches)
-- [ ] **Step 4 (lock-in moment)** — migrate `executeTransfer` → `withFacade`. Pause and review.
+- [x] `wallet info` — confirmed nothing to migrate (reads only `~/.midnight/wallets/<name>.json`,
+      doesn't touch dust/wallet-cache files).
+- [x] **Step 4 (lock-in moment)** — `executeTransfer` migrated to
+      `repo.withFacade(...)`. Three retry loops collapsed into the repo:
+      sync-retry on `StaleCacheError` + timeout, cold-start race retry on
+      `Wallet.InsufficientFunds`, plus optional dust pre-prime in write-mode.
+      `executeTransfer` body shrank from ~225 lines (orchestration + 3 retry
+      loops) to ~70 lines (validate, pre-flight, ensureDust, build/submit).
+      SDK error classifiers extracted to `src/lib/sdk-errors.ts` to break
+      a circular import. Verified:
+      - Cold undeployed `mn airdrop`: 18s end-to-end.
+      - Preprod `mn transfer bob → alice 1 NIGHT`: 27s, txHash returned.
+      - 893 tests passing.
+      **Pause and review before fanning out.**
 - [ ] Migrate `airdrop`, `dust register`, `serve`, `contract`
 - [ ] Delete the now-unused shallow cache unit tests
 - [ ] Delete the old utilities once nothing imports them

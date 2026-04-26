@@ -8,11 +8,8 @@ import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sd
 import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
-import { type FacadeBundle, buildFacade, startAndSyncFacade, quickSync, stopFacade, suppressSdkTransientErrors, StaleCacheError } from './facade.ts';
-import { primeDustCacheWithFeedback } from './dust-prime.ts';
-import { clearDustDirectCache, dustPublicKeyHexFromSeed } from './dust-direct-cache.ts';
-import { clearWalletCache } from './wallet-cache.ts';
-import { loadWalletCache, saveWalletCache } from './wallet-cache.ts';
+import { type FacadeBundle, quickSync, suppressSdkTransientErrors } from './facade.ts';
+import { defaultRepository } from './wallet-data-repository.ts';
 import { verbose } from './verbose.ts';
 import {
   NATIVE_TOKEN_TYPE,
@@ -25,7 +22,6 @@ import {
   DUST_REGISTRATION_TIMEOUT_MS,
   DUST_REGISTRATION_RETRY_DELAY_MS,
   SYNC_ATTEMPT_TIMEOUT_MS,
-  SYNC_ATTEMPT_REMOTE_TIMEOUT_MS,
   DUST_COST_OVERHEAD,
   MIN_DUST_FOR_TRANSFER,
 } from './constants.ts';
@@ -123,61 +119,11 @@ export function validateRecipientAddress(address: string, networkConfig: Network
 
 // ── Error detection ──────────────────────────────────────────────────
 
-/**
- * Check if an error is a transaction submission rejection from the node.
- *
- * During dust registration, this is almost always error 138
- * (BalanceCheckOverspend) — the estimated dust capacity hasn't grown
- * large enough to cover the tx fee yet.
- *
- * The SDK throws a generic "Transaction submission error" without the
- * actual error code (138). The code is only printed to console by
- * polkadot-js. So we match on the submission error message pattern
- * plus any "138" in the cause chain as a fallback.
- */
-function isTransactionRejectedError(err: any): boolean {
-  let current = err;
-  while (current) {
-    const msg = String(current?.message ?? '').toLowerCase();
-    if (msg.includes('submission error')) return true;
-    if (msg.includes('transaction') && msg.includes('invalid')) return true;
-    if (msg.includes('138')) return true;
-    const tag = current?._tag;
-    if (tag === 'TransactionInvalidError' || tag === 'SubmissionError') return true;
-    current = current.cause;
-  }
-  return false;
-}
-
-/**
- * Check if an error is dust-related — the SDK throws various messages when
- * dust capacity is too low to pay fees. All of these are retryable by
- * waiting for dust generation capacity to grow.
- */
-export function isDustRelatedError(err: any): boolean {
-  const msg = err?.message?.toLowerCase() ?? '';
-  return msg.includes('not enough dust') ||
-    msg.includes('dust generated') ||
-    msg.includes('insufficient funds') ||
-    msg.includes('no dust tokens') ||
-    isTransactionRejectedError(err);
-}
-
-/**
- * Match the SDK's `Wallet.InsufficientFunds` error surfaced from
- * `transferTransaction`. Distinct from our own pre-flight "Insufficient
- * balance" (that message starts with "Insufficient balance:"). The SDK
- * raises this from `#balanceSegment` when its internal coin index is
- * empty — which on a freshly-started localnet can happen even though the
- * state snapshot the facade just emitted shows UTXOs. Recovery is a full
- * facade restart, not an in-place quick-sync.
- */
-export function isSdkInsufficientFundsError(err: any): boolean {
-  const msg = err?.message?.toLowerCase() ?? '';
-  const tag = err?._tag;
-  if (tag === 'Wallet.InsufficientFunds') return true;
-  return msg === 'insufficient funds' || msg.startsWith('insufficient funds');
-}
+// SDK error classifiers moved to ./sdk-errors.ts so wallet-data-repository
+// can import them without a circular dependency. Re-exported for callers
+// that still import from this module.
+export { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts';
+import { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts';
 
 /** Format dust specks to human-readable DUST string (e.g. "0.300000"). Lib-layer safe (no UI import). */
 function dustToString(specks: bigint): string {
@@ -518,13 +464,13 @@ async function buildAndSubmitTransfer(
 // ── Main transfer flow ───────────────────────────────────────────────
 
 /**
- * Execute a full transfer flow:
- * 1. Build facade from seed + network config
- * 2. Start & sync facade
- * 3. Check balance
- * 4. Ensure dust is available
- * 5. Build/sign/prove/submit transaction (re-ensures dust on retry)
- * 6. Clean shutdown
+ * Execute a full transfer flow. The lifecycle and recovery loops live in
+ * `repo.withFacade(...)`: pre-prime dust, sync-retry on stale-cache /
+ * timeout, cold-start race retry on SDK InsufficientFunds, save+invalidate
+ * on success, stopFacade in finally. This function only owns the
+ * transfer-specific work: pre-flight checks (balance, dust threshold),
+ * `ensureDust` orchestration, and the build/sign/prove/submit retry loop
+ * (handled inside `buildAndSubmitTransfer` for stale-UTXO + dust errors).
  */
 export async function executeTransfer(params: TransferParams): Promise<TransferResult> {
   const {
@@ -539,175 +485,57 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     onProving,
     onSubmitting,
     onSyncWarning,
-    walletAddress,
-    networkName,
   } = params;
 
   const amount = nightToMicro(amountNight);
-
-  // Validate and decode recipient address
   const decodedAddress = validateRecipientAddress(recipientAddress, networkConfig);
 
-  // Suppress known transient SDK errors (Wallet.Sync: Internal Server Error, etc.)
+  // Suppress SDK transient errors + polkadot-js RPC noise for the duration
+  // of the transfer (covers dust registration AND tx submission).
   const unsuppress = suppressSdkTransientErrors(onSyncWarning);
-
-  // Suppress polkadot-js RPC-CORE noise — single suppression point for the
-  // entire transfer flow (covers dust registration and transfer submission).
   const restoreRpc = suppressRpcNoise();
 
-  // Writes always use the cache: on hosted networks the SDK's fresh-sync
-  // path is too slow to be viable, so there's no user-facing `--no-cache`
-  // flag. `mn cache clear` wipes the cache explicitly if needed.
-  const useCache = walletAddress && networkName;
-  // S1: wipe caches whose stored chainId no longer matches this network's
-  // current genesis hash (remote reset / testnet reindex). Cheap, memoised.
-  if (useCache && networkName) {
-    const { validateNetworkCaches } = await import('./wallet-cache.ts');
-    await validateNetworkCaches(networkName, networkConfig.node);
-  }
-  const cache = useCache ? loadWalletCache(walletAddress, networkName) : null;
-
-  // Prime the dust-direct cache so the facade's dust wallet restores from a
-  // near-tip checkpoint. Reuses the caller's `onDust` hook for status —
-  // command-layer spinner picks up prime progress.
-  if (useCache && networkName) {
-    await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
-      onStatus: onDust,
-      signal,
-    });
-  }
-
-  // Build facade — may be rebuilt on sync retry
-  verbose('transfer', 'Building facade...');
-  let bundle = await buildFacade(seedBuffer, networkConfig, cache);
-  let shutdownComplete = false;
-
-  // Signal handling — clean shutdown on abort
-  const cleanup = async () => {
-    if (!shutdownComplete) {
-      shutdownComplete = true;
-      try {
-        await stopFacade(bundle);
-      } catch {
-        // Best-effort shutdown
-      }
-    }
-  };
-
-  const onAbort = () => { cleanup(); };
-  signal?.addEventListener('abort', onAbort, { once: true });
-
   try {
-    // Start & sync with retry — dust wallet can take many events to catch up
-    // on remote networks (preview/preprod). On timeout, save partial progress
-    // to cache so the next attempt resumes where it left off.
-    const isRemote = networkConfig.networkId !== 'Undeployed';
-    const syncTimeoutMs = isRemote ? SYNC_ATTEMPT_REMOTE_TIMEOUT_MS : SYNC_ATTEMPT_TIMEOUT_MS;
-    const MAX_SYNC_ATTEMPTS = 3;
-    let syncedState!: any;
-
-    verbose('transfer', `Sync timeout: ${syncTimeoutMs / 1000}s (${isRemote ? 'remote' : 'local'} network)`);
-
-    for (let attempt = 1; attempt <= MAX_SYNC_ATTEMPTS; attempt++) {
-      try {
-        syncedState = await startAndSyncFacade(bundle, {
-          onProgress: onSync,
-          onSyncDetail,
-          timeoutMs: syncTimeoutMs,
-          syncMode: 'lite',
-          // Writes build ZK proofs — need strict sync or the commitment tree
-          // is stale and chain rejects with MalformedError::InvalidDustSpendProof.
-          requireStrictSync: true,
-        });
-        break;
-      } catch (err: any) {
+    return await defaultRepository().withFacade(
+      seedBuffer,
+      networkConfig,
+      async ({ bundle, state }) => {
         if (signal?.aborted) throw new Error('Operation cancelled');
 
-        // Auto-recover from stale cache (localnet reset, chain switch, etc).
-        // Wipe both caches and re-prime so the retry starts from fresh state.
-        if (err instanceof StaleCacheError && attempt < MAX_SYNC_ATTEMPTS && useCache) {
-          onDust?.(`Cache is stale, clearing and rebuilding (attempt ${attempt + 1}/${MAX_SYNC_ATTEMPTS})...`);
-          verbose('transfer', `Stale cache detected: ${err.message.split('\n')[0]}`);
-          await stopFacade(bundle).catch(() => {});
-          clearWalletCache(walletAddress, networkName);
-          clearDustDirectCache(networkName, dustPublicKeyHexFromSeed(seedBuffer));
-          // Re-prime the dust cache so the next attempt restores from a
-          // current checkpoint instead of a full SDK resync.
-          await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
-            onStatus: onDust,
-            signal,
-          });
-          bundle = await buildFacade(seedBuffer, networkConfig, null);
-          continue;
+        verbose('transfer', 'Sync complete, checking balance...');
+        const unshieldedBalance = state.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
+        const availableCoinCount = state.unshielded.availableCoins?.length ?? 0;
+        verbose('transfer', `Balance: ${Number(unshieldedBalance) / TOKEN_MULTIPLIER} NIGHT, coins: ${availableCoinCount}`);
+        if (unshieldedBalance < amount) {
+          const haveNight = Number(unshieldedBalance) / TOKEN_MULTIPLIER;
+          throw new Error(
+            `Insufficient balance: ${haveNight.toFixed(6)} NIGHT available, ` +
+            `${amountNight} NIGHT requested`
+          );
         }
 
-        if (attempt < MAX_SYNC_ATTEMPTS && String(err?.message).includes('timed out')) {
-          // Save partial sync progress to cache before retrying
-          if (useCache) {
-            try {
-              verbose('transfer', 'Saving partial sync progress to cache...');
-              await saveWalletCache(walletAddress, networkName, bundle.facade);
-            } catch { /* best-effort */ }
-          }
-          onDust?.(`Sync timed out, retrying (attempt ${attempt + 1}/${MAX_SYNC_ATTEMPTS})...`);
-          await stopFacade(bundle).catch(() => {});
-          const retryCache = useCache ? loadWalletCache(walletAddress, networkName) : null;
-          bundle = await buildFacade(seedBuffer, networkConfig, retryCache);
-          continue;
+        // Pre-flight dust-below-threshold check. Facade restart won't change
+        // this outcome, so fail fast here.
+        const initialDustBalance = state.dust.balance(new Date());
+        if (initialDustBalance > 0n && initialDustBalance < MIN_DUST_FOR_TRANSFER) {
+          throw new Error(
+            `Insufficient dust for transaction fees.\n` +
+            `Available: ${dustToString(initialDustBalance)} DUST, need ≥${dustToString(MIN_DUST_FOR_TRANSFER)} DUST.\n` +
+            `Dust regenerates over time from registered NIGHT UTXOs.\n` +
+            `Check status: midnight dust status`
+          );
         }
-        throw err;
-      }
-    }
 
-    if (signal?.aborted) throw new Error('Operation cancelled');
+        if (signal?.aborted) throw new Error('Operation cancelled');
 
-    verbose('transfer', 'Sync complete, checking balance...');
-    const unshieldedBalance = syncedState.unshielded.balances[ledger.unshieldedToken().raw] ?? 0n;
-    const availableCoinCount = syncedState.unshielded.availableCoins?.length ?? 0;
-    verbose('transfer', `Balance: ${Number(unshieldedBalance) / TOKEN_MULTIPLIER} NIGHT, coins: ${availableCoinCount}`);
-    if (unshieldedBalance < amount) {
-      const haveNight = Number(unshieldedBalance) / TOKEN_MULTIPLIER;
-      throw new Error(
-        `Insufficient balance: ${haveNight.toFixed(6)} NIGHT available, ` +
-        `${amountNight} NIGHT requested`
-      );
-    }
-
-    // Pre-flight dust-below-threshold check using the initial synced state.
-    // Facade restart won't change this outcome, so fail fast here.
-    const initialDustBalance = syncedState.dust.balance(new Date());
-    if (initialDustBalance > 0n && initialDustBalance < MIN_DUST_FOR_TRANSFER) {
-      throw new Error(
-        `Insufficient dust for transaction fees.\n` +
-        `Available: ${dustToString(initialDustBalance)} DUST, need ≥${dustToString(MIN_DUST_FOR_TRANSFER)} DUST.\n` +
-        `Dust regenerates over time from registered NIGHT UTXOs.\n` +
-        `Check status: midnight dust status`
-      );
-    }
-
-    // Cold-start race: on a freshly-started localnet the facade's state
-    // observable emits a snapshot with coins *before* the SDK's internal
-    // coin index (used by transferTransaction's #balanceSegment) is
-    // populated. Result: InsufficientFunds at tx-build time even though
-    // the pre-flight balance check just saw N coins. In-place retry via
-    // quickSync doesn't help — the stale index is in the subscription's
-    // shareReplay buffer. A full facade stop/rebuild re-primes it, but
-    // needs a small pause to let the indexer catch up between attempts.
-    const MAX_COLD_START_ATTEMPTS = 5;
-    const COLD_START_DELAY_MS = 5_000;
-    let txHash: string | undefined;
-    for (let attempt = 1; attempt <= MAX_COLD_START_ATTEMPTS; attempt++) {
-      if (signal?.aborted) throw new Error('Operation cancelled');
-
-      try {
         verbose('transfer', 'Ensuring dust availability...');
-        await ensureDust(bundle, onDust, syncedState);
+        await ensureDust(bundle, onDust, state);
         verbose('transfer', 'Dust available');
 
         if (signal?.aborted) throw new Error('Operation cancelled');
 
         verbose('transfer', 'Building and submitting transaction...');
-        txHash = await buildAndSubmitTransfer(
+        const txHash = await buildAndSubmitTransfer(
           bundle,
           decodedAddress,
           amount,
@@ -715,39 +543,22 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
           onSubmitting,
           onDust,
         );
-        break;
-      } catch (err) {
-        if (!isSdkInsufficientFundsError(err) || attempt >= MAX_COLD_START_ATTEMPTS) throw err;
-
-        verbose('transfer', `SDK insufficient funds despite ${availableCoinCount} coins in state — facade restart ${attempt + 1}/${MAX_COLD_START_ATTEMPTS} after ${COLD_START_DELAY_MS / 1000}s`);
-        onDust?.(`Refreshing wallet state (attempt ${attempt + 1}/${MAX_COLD_START_ATTEMPTS})...`);
-        await stopFacade(bundle).catch(() => {});
-        await new Promise((r) => setTimeout(r, COLD_START_DELAY_MS));
-        if (signal?.aborted) throw new Error('Operation cancelled');
-        const retryCache = useCache ? loadWalletCache(walletAddress, networkName) : null;
-        bundle = await buildFacade(seedBuffer, networkConfig, retryCache);
-        syncedState = await startAndSyncFacade(bundle, {
-          onProgress: onSync,
-          onSyncDetail,
-          timeoutMs: syncTimeoutMs,
-          syncMode: 'lite',
-          requireStrictSync: true,
-        });
-      }
-    }
-
-    if (!txHash) throw new Error('Transfer failed: no transaction hash returned');
-
-    // Save cache after successful transfer (post-tx state has updated UTXOs)
-    if (useCache) {
-      try { await saveWalletCache(walletAddress, networkName, bundle.facade); } catch { /* best-effort */ }
-    }
-
-    return { txHash, amountMicroNight: amount };
+        return { txHash, amountMicroNight: amount };
+      },
+      {
+        syncMode: 'lite',
+        // Writes build ZK proofs — need strict sync or the commitment tree
+        // is stale and chain rejects with MalformedError::InvalidDustSpendProof.
+        requireStrictSync: true,
+        signal,
+        onStatus: onDust,
+        onSyncProgress: onSync,
+        onSyncDetail,
+        onSyncWarning,
+      },
+    );
   } finally {
-    signal?.removeEventListener('abort', onAbort);
     restoreRpc();
     unsuppress();
-    await cleanup();
   }
 }

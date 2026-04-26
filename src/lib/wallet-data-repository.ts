@@ -27,9 +27,11 @@ import {
   buildFacade,
   startAndSyncFacade,
   stopFacade,
+  StaleCacheError,
   type FacadeBundle,
   type SyncMode,
 } from './facade.ts';
+import { isSdkInsufficientFundsError } from './sdk-errors.ts';
 import {
   loadDustCache,
   saveDustCache,
@@ -110,6 +112,16 @@ export interface FacadeOptions extends ReadOptions {
   requireStrictSync?: boolean;
   /** If true, skip the post-resolve invalidation (read-only borrowers). */
   readOnly?: boolean;
+  /** Per-attempt sync deadline. Default: SYNC_ATTEMPT_TIMEOUT_MS (local) or SYNC_ATTEMPT_REMOTE_TIMEOUT_MS (remote). */
+  syncTimeoutMs?: number;
+  /** Per-emission sync progress hook (forwards startAndSyncFacade onProgress). */
+  onSyncProgress?: (applied: number, highest: number) => void;
+  /** Per-emission detail hook (which wallets are still syncing). */
+  onSyncDetail?: (detail: string) => void;
+  /** Suppressed-but-relayed SDK transient warnings (Wallet.Sync, etc). */
+  onSyncWarning?: (tag: string, message: string) => void;
+  /** Suppress the dust pre-prime even in write mode (used by tests / debug). */
+  noPrime?: boolean;
 }
 
 export type TipFingerprint = string;
@@ -161,6 +173,17 @@ const TIP_PROBE_TTL_MS = 5_000;
  * indexer. A misbehaving indexer that streams events forever still terminates.
  */
 const DUST_PARTIAL_RETRIES = 6;
+
+/** Default per-sync-attempt deadline (local). */
+const SYNC_ATTEMPT_LOCAL_MS = 30_000;
+/** Default per-sync-attempt deadline (remote — preprod/preview Day 0). */
+const SYNC_ATTEMPT_REMOTE_MS = 120_000;
+/** Sync-retry budget: number of build+sync attempts before giving up on transient sync errors. */
+const SYNC_MAX_ATTEMPTS = 3;
+/** Cold-start race retry budget: how many times to stop+rebuild+re-sync when the SDK reports InsufficientFunds despite a synced state with coins. */
+const COLD_START_MAX_ATTEMPTS = 5;
+/** Backoff between cold-start retries — gives the indexer time to settle. */
+const COLD_START_DELAY_MS = 5_000;
 
 export class WalletDataRepository {
   private readonly now: () => number;
@@ -286,6 +309,32 @@ export class WalletDataRepository {
 
   // ── Borrow pattern (writes) ───────────────────────
 
+  /**
+   * Borrow a synced WalletFacade for a write or facade-bound read. Owns the
+   * full lifecycle plus the recovery loops every write path used to
+   * re-implement:
+   *
+   *   1. Optional dust pre-prime (skipped when `noPrime: true` or when in
+   *      read-only mode). Warms the dust-direct cache so the facade's dust
+   *      wallet restores from a near-tip checkpoint instead of cold-syncing
+   *      via the SDK's `isConnected` path.
+   *   2. Sync-retry on `StaleCacheError` (chain reset / re-index): wipe both
+   *      caches, re-prime, rebuild from a clean cache, re-sync.
+   *   3. Sync-retry on timeout: persist whatever progress the facade made,
+   *      reload from disk so the next attempt resumes from the checkpoint.
+   *   4. Cold-start race retry around `fn`: when the SDK throws
+   *      `Wallet.InsufficientFunds` despite the synced state showing coins
+   *      (the SDK's internal coin index hadn't caught up to the state
+   *      snapshot), stop+rebuild+re-sync and call fn again. Bounded.
+   *   5. Save wallet cache on success.
+   *   6. Auto-invalidate dust+unshielded+facade memo entries for this seed
+   *      (writes mutate state). Read-only borrowers pass `readOnly: true`.
+   *   7. stopFacade in `finally`.
+   *
+   * The SDK's `FacadeBundle` is intentionally exposed via `lease.bundle` so
+   * callers can build/sign/submit transactions. Tests of write paths through
+   * this method are integration tests against a real network.
+   */
   async withFacade<T>(
     seed: Buffer,
     network: NetworkConfig,
@@ -294,20 +343,126 @@ export class WalletDataRepository {
   ): Promise<T> {
     const syncMode = opts.syncMode ?? 'full';
     const requireStrictSync = opts.requireStrictSync ?? true;
+    const writeMode = requireStrictSync && !opts.readOnly;
     const networkName = networkNameOf(network);
     const address = deriveUnshieldedAddress(seed, networkName);
+    const isRemote = network.networkId !== 'Undeployed';
+    const syncTimeoutMs = opts.syncTimeoutMs
+      ?? (isRemote ? SYNC_ATTEMPT_REMOTE_MS : SYNC_ATTEMPT_LOCAL_MS);
 
     await validateWalletCacheChainId(address, networkName, network.node);
-    const cache = opts.forceFresh ? null : loadWalletCache(address, networkName, this.cacheDir);
-    const bundle = await buildFacade(seed, network, cache);
+
+    // ── Pre-prime the dust-direct cache for write-mode borrowers ──
+    // Equivalent to the legacy `primeDustCacheWithFeedback` step: warms the
+    // dust state to chain tip on disk so buildFacade's dust bridge starts
+    // near-tip. Read-only borrowers skip it.
+    if (writeMode && !opts.noPrime && !opts.forceFresh) {
+      try {
+        await this.dust(seed, network, { signal: opts.signal, onStatus: opts.onStatus });
+      } catch (err) {
+        // Pre-prime is best-effort — the actual sync below will re-attempt
+        // anyway. Surface the error only via onSyncWarning if anyone cares.
+        opts.onSyncWarning?.('PrePrime', (err as Error).message);
+      }
+    }
+
+    let bundle: FacadeBundle | undefined;
+    let syncedState: FacadeState | undefined;
+    let cleanupDone = false;
+    const cleanup = async () => {
+      if (cleanupDone || !bundle) return;
+      cleanupDone = true;
+      try { await stopFacade(bundle); } catch { /* best-effort */ }
+    };
+
     try {
-      const state = await startAndSyncFacade(bundle, { syncMode, requireStrictSync });
-      const result = await fn({ bundle, state });
+      // ── Sync-retry loop (build + start) ────────────────────
+      for (let attempt = 1; attempt <= SYNC_MAX_ATTEMPTS; attempt++) {
+        if (opts.signal?.aborted) throw new Error('Operation cancelled');
+        const cacheBeforeBuild = opts.forceFresh
+          ? null
+          : loadWalletCache(address, networkName, this.cacheDir);
+        bundle = await buildFacade(seed, network, cacheBeforeBuild);
+        try {
+          syncedState = await startAndSyncFacade(bundle, {
+            onProgress: opts.onSyncProgress,
+            onSyncDetail: opts.onSyncDetail,
+            timeoutMs: syncTimeoutMs,
+            syncMode,
+            requireStrictSync,
+          });
+          break;
+        } catch (err: any) {
+          if (opts.signal?.aborted) throw new Error('Operation cancelled');
+
+          if (err instanceof StaleCacheError && attempt < SYNC_MAX_ATTEMPTS && writeMode) {
+            opts.onStatus?.(`Cache is stale, clearing and rebuilding (attempt ${attempt + 1}/${SYNC_MAX_ATTEMPTS})...`);
+            await stopFacade(bundle).catch(() => {});
+            bundle = undefined;
+            clearWalletCache(address, networkName, this.cacheDir);
+            clearDustDirectCache(networkName, dustPublicKeyHexFromSeed(seed), this.cacheDir);
+            // Re-prime the dust cache so the next attempt restores from a
+            // current checkpoint instead of a full SDK resync.
+            try {
+              await this.dust(seed, network, { signal: opts.signal, onStatus: opts.onStatus });
+            } catch { /* best-effort */ }
+            continue;
+          }
+
+          if (attempt < SYNC_MAX_ATTEMPTS && String(err?.message ?? '').includes('timed out')) {
+            // Save partial sync progress to cache before retrying so the next
+            // attempt resumes from the latest event id.
+            try { await saveWalletCache(address, networkName, bundle.facade, this.cacheDir); } catch { /* best-effort */ }
+            opts.onStatus?.(`Sync timed out, retrying (attempt ${attempt + 1}/${SYNC_MAX_ATTEMPTS})...`);
+            await stopFacade(bundle).catch(() => {});
+            bundle = undefined;
+            continue;
+          }
+
+          throw err;
+        }
+      }
+
+      if (!bundle || !syncedState) throw new Error('Sync failed: no facade state after retries');
+
+      // ── Cold-start race retry around fn ───────────────────
+      // The SDK's state observable can emit a snapshot with coins populated
+      // BEFORE the internal #balanceSegment coin index is built. fn's call
+      // to transferTransaction then throws Wallet.InsufficientFunds. Recovery
+      // is a full facade restart, not in-place quick-sync. Bounded.
+      let result: T;
+      let attempt = 0;
+      while (true) {
+        attempt++;
+        if (opts.signal?.aborted) throw new Error('Operation cancelled');
+        try {
+          result = await fn({ bundle, state: syncedState });
+          break;
+        } catch (err) {
+          const canRetry = writeMode && attempt < COLD_START_MAX_ATTEMPTS && isSdkInsufficientFundsError(err);
+          if (!canRetry) throw err;
+          opts.onStatus?.(`Refreshing wallet state (attempt ${attempt + 1}/${COLD_START_MAX_ATTEMPTS})...`);
+          await stopFacade(bundle).catch(() => {});
+          bundle = undefined;
+          await new Promise((r) => setTimeout(r, COLD_START_DELAY_MS));
+          if (opts.signal?.aborted) throw new Error('Operation cancelled');
+          const retryCache = loadWalletCache(address, networkName, this.cacheDir);
+          bundle = await buildFacade(seed, network, retryCache);
+          syncedState = await startAndSyncFacade(bundle, {
+            onProgress: opts.onSyncProgress,
+            onSyncDetail: opts.onSyncDetail,
+            timeoutMs: syncTimeoutMs,
+            syncMode,
+            requireStrictSync,
+          });
+        }
+      }
+
       try { await saveWalletCache(address, networkName, bundle.facade, this.cacheDir); } catch { /* best-effort */ }
       if (!opts.readOnly) this.invalidate({ network, seed });
       return result;
     } finally {
-      await stopFacade(bundle);
+      await cleanup();
     }
   }
 
