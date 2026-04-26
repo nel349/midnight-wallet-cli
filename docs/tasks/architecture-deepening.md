@@ -26,15 +26,54 @@ wallet on this network". Every command stops calling `loadDustCache`, `saveDustC
 `primeDustCache`, `loadWalletCache`, `validateNetworkCaches` directly. They call
 the repo. Repo decides: in-memory hit? on-disk + tip unchanged? else fetch.
 
-- [ ] Frame the problem space + invariants (skill step 4)
-- [ ] Design 3+ candidate interfaces in parallel (skill step 5)
-- [ ] Pick a design (skill step 6)
-- [ ] File RFC as GitHub issue (skill step 7)
-- [ ] Implement repository surface
-- [ ] Migrate one read path (`dust status`) end-to-end as the canonical example
-- [ ] Migrate the rest of the read paths (`balance`, `wallet info`, `dust register` pre-check)
-- [ ] Migrate the write paths (`transfer`, `airdrop`, `dust register`, `serve`, `contract`)
-- [ ] Boundary tests on the repo interface; delete shallow cache unit tests
+### Invariants
+
+1. No silent staleness — reads either return tip-current values or carry an explicit `freshAsOf` the caller can reason about.
+2. Writes invalidate — successful chain writes tell the repo "I changed X" so the next read bypasses the cache for that scope.
+3. Force-fresh always works — one explicit option bypasses every layer.
+4. No persisted secrets — derived state only, keyed by pubkey hashes.
+5. Process-safe — atomic-rename writes preserved; concurrent `mn` invocations don't corrupt cache files.
+6. Network-down tolerant — reads return on-disk value with `lastSyncedAt`, not an error.
+7. Two-layer cache — in-memory layer for the long-lived MCP server process, disk layer shared across `mn` shell invocations.
+
+### Chosen design — hybrid (ergonomic surface + ports & adapters internals)
+
+**Public surface** is ergonomic: trivial 1-line defaults for the 95% case, options object for the rest.
+
+```
+repo.dust(seed, network, opts?)        → DustView
+repo.unshielded(addr, network, opts?)  → UnshieldedView
+repo.withFacade(seed, network, fn, opts?)  → T  // borrow pattern, auto-stop, auto-invalidate
+repo.invalidate(scope)                 → void
+```
+
+**Internals** are ports-and-adapters: `ChainRpcPort`, `IndexerSubscriptionPort`, `FacadePort`, `CacheStoragePort`, `ClockPort`. Production adapters wrap existing modules (`node-rpc.ts`, `balance-subscription.ts` + `dust-direct.ts`, `facade.ts`, `wallet-cache.ts` + `dust-direct-cache.ts`). Test adapters are in-memory.
+
+**Why this hybrid:** Design 3 wins on day-1 ergonomics (1-line call sites). Design 4 wins on testability (cache+tip+invalidation logic becomes unit-testable for the first time, no localnet needed). Combining gives both. Designs 1 and 2 over-rotated (1: elegance over usability; 2: over-engineered for needs we don't have today).
+
+**Defaults locked in:**
+- `freshness = 'tip-aware'` — cache hit valid iff chain tip unchanged. Cheap RPC tip-check beats arbitrary TTL.
+- `forceFresh = false` — opt-in.
+- `withFacade` defaults to `syncMode: 'full'` and `requireStrictSync: true` — matches the dominant write path; readers opt out.
+- `withFacade` auto-invalidates on resolve — write callers were doing this manually anyway.
+- In-memory layer wins over disk; disk wins over network. One read in the same MCP-process tip is free after the first.
+
+**Acknowledged leak:** `withFacade(fn(lease))` exposes the SDK's `FacadeBundle` so callers can build/sign/submit. Defining an opaque handle would require wrapping the SDK's transferTransaction/signRecipe/finalizeRecipe surface — premature. Accept the leak; tests through `withFacade` are integration tests against localnet.
+
+### TODO
+
+- [x] Frame the problem space + invariants
+- [x] Design 3+ candidate interfaces in parallel
+- [x] Pick a design (hybrid 3+4)
+- [ ] Land the repo + ports + production adapters (no callers yet, just the seam)
+- [ ] Migrate `dust status` end-to-end as the canonical example
+- [ ] Migrate `balance` (both lightweight and full-facade paths)
+- [ ] Migrate `wallet info` (where it touches caches)
+- [ ] Migrate `executeTransfer` → `withFacade`
+- [ ] Migrate `airdrop`, `dust register`, `serve`, `contract`
+- [ ] Boundary tests on the repo interface using in-memory adapters
+- [ ] Delete the now-unused shallow cache unit tests
+- [ ] Delete the old utilities once nothing imports them
 - [ ] Measure preprod dust-status latency before/after on a warm session
 
 ## #3 — Facade lifecycle (next)
