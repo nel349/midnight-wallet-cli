@@ -158,10 +158,26 @@ If we later need pluggable storage backends, alternative RPC transports, or fine
         - balance --wallet: schema-identical JSON.
       `mn serve` deferred — long-lived facade is a different lifecycle
       pattern that doesn't fit `withFacade`'s borrow shape.
+- [x] Cleanup: dropped `walletAddress` / `networkName` from `TransferParams`
+      and all four call sites. They were vestigial cache-key plumbing — the
+      repo derives both from the seed.
+- [x] **Measurement** — `scripts/measure-preprod-dust.ts`. Real preprod
+      numbers against alice (236k dust events):
+
+      | Scenario                       |       Time | Speedup vs cold |
+      |--------------------------------|-----------:|----------------:|
+      | Cold (no disk, no memo)        | 237,703 ms |             1×  |
+      | Disk-warm (new CLI process)    |   1,925 ms |          **123×** |
+      | Memo-warm (MCP / same process) |       4 ms |       **59,426×** |
+
+      **Plus correctness:** pre-repo the cold case never completed
+      (180s timeout, 0 events saved). The repo's partial-resume +
+      checkpoint fix made cold succeed at all.
 - [ ] Migrate `serve` (long-lived facade — different pattern)
-- [ ] Delete the now-unused shallow cache unit tests
-- [ ] Delete the old utilities once nothing imports them
-- [ ] Measure preprod dust-status latency before/after on a warm session
+- [ ] Delete cache utilities + their tests once nothing imports them
+      (note: the cache modules `wallet-cache.ts`, `dust-direct-cache.ts`,
+      `dust-prime.ts` are still legitimately used — by the repo internally
+      and by `mn serve`. Real deletion blocked on the serve migration.)
 
 ## #3 — Facade lifecycle (next)
 
