@@ -11,7 +11,7 @@ import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides, type NetworkConfig, type NetworkName } from '../lib/network.ts';
 import { getNetworkId } from '../lib/network-id.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
-import { deriveUnshieldedAddress, deriveShieldedAddress } from '../lib/derive-address.ts';
+import { deriveShieldedAddress } from '../lib/derive-address.ts';
 import { parseAmount, nightToMicro, executeTransfer, ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { suppressSdkTransientErrors } from '../lib/facade.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
@@ -70,7 +70,6 @@ async function unshieldedAirdrop(
   if (isVerbose(args)) enableVerbose();
   const recipientAddress = config.addresses[networkName as NetworkName];
   const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
-  const genesisAddress = deriveUnshieldedAddress(genesisSeedBuffer, networkName as NetworkName);
 
   process.stderr.write('\n' + header('Airdrop') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
@@ -88,8 +87,6 @@ async function unshieldedAirdrop(
       recipientAddress,
       amountNight,
       signal,
-      walletAddress: genesisAddress,
-      networkName,
       onSync(applied, highest) {
         if (highest > 0) {
           const pct = Math.round((applied / highest) * 100);

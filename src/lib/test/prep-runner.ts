@@ -259,8 +259,6 @@ async function stepBalance(amount: number, config: DappTestConfig, callbacks: Pr
     networkConfig,
     recipientAddress: address,
     amountNight: amount,
-    walletAddress: genesisAddress,
-    networkName: network,
     onSync(_applied, _highest) {},
     onDust(status) { callbacks.onMessage(`Dust: ${status}`); },
     onProving() { callbacks.onMessage('Generating ZK proof...'); },

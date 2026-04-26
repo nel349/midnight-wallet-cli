@@ -44,10 +44,6 @@ export interface TransferParams {
   onProving?: () => void;
   onSubmitting?: () => void;
   onSyncWarning?: (tag: string, message: string) => void;
-  /** Wallet address for cache keying (required for cache). */
-  walletAddress?: string;
-  /** Network name for cache keying (required for cache). */
-  networkName?: string;
 }
 
 export interface TransferResult {

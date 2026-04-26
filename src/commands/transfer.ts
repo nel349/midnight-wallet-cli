@@ -119,8 +119,6 @@ async function unshieldedTransfer(
       recipientAddress,
       amountNight,
       signal,
-      walletAddress: address,
-      networkName,
       onSync(applied, highest) {
         if (highest > 0) {
           const pct = Math.min(Math.round((applied / highest) * 100), 100);
