@@ -57,16 +57,19 @@ repo.invalidate(scope)                     → void
 - A `getCurrentTip()` helper that asks the substrate node for its current head (cheap, ~50ms; uses existing `node-rpc.ts`).
 - An `invalidate()` method that clears the in-memory map and marks disk entries stale.
 
-**Two constructor seams for testability** (no full P&A):
+**Four constructor seams for testability** (no full P&A):
 
 ```
 new WalletDataRepository(deps: {
-  now?: () => number;                      // default: Date.now
-  fetchTip?: (n: NetworkConfig) => Promise<TipFingerprint>;  // default: substrate RPC
+  now?:             () => number;
+  fetchTip?:        (n: NetworkConfig) => Promise<TipFingerprint>;
+  fetchUnshielded?: (address, network, onProgress?) => Promise<BalanceSummary>;
+  fetchDust?:       (seed, network, opts) => Promise<DustDirectResult>;
+  cacheDir?:        string;   // tests use a tmp dir
 })
 ```
 
-Tests inject a fake `now()` and a fake `fetchTip()`. That's enough to exercise the cache + tip + invalidation logic without spinning up Docker, the SDK, or the indexer. Cache-policy tests become unit tests for the first time.
+Initial sketch said "two seams"; the honest count to make cache logic genuinely unit-testable (without touching network) is four. Production defaults wire to the existing `chain_getBlockHash` / `checkBalance` / `readDustBalanceDirect` paths.
 
 **Why Option Z over the hybrid:** the hybrid's 5 ports + 5 production adapters + 5 test adapters (~16 files) was over-engineering. Option Z gets the same user-facing wins (tip-aware invalidation, in-memory layer, write-invalidation, force-fresh, ergonomic call sites) and keeps cache-policy logic unit-testable, with one new file and ~150 lines.
 
@@ -87,14 +90,16 @@ If we later need pluggable storage backends, alternative RPC transports, or fine
 
 - [x] Frame the problem space + invariants
 - [x] Design 3+ candidate interfaces in parallel
-- [x] Pick a design (hybrid 3+4)
-- [ ] Land the repo + ports + production adapters (no callers yet, just the seam)
-- [ ] Migrate `dust status` end-to-end as the canonical example
-- [ ] Migrate `balance` (both lightweight and full-facade paths)
+- [x] Pick a design (Option Z — ergonomic surface, four seams)
+- [x] **Step 1** — land the repo + tests (commit `21b3de9`, branch `arch/wallet-data-repository`).
+      8 boundary tests passing in 66ms; smoke-tested against real localnet
+      (cold dust read 241ms → memo hit 3ms; cold unshielded 13ms → memo hit 7ms).
+      No callers migrated yet.
+- [ ] **Step 2** — migrate `dust status` end-to-end as the canonical example
+- [ ] **Step 3** — migrate `balance` (both lightweight and full-facade paths)
 - [ ] Migrate `wallet info` (where it touches caches)
-- [ ] Migrate `executeTransfer` → `withFacade`
+- [ ] **Step 4 (lock-in moment)** — migrate `executeTransfer` → `withFacade`. Pause and review.
 - [ ] Migrate `airdrop`, `dust register`, `serve`, `contract`
-- [ ] Boundary tests on the repo interface using in-memory adapters
 - [ ] Delete the now-unused shallow cache unit tests
 - [ ] Delete the old utilities once nothing imports them
 - [ ] Measure preprod dust-status latency before/after on a warm session
