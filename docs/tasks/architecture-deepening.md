@@ -137,7 +137,28 @@ If we later need pluggable storage backends, alternative RPC transports, or fine
       - Preprod `mn transfer bob → alice 1 NIGHT`: 27s, txHash returned.
       - 893 tests passing.
       **Pause and review before fanning out.**
-- [ ] Migrate `airdrop`, `dust register`, `serve`, `contract`
+- [x] **Step 5** — remaining write commands migrated:
+      - `shieldedTransfer` (commands/transfer.ts) → `withFacade`
+      - `shieldedAirdrop` (commands/airdrop.ts) → `withFacade`. Step 1
+        (read user shielded address) skips facade entirely now via the
+        new `deriveShieldedAddress` helper — pure key derivation.
+      - `dustRegister` (commands/dust.ts) → `withFacade`. Caller
+        boilerplate (validateNetworkCaches, primeDustCache, buildFacade,
+        signal handling, cleanup) collapsed.
+      - `balance --wallet` Phase 2 shielded → `withFacade { readOnly: true,
+        syncMode: 'no-dust' }`. JSON output schema-identical to Step 3
+        baseline (only data values differ).
+      - `contract preflight` → `repo.unshielded` + `repo.dust` directly
+        (lighter than facade — pure reads).
+      Verified end-to-end on undeployed:
+        - airdrop dev-bob: 21s, txHash returned.
+        - shielded airdrop dev-alice: 20.5s, txHash returned.
+        - shielded transfer alice → bob: 49s, txHash returned.
+        - dust register dev-bob: 31s, txHash returned.
+        - balance --wallet: schema-identical JSON.
+      `mn serve` deferred — long-lived facade is a different lifecycle
+      pattern that doesn't fit `withFacade`'s borrow shape.
+- [ ] Migrate `serve` (long-lived facade — different pattern)
 - [ ] Delete the now-unused shallow cache unit tests
 - [ ] Delete the old utilities once nothing imports them
 - [ ] Measure preprod dust-status latency before/after on a warm session

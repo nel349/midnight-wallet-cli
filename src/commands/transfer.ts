@@ -9,9 +9,9 @@ import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { getNetworkId } from '../lib/network-id.ts';
-import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { parseAmount, nightToMicro, executeTransfer, ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
+import { suppressSdkTransientErrors } from '../lib/facade.ts';
+import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { header, keyValue, divider, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
@@ -217,109 +217,83 @@ async function shieldedTransfer(
 
   const unsuppress = suppressSdkTransientErrors();
   const restoreRpc = suppressRpcNoise();
-  const cache = loadWalletCache(unshieldedAddress, networkName);
   const spinner = startSpinner('Syncing wallet...');
 
-  let bundle: FacadeBundle | undefined;
-
   try {
-    bundle = await buildFacade(seedBuffer, networkConfig, cache);
-    if (bundle.restoredFromCache) spinner.update('Restoring from cache...');
+    const txHash = await defaultRepository().withFacade(
+      seedBuffer,
+      networkConfig,
+      async ({ bundle, state }) => {
+        // Cache shielded address in wallet file
+        const senderShieldedAddr = MidnightBech32m.encode(networkId, state.shielded.address).asString();
+        saveShieldedAddress(walletPath, networkName, senderShieldedAddr);
 
-    const state = await startAndSyncFacade(bundle, {
-      syncMode: 'full',
-      // Writes build ZK proofs against the commitment tree — stale tree → chain rejects.
-      requireStrictSync: true,
-      onProgress: (applied, highest) => {
-        if (highest > 0) {
-          const pct = Math.min(Math.round((applied / highest) * 100), 100);
-          spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
+        const shieldedBalance = state.shielded.balances[nightToken] ?? 0n;
+        if (shieldedBalance < amount) {
+          const available = Number(shieldedBalance) / 1_000_000;
+          throw new Error(
+            `Insufficient shielded balance: ${available.toFixed(6)} NIGHT available, ${amountNight} NIGHT requested.\n` +
+            `Fund shielded balance: midnight airdrop ${amountNight} --shielded`
+          );
         }
+
+        spinner.update('Checking dust...');
+        await ensureDust(bundle, (status: string) => spinner.update(status));
+
+        if (signal?.aborted) throw new Error('Operation cancelled');
+
+        spinner.update('Building shielded transaction...');
+        const recipe = await bundle.facade.transferTransaction(
+          [{
+            type: 'shielded' as const,
+            outputs: [{ type: nightToken, amount, receiverAddress: decodedRecipient }],
+          }],
+          { shieldedSecretKeys: bundle.zswapSecretKeys, dustSecretKey: bundle.dustSecretKey },
+          { ttl: new Date(Date.now() + 60 * 60 * 1000) },
+        );
+
+        spinner.update('Signing...');
+        const signed = await bundle.facade.signRecipe(
+          recipe,
+          (payload: Uint8Array) => bundle.keystore.signData(payload),
+        );
+
+        spinner.update('Generating ZK proof (this may take a few minutes)...');
+        const finalized = await bundle.facade.finalizeRecipe(signed);
+
+        spinner.update('Submitting transaction...');
+        const txId = await bundle.facade.submitTransaction(finalized);
+        return String(txId);
       },
-      onSyncDetail: (detail) => spinner.update(`Syncing wallet... (waiting on: ${detail})`),
-    });
-
-    // Cache shielded address in wallet file
-    const senderShieldedAddr = MidnightBech32m.encode(networkId, state.shielded.address).asString();
-    saveShieldedAddress(walletPath, networkName, senderShieldedAddr);
-
-    // Check shielded balance
-    const shieldedBalance = state.shielded.balances[nightToken] ?? 0n;
-    if (shieldedBalance < amount) {
-      const available = Number(shieldedBalance) / 1_000_000;
-      throw new Error(
-        `Insufficient shielded balance: ${available.toFixed(6)} NIGHT available, ${amountNight} NIGHT requested.\n` +
-        `Fund shielded balance: midnight airdrop ${amountNight} --shielded`
-      );
-    }
-
-    // Ensure dust
-    spinner.update('Checking dust...');
-    await ensureDust(bundle, (status: string) => spinner.update(status));
-
-    if (signal?.aborted) throw new Error('Operation cancelled');
-
-    // Build shielded transfer
-    spinner.update('Building shielded transaction...');
-    const recipe = await bundle.facade.transferTransaction(
-      [{
-        type: 'shielded' as const,
-        outputs: [{
-          type: nightToken,
-          amount,
-          receiverAddress: decodedRecipient,
-        }],
-      }],
       {
-        shieldedSecretKeys: bundle.zswapSecretKeys,
-        dustSecretKey: bundle.dustSecretKey,
+        syncMode: 'full',
+        requireStrictSync: true,
+        signal,
+        onStatus: (s) => spinner.update(s),
+        onSyncProgress: (applied, highest) => {
+          if (highest > 0) {
+            const pct = Math.min(Math.round((applied / highest) * 100), 100);
+            spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
+          }
+        },
+        onSyncDetail: (detail) => spinner.update(`Syncing wallet... (waiting on: ${detail})`),
       },
-      { ttl: new Date(Date.now() + 60 * 60 * 1000) },
     );
-
-    // Sign, prove, submit
-    spinner.update('Signing...');
-    const signed = await bundle.facade.signRecipe(
-      recipe,
-      (payload: Uint8Array) => bundle!.keystore.signData(payload),
-    );
-
-    spinner.update('Generating ZK proof (this may take a few minutes)...');
-    const finalized = await bundle.facade.finalizeRecipe(signed);
-
-    spinner.update('Submitting transaction...');
-    const txId = await bundle.facade.submitTransaction(finalized);
-    const txHash = String(txId);
 
     spinner.stop('Transaction submitted');
 
-    // Save cache
-    try { await saveWalletCache(unshieldedAddress, networkName, bundle.facade); } catch { /* best-effort */ }
-
     if (hasFlag(args, 'json')) {
-      writeJsonResult({
-        txHash,
-        amount: amountNight,
-        recipient: recipientAddress,
-        network: networkName,
-        type: 'shielded',
-      });
+      writeJsonResult({ txHash, amount: amountNight, recipient: recipientAddress, network: networkName, type: 'shielded' });
       return;
     }
-
     process.stdout.write(txHash + '\n');
-
-    process.stderr.write('\n' + successMessage(
-      `Transferred ${amountNight} shielded NIGHT`,
-      txHash,
-    ) + '\n');
+    process.stderr.write('\n' + successMessage(`Transferred ${amountNight} shielded NIGHT`, txHash) + '\n');
     process.stderr.write('\n' + divider() + '\n');
     process.stderr.write(dim('  Verify: midnight balance --shielded') + '\n\n');
   } catch (err) {
     spinner.stop('Failed');
     throw err;
   } finally {
-    if (bundle) await stopFacade(bundle);
     restoreRpc();
     unsuppress();
   }

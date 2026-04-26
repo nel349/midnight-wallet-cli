@@ -4,7 +4,6 @@
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
-import * as rx from 'rxjs';
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
@@ -12,11 +11,10 @@ import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides, type NetworkConfig, type NetworkName } from '../lib/network.ts';
 import { getNetworkId } from '../lib/network-id.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
-import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
+import { deriveUnshieldedAddress, deriveShieldedAddress } from '../lib/derive-address.ts';
 import { parseAmount, nightToMicro, executeTransfer, ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, type FacadeBundle } from '../lib/facade.ts';
-import { primeDustCacheWithFeedback } from '../lib/dust-prime.ts';
-import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
+import { suppressSdkTransientErrors } from '../lib/facade.ts';
+import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { header, keyValue, divider, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
@@ -162,145 +160,97 @@ async function shieldedAirdrop(
   if (isVerbose(args)) enableVerbose();
 
   const userSeedBuffer = Buffer.from(config.seed, 'hex');
-  const userUnshieldedAddress = config.addresses[networkName as NetworkName];
   const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
-  const genesisAddress = deriveUnshieldedAddress(genesisSeedBuffer, networkName as NetworkName);
   const networkId = getNetworkId(networkConfig.networkId);
   const nightToken = ledger.unshieldedToken().raw;
+
+  // Recipient shielded address — pure key derivation, no facade needed.
+  const userShieldedAddress = deriveShieldedAddress(userSeedBuffer);
+  const userShieldedAddrStr = MidnightBech32m.encode(networkId, userShieldedAddress).asString();
+  // Cache it in the wallet file so subsequent reads can short-circuit.
+  saveShieldedAddress(resolveWalletPath(getFlag(args, 'wallet')), networkName as NetworkName, userShieldedAddrStr);
 
   process.stderr.write('\n' + header('Shielded Airdrop') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
   process.stderr.write(keyValue('From', dim('genesis shielded (seed 0x01)')) + '\n');
+  process.stderr.write(keyValue('To', formatAddress(userShieldedAddrStr, true)) + '\n');
   process.stderr.write(keyValue('Amount', bold(amountNight + ' NIGHT (shielded)')) + '\n');
   process.stderr.write('\n');
 
   const unsuppress = suppressSdkTransientErrors();
   const restoreRpc = suppressRpcNoise();
-  const spinner = startSpinner('Getting shielded address...');
-
-  let userBundle: FacadeBundle | undefined;
-  let genesisBundle: FacadeBundle | undefined;
+  const spinner = startSpinner('Syncing genesis wallet...');
 
   try {
-    // S1: validate caches vs current chain genesis before any load.
-    const { validateNetworkCaches } = await import('../lib/wallet-cache.ts');
-    await validateNetworkCaches(networkName, networkConfig.node);
-
-    // Step 1: Get user's shielded address (start facade, read first state emission, stop)
-    const userCache = loadWalletCache(userUnshieldedAddress, networkName);
-    userBundle = await buildFacade(userSeedBuffer, networkConfig, userCache);
-    await userBundle.facade.start(userBundle.zswapSecretKeys, userBundle.dustSecretKey);
-    const userState = await rx.firstValueFrom(userBundle.facade.state());
-    const userShieldedAddress = userState.shielded.address;
-    const userShieldedAddrStr = MidnightBech32m.encode(networkId, userShieldedAddress).asString();
-    // Cache shielded address in wallet file
-    saveShieldedAddress(resolveWalletPath(getFlag(args, 'wallet')), networkName as NetworkName, userShieldedAddrStr);
-    await stopFacade(userBundle);
-    userBundle = undefined;
-
-    process.stderr.write(keyValue('To', formatAddress(userShieldedAddrStr, true)) + '\n\n');
-
-    // Step 2: Prime dust cache + build genesis facade (full sync, needs shielded balance)
-    await primeDustCacheWithFeedback(genesisSeedBuffer, networkName, networkConfig.indexerWS, {
-      onStatus: (s) => spinner.update(s),
-      signal,
-    });
-    spinner.update('Syncing genesis wallet...');
-    const genesisCache = loadWalletCache(genesisAddress, networkName);
-    genesisBundle = await buildFacade(genesisSeedBuffer, networkConfig, genesisCache);
-    if (genesisBundle.restoredFromCache) spinner.update('Restoring from cache...');
-
-    const genesisState = await startAndSyncFacade(genesisBundle, {
-      syncMode: 'full',
-      // Airdrop sends a transaction — must be strictly synced for proof validity.
-      requireStrictSync: true,
-      onProgress: (applied, highest) => {
-        if (highest > 0) {
-          const pct = Math.min(Math.round((applied / highest) * 100), 100);
-          spinner.update(pct >= 100 ? 'Syncing genesis wallet...' : `Syncing genesis wallet... ${pct}%`);
+    const txHash = await defaultRepository().withFacade(
+      genesisSeedBuffer,
+      networkConfig,
+      async ({ bundle, state }) => {
+        const genesisShieldedBalance = state.shielded.balances[nightToken] ?? 0n;
+        if (genesisShieldedBalance < amount) {
+          const available = Number(genesisShieldedBalance) / 1_000_000;
+          throw new Error(
+            `Genesis wallet has insufficient shielded balance: ${available.toFixed(6)} NIGHT available, ${amountNight} NIGHT requested`
+          );
         }
+
+        spinner.update('Checking dust...');
+        await ensureDust(bundle, (status: string) => spinner.update(status));
+
+        if (signal?.aborted) throw new Error('Operation cancelled');
+
+        spinner.update('Building shielded transaction...');
+        const recipe = await bundle.facade.transferTransaction(
+          [{
+            type: 'shielded' as const,
+            outputs: [{ type: nightToken, amount, receiverAddress: userShieldedAddress }],
+          }],
+          { shieldedSecretKeys: bundle.zswapSecretKeys, dustSecretKey: bundle.dustSecretKey },
+          { ttl: new Date(Date.now() + 60 * 60 * 1000) },
+        );
+
+        spinner.update('Signing...');
+        const signed = await bundle.facade.signRecipe(
+          recipe,
+          (payload: Uint8Array) => bundle.keystore.signData(payload),
+        );
+
+        spinner.update('Generating ZK proof (this may take a few minutes)...');
+        const finalized = await bundle.facade.finalizeRecipe(signed);
+
+        spinner.update('Submitting transaction...');
+        const txId = await bundle.facade.submitTransaction(finalized);
+        return String(txId);
       },
-      onSyncDetail: (detail) => spinner.update(`Syncing genesis wallet... (waiting on: ${detail})`),
-    });
-
-    // Step 3: Check genesis shielded balance
-    const genesisShieldedBalance = genesisState.shielded.balances[nightToken] ?? 0n;
-    if (genesisShieldedBalance < amount) {
-      const available = Number(genesisShieldedBalance) / 1_000_000;
-      throw new Error(
-        `Genesis wallet has insufficient shielded balance: ${available.toFixed(6)} NIGHT available, ${amountNight} NIGHT requested`
-      );
-    }
-
-    // Step 4: Ensure dust on genesis
-    spinner.update('Checking dust...');
-    await ensureDust(genesisBundle, (status: string) => spinner.update(status));
-
-    if (signal?.aborted) throw new Error('Operation cancelled');
-
-    // Step 5: Build shielded transfer from genesis → user
-    spinner.update('Building shielded transaction...');
-    const recipe = await genesisBundle.facade.transferTransaction(
-      [{
-        type: 'shielded' as const,
-        outputs: [{
-          type: nightToken,
-          amount,
-          receiverAddress: userShieldedAddress,
-        }],
-      }],
       {
-        shieldedSecretKeys: genesisBundle.zswapSecretKeys,
-        dustSecretKey: genesisBundle.dustSecretKey,
+        syncMode: 'full',
+        requireStrictSync: true,
+        signal,
+        onStatus: (s) => spinner.update(s),
+        onSyncProgress: (applied, highest) => {
+          if (highest > 0) {
+            const pct = Math.min(Math.round((applied / highest) * 100), 100);
+            spinner.update(pct >= 100 ? 'Syncing genesis wallet...' : `Syncing genesis wallet... ${pct}%`);
+          }
+        },
+        onSyncDetail: (detail) => spinner.update(`Syncing genesis wallet... (waiting on: ${detail})`),
       },
-      { ttl: new Date(Date.now() + 60 * 60 * 1000) },
     );
-
-    // Step 6: Sign, prove, submit
-    spinner.update('Signing...');
-    const signed = await genesisBundle.facade.signRecipe(
-      recipe,
-      (payload: Uint8Array) => genesisBundle!.keystore.signData(payload),
-    );
-
-    spinner.update('Generating ZK proof (this may take a few minutes)...');
-    const finalized = await genesisBundle.facade.finalizeRecipe(signed);
-
-    spinner.update('Submitting transaction...');
-    const txId = await genesisBundle.facade.submitTransaction(finalized);
-    const txHash = String(txId);
 
     spinner.stop('Transaction submitted');
 
-    // Save genesis cache
-    try { await saveWalletCache(genesisAddress, networkName, genesisBundle.facade); } catch { /* best-effort */ }
-
-    // Output
     if (hasFlag(args, 'json')) {
-      writeJsonResult({
-        txHash,
-        amount: amountNight,
-        shieldedAddress: userShieldedAddrStr,
-        network: networkName,
-        type: 'shielded',
-      });
+      writeJsonResult({ txHash, amount: amountNight, shieldedAddress: userShieldedAddrStr, network: networkName, type: 'shielded' });
       return;
     }
-
     process.stdout.write(txHash + '\n');
-
-    process.stderr.write('\n' + successMessage(
-      `Airdropped ${amountNight} shielded NIGHT to your wallet`,
-      txHash,
-    ) + '\n');
+    process.stderr.write('\n' + successMessage(`Airdropped ${amountNight} shielded NIGHT to your wallet`, txHash) + '\n');
     process.stderr.write('\n' + divider() + '\n');
     process.stderr.write(dim('  Verify: midnight balance --shielded') + '\n\n');
   } catch (err) {
     spinner.stop('Failed');
     throw err;
   } finally {
-    if (userBundle) await stopFacade(userBundle);
-    if (genesisBundle) await stopFacade(genesisBundle);
     restoreRpc();
     unsuppress();
   }

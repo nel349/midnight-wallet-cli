@@ -8,14 +8,11 @@ import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides, type NetworkConfig } from '../lib/network.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForLiteSyncedState, type FacadeBundle } from '../lib/facade.ts';
+import { suppressSdkTransientErrors, waitForLiteSyncedState } from '../lib/facade.ts';
 import { deriveDustSeed } from '../lib/derivation.ts';
-import { loadWalletCache, saveWalletCache } from '../lib/wallet-cache.ts';
 import { ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { checkBalance } from '../lib/balance-subscription.ts';
-import { readDustBalanceDirect } from '../lib/dust-direct.ts';
-import { loadDustCache, saveDustCache, dustPublicKeyHex } from '../lib/dust-direct-cache.ts';
-import { primeDustCacheWithFeedback } from '../lib/dust-prime.ts';
+import { dustPublicKeyHex } from '../lib/dust-direct-cache.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { header, keyValue, divider, formatDust, successMessage, toDust } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -75,49 +72,19 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   }
 
   // register: full facade flow (requires proof server, keystore, sync).
+  // The repo's withFacade owns: validate caches, pre-prime dust, build facade,
+  // sync (with retry), save, invalidate, stop. We just provide the work.
   rejectNoCacheForWrites(args);
-  // Prime dust cache so register's facade sync resumes from chain tip instead
-  // of slowly catching up events from scratch. Owned UTXOs are typically 0
-  // here (that's why we're registering) — priming still populates the global
-  // commitment tree, which is what the register tx's proof needs.
-  // S1: validate caches vs chain genesis first — a stale dust cache would
-  // prime from an invalid checkpoint.
-  const { validateNetworkCaches } = await import('../lib/wallet-cache.ts');
-  await validateNetworkCaches(networkName, networkConfig.node);
 
-  const primeSpinner = startSpinner(`Priming dust cache from ${networkName}...`);
-  await primeDustCacheWithFeedback(seedBuffer, networkName, networkConfig.indexerWS, {
-    onStatus: (s) => primeSpinner.update(s),
-    signal,
-  });
-  primeSpinner.stop('Dust cache primed');
-
-  const cache = loadWalletCache(address, networkName);
-  const bundle = await buildFacade(seedBuffer, networkConfig, cache);
-
-  const cleanup = async () => {
-    try { await stopFacade(bundle); } catch { /* best-effort */ }
-  };
-
-  const onAbort = () => { cleanup(); };
-  signal?.addEventListener('abort', onAbort, { once: true });
-
-  // Suppress known transient SDK errors (Wallet.Sync: Internal Server Error, etc.)
   const warningRef: { current?: (tag: string, msg: string) => void } = {};
-  const unsuppress = suppressSdkTransientErrors((tag, msg) => {
-    warningRef.current?.(tag, msg);
-  });
-
-  // Suppress polkadot-js RPC-CORE noise (single point for entire command)
+  const unsuppress = suppressSdkTransientErrors((tag, msg) => warningRef.current?.(tag, msg));
   const restoreRpc = suppressRpcNoise();
 
   try {
-    await dustRegister(bundle, networkName, address, isJson, signal, warningRef);
+    await dustRegister(seedBuffer, networkConfig, isJson, signal, warningRef);
   } finally {
-    signal?.removeEventListener('abort', onAbort);
     restoreRpc();
     unsuppress();
-    await cleanup();
   }
 }
 
@@ -215,64 +182,55 @@ function printUnregisteredStatus(
 }
 
 async function dustRegister(
-  bundle: FacadeBundle,
-  networkName: string,
-  address: string,
+  seedBuffer: Buffer,
+  networkConfig: NetworkConfig,
   jsonMode: boolean,
   signal?: AbortSignal,
   warningRef?: WarningRef,
 ): Promise<void> {
+  const networkName = networkConfig.networkId.toLowerCase();
   process.stderr.write('\n' + header('Dust Register') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n\n');
 
-  const spinner = startSpinner(bundle.restoredFromCache ? 'Restoring from cache...' : 'Syncing wallet...');
+  const spinner = startSpinner('Syncing wallet...');
   if (warningRef) {
     warningRef.current = (_tag, msg) => spinner.update(`Syncing wallet... (${msg}, retrying)`);
   }
 
   try {
-    const syncedState = await startAndSyncFacade(bundle, {
-      syncMode: 'lite',
-      // dust register writes a tx — must be strictly synced for proof validity.
-      requireStrictSync: true,
-      onProgress: (applied, highest) => {
-        if (highest > 0) {
-          const pct = Math.min(Math.round((applied / highest) * 100), 100);
-          spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
-        }
+    const { result, dustBal } = await defaultRepository().withFacade(
+      seedBuffer,
+      networkConfig,
+      async ({ bundle, state }) => {
+        if (signal?.aborted) throw new Error('Operation cancelled');
+        spinner.update('Checking dust status...');
+
+        // ensureDust handles: early return if dust exists, registration
+        // of unregistered UTXOs, waiting for dust coins.
+        const result = await ensureDust(bundle, (status: string) => spinner.update(status), state);
+
+        if (signal?.aborted) throw new Error('Operation cancelled');
+
+        // Wait for dust data to be fully populated before reading balance.
+        const finalState = await waitForLiteSyncedState(bundle);
+        return { result, dustBal: finalState.dust.balance(new Date()) };
       },
-      onSyncDetail: (detail) => {
-        spinner.update(`Syncing wallet... (waiting on: ${detail})`);
+      {
+        syncMode: 'lite',
+        requireStrictSync: true,
+        signal,
+        onStatus: (s) => spinner.update(s),
+        onSyncProgress: (applied, highest) => {
+          if (highest > 0) {
+            const pct = Math.min(Math.round((applied / highest) * 100), 100);
+            spinner.update(pct >= 100 ? 'Syncing wallet...' : `Syncing wallet... ${pct}%`);
+          }
+        },
+        onSyncDetail: (detail) => spinner.update(`Syncing wallet... (waiting on: ${detail})`),
       },
-    });
+    );
 
-    if (signal?.aborted) throw new Error('Operation cancelled');
-
-    spinner.update('Checking dust status...');
-
-    // Use shared ensureDust — handles: early return if dust exists,
-    // registration of unregistered UTXOs, waiting for dust coins.
-    // Pass syncedState to avoid shareReplay stale-read issue.
-    const result = await ensureDust(bundle, (status: string) => {
-      spinner.update(status);
-    }, syncedState);
-
-    if (signal?.aborted) throw new Error('Operation cancelled');
-
-    // Wait for dust data to be fully populated before reading balance.
-    // The lite sync may have resolved via the index fallback before dust
-    // events were processed — waitForLiteSyncedState waits for isStrictlyComplete.
-    const state = await waitForLiteSyncedState(bundle);
-    const dustBal = state.dust.balance(new Date());
-
-    // Save cache after successful sync
-    try { await saveWalletCache(address, networkName, bundle.facade); } catch { /* best-effort */ }
-
-    if (result.alreadyAvailable) {
-      spinner.stop('Dust already available');
-    } else {
-      spinner.stop('Dust registration complete');
-    }
+    spinner.stop(result.alreadyAvailable ? 'Dust already available' : 'Dust registration complete');
 
     if (jsonMode) {
       const json: Record<string, unknown> = { subcommand: 'register', dustBalance: toDust(dustBal) };
@@ -282,15 +240,11 @@ async function dustRegister(
     }
 
     process.stdout.write(dustBal.toString() + '\n');
-    if (result.alreadyAvailable) {
-      process.stderr.write('\n' + successMessage(
-        `Dust tokens already available: ${formatDust(dustBal)}`,
-      ) + '\n\n');
-    } else {
-      process.stderr.write('\n' + successMessage(
-        `Dust tokens available: ${formatDust(dustBal)}`,
-      ) + '\n\n');
-    }
+    process.stderr.write('\n' + successMessage(
+      result.alreadyAvailable
+        ? `Dust tokens already available: ${formatDust(dustBal)}`
+        : `Dust tokens available: ${formatDust(dustBal)}`,
+    ) + '\n\n');
   } catch (err) {
     spinner.stop('Failed');
     throw err;

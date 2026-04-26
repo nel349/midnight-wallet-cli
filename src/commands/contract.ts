@@ -98,10 +98,8 @@ async function handleInspect(args: ParsedArgs): Promise<void> {
 async function preflight(network: string, jsonMode: boolean): Promise<void> {
   const { loadWalletConfig, resolveWalletPath } = await import('../lib/wallet-config.ts');
   const { resolveNetwork } = await import('../lib/resolve-network.ts');
-  const { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors } = await import('../lib/facade.ts');
-  const { loadWalletCache } = await import('../lib/wallet-cache.ts');
-  const { suppressRpcNoise } = await import('../lib/transfer.ts');
-  const ledgerMod = await import('@midnight-ntwrk/ledger-v8');
+  const { defaultRepository } = await import('../lib/wallet-data-repository.ts');
+  const { NATIVE_TOKEN_TYPE } = await import('../lib/constants.ts');
 
   const { config: networkConfig } = resolveNetwork({
     args: { command: 'contract', subcommand: undefined, positionals: [], flags: { network } },
@@ -111,19 +109,16 @@ async function preflight(network: string, jsonMode: boolean): Promise<void> {
   const address = walletConfig.addresses[network as NetworkName];
 
   const spinner = startSpinner('Checking wallet...');
-  const unsuppress = suppressSdkTransientErrors();
-  const restoreRpc = suppressRpcNoise();
-  const cache = loadWalletCache(address, network);
-  const bundle = await buildFacade(seedBuffer, networkConfig, cache);
+  const repo = defaultRepository();
 
   try {
-    const state = await startAndSyncFacade(bundle, { syncMode: 'lite' });
+    // Two cheap reads through the repo — no facade, no proof server, no
+    // strict sync. The repo's tip-aware memo means the next deploy/call
+    // in the same MCP session pays ~zero on these checks.
+    const balanceView = await repo.unshielded(address, networkConfig);
+    const nightBalance = balanceView.balances.get(NATIVE_TOKEN_TYPE) ?? 0n;
 
-    // Check NIGHT balance
-    const nightToken = ledgerMod.unshieldedToken().raw;
-    const balance = state.unshielded.balances[nightToken] ?? 0n;
-
-    if (balance === 0n) {
+    if (nightBalance === 0n) {
       spinner.fail('No NIGHT balance');
       throw new Error(
         `Wallet has 0 NIGHT on ${network}.\n\n` +
@@ -135,22 +130,8 @@ async function preflight(network: string, jsonMode: boolean): Promise<void> {
       );
     }
 
-    // Check dust
-    const dustBalance = (() => {
-      try {
-        const dust = state.dust as any;
-        return dust?.balance?.(new Date()) ?? 0n;
-      } catch { return 0n; }
-    })();
-
-    const dustCoins = (() => {
-      try {
-        const dust = state.dust as any;
-        return dust?.availableCoins?.length ?? 0;
-      } catch { return 0; }
-    })();
-
-    if (dustBalance === 0n && dustCoins === 0) {
+    const dustView = await repo.dust(seedBuffer, networkConfig, { onStatus: (s) => spinner.update(s) });
+    if (dustView.balance === 0n && dustView.availableCoins === 0) {
       spinner.fail('No dust available');
       throw new Error(
         `Wallet has no dust on ${network}. Dust is required to pay transaction fees.\n\n` +
@@ -160,11 +141,10 @@ async function preflight(network: string, jsonMode: boolean): Promise<void> {
       );
     }
 
-    spinner.stop(`Wallet OK (${balance} NIGHT, dust available)`);
-  } finally {
-    restoreRpc();
-    unsuppress();
-    try { await stopFacade(bundle); } catch {}
+    spinner.stop(`Wallet OK (${nightBalance} NIGHT, dust available)`);
+  } catch (err) {
+    spinner.fail('Wallet check failed');
+    throw err;
   }
 }
 

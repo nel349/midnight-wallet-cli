@@ -77,16 +77,26 @@ export function deriveAllAddresses(
 export function deriveAllShieldedAddresses(
   seedBuffer: Buffer,
 ): Record<NetworkName, string> {
-  const shieldedSeed = deriveShieldedSeed(seedBuffer);
-  const keys = ledger.ZswapSecretKeys.fromSeed(shieldedSeed);
-  const address = new ShieldedAddress(
-    new ShieldedCoinPublicKey(Buffer.from(keys.coinPublicKey, 'hex')),
-    new ShieldedEncryptionPublicKey(Buffer.from(keys.encryptionPublicKey, 'hex')),
-  );
+  const address = deriveShieldedAddress(seedBuffer);
   const out = {} as Record<NetworkName, string>;
   for (const name of getValidNetworkNames()) {
     const networkId = NETWORK_ID_MAP[name as NetworkName];
     out[name as NetworkName] = MidnightBech32m.encode(networkId, address).asString();
   }
   return out;
+}
+
+/**
+ * Derive the raw `ShieldedAddress` (SDK type) from a seed. Cheap — pure
+ * key derivation, no facade or network needed. Use when you need an
+ * address as an SDK call argument (e.g. `transferTransaction`'s
+ * `receiverAddress` field).
+ */
+export function deriveShieldedAddress(seedBuffer: Buffer): ShieldedAddress {
+  const shieldedSeed = deriveShieldedSeed(seedBuffer);
+  const keys = ledger.ZswapSecretKeys.fromSeed(shieldedSeed);
+  return new ShieldedAddress(
+    new ShieldedCoinPublicKey(Buffer.from(keys.coinPublicKey, 'hex')),
+    new ShieldedEncryptionPublicKey(Buffer.from(keys.encryptionPublicKey, 'hex')),
+  );
 }
