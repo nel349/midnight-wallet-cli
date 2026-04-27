@@ -7,6 +7,7 @@ import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NetworkConfig } from '../network.ts';
+import { WITNESS_FILE_CANDIDATES } from './witness-discovery.ts';
 
 /**
  * Walk up from this module to find the closest `node_modules` directory.
@@ -213,14 +214,10 @@ const contractMod = await import(pathToFileURL(resolve(MANAGED_DIR, 'contract', 
 // Both relative-to-cwd locations and contract/<...> locations are checked
 // so mn dev (which chdirs into the contract sub-package) and mn contract
 // deploy run from a workspace root both work.
+const WITNESS_CANDIDATES = ${JSON.stringify(WITNESS_FILE_CANDIDATES)};
 let witnesses;
 let createPrivateState;
-for (const p of [
-  'dist/witnesses.js',
-  'src/witnesses.js',
-  'contract/dist/witnesses.js',
-  'contract/src/witnesses.js',
-]) {
+for (const p of WITNESS_CANDIDATES) {
   try {
     const wMod = await import(pathToFileURL(resolve(p)).href);
     if (wMod.witnesses) { witnesses = wMod.witnesses; }
@@ -234,7 +231,15 @@ for (const p of [
   } catch {}
 }
 
-if (!witnesses) process.stderr.write('Warning: No witnesses found — using vacant witnesses\\n');
+// Note: callers (commands/contract.ts, commands/dev.ts) preflight when the
+// contract's compiler-info declares witnesses, so a missing module here means
+// the contract truly has no witnesses (vacant is correct). The runtime
+// warning still names every path we tried — useful when the SDK later
+// complains about a specific witness name despite preflight passing.
+if (!witnesses) {
+  process.stderr.write('Warning: No witnesses module found — using vacant witnesses. Searched:\\n');
+  for (const p of WITNESS_CANDIDATES) process.stderr.write('  - ' + p + '\\n');
+}
 
 // Generate initial private state.
 // Uses a deterministic seed derived from the wallet so post/takeDown use the same key.

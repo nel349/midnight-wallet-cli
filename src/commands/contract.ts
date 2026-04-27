@@ -206,6 +206,18 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
 
   const { info } = findContractInfo(dappDir);
 
+  // Fail fast when the contract declares witnesses but no compiled
+  // witnesses.js is on disk — otherwise the SDK throws a cryptic
+  // "first (witnesses) argument does not contain a function-valued field
+  // named X" mid-deploy after a long wait.
+  const declaredWitnesses = info.witnesses.map((w) => w.name);
+  if (declaredWitnesses.length > 0) {
+    const { findWitnessFile, buildMissingWitnessError } = await import('../lib/contract/witness-discovery.ts');
+    if (!findWitnessFile(dappDir)) {
+      throw new Error(buildMissingWitnessError({ projectRoot: dappDir, witnessNames: declaredWitnesses }));
+    }
+  }
+
   const network = getFlag(args, 'network') ?? 'undeployed';
   const { config: networkConfig } = resolveNetwork({
     args: { command: 'contract', subcommand: 'deploy', positionals: [], flags: { network } },
