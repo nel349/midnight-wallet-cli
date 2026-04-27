@@ -280,7 +280,8 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     } else {
       process.stderr.write('\n');
       process.stderr.write(keyValue('Address', result.contractAddress) + '\n');
-      process.stderr.write('\n' + green('  ✓ Deploy successful') + '\n\n');
+      process.stderr.write('\n' + green('  ✓ Deploy successful') + '\n');
+      writeNextStepsHint(result.contractAddress, info.circuits, network);
       // Pipeable address on stdout for shell composition (e.g. `addr=$(mn contract deploy)`).
       process.stdout.write(result.contractAddress + '\n');
     }
@@ -290,6 +291,26 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
   } finally {
     await serve.stop();
   }
+}
+
+/**
+ * Print "what next?" hints after a successful deploy. Always shows the
+ * state-read command (works even for contracts with no public circuits),
+ * and adds a call command when at least one circuit takes no arguments
+ * (those run as-is without --args).
+ */
+function writeNextStepsHint(address: string, circuits: { name: string; arguments: unknown[] }[], network: string): void {
+  const networkFlag = network === 'undeployed' ? '' : ` --network ${network}`;
+  process.stderr.write('\n' + dim('  Next:') + '\n');
+  process.stderr.write(dim('    mn contract state --address ') + teal(address) + dim(networkFlag) + '\n');
+  const noArgCircuit = circuits.find((c) => c.arguments.length === 0);
+  if (noArgCircuit) {
+    process.stderr.write(
+      dim('    mn contract call --address ') + teal(address) +
+      dim(' --circuit ') + teal(noArgCircuit.name) + dim(networkFlag) + '\n',
+    );
+  }
+  process.stderr.write('\n');
 }
 
 // ── Call ──
