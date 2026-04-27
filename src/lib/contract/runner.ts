@@ -3,7 +3,7 @@
 // The generated script only needs contract SDK + RPC client — no wallet SDK.
 
 import { spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NetworkConfig } from '../network.ts';
@@ -14,11 +14,11 @@ import { WITNESS_FILE_CANDIDATES } from './witness-discovery.ts';
  * The generated deploy/call script imports SDK packages by bare specifier
  * (`@midnight-ntwrk/midnight-js-contracts`, `ws`, etc.); without help, Node
  * resolves those against the user's project — which usually doesn't have them.
- * We hand the script our own `node_modules` via `NODE_PATH` so it falls back
- * to the CLI's bundled deps when the user's project is missing them.
  *
- * The user's `node_modules` still takes precedence (cwd-relative resolution
- * runs first), so anyone deliberately pinning an SDK version still gets it.
+ * NODE_PATH is documented as honored only by CommonJS resolution, not ESM.
+ * Since the deploy script is ESM (.mjs), we instead write the script into a
+ * temp dir that contains a `node_modules` symlink to ours. Node's normal
+ * walk-up from the script's location then finds our SDK packages.
  */
 function findOurNodeModules(): string | null {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -465,17 +465,31 @@ async function executeScript(
   script: string,
   onMessage?: (msg: string) => void,
 ): Promise<string> {
+  // ESM resolution walks up from the importing file's location to find
+  // node_modules; NODE_PATH does NOT work for ESM. Three different files
+  // need to resolve bare imports during a deploy:
+  //   1. the generated script.mjs (in dappDir)
+  //   2. the user's compiled contract/index.js (under managed/<name>/)
+  //   3. the user's witnesses.js (under dist/ or src/)
+  // All three live somewhere under dappDir, so a single symlink at
+  // dappDir/node_modules satisfies all of them. We only create it if the
+  // user has no node_modules of their own, and we remove it on the way out
+  // so the dapp dir is left exactly as we found it.
+  const userNodeModules = join(dappDir, 'node_modules');
+  const createdSymlink = OUR_NODE_MODULES && !existsSync(userNodeModules);
+  if (createdSymlink) {
+    try { symlinkSync(OUR_NODE_MODULES!, userNodeModules); } catch { /* user keeps whatever they had */ }
+  }
+
   const scriptPath = join(dappDir, `.mn-contract-${Date.now()}.mjs`);
   writeFileSync(scriptPath, script);
 
-  // Stitch the CLI's own node_modules into NODE_PATH so the generated script
-  // can import SDK packages (@midnight-ntwrk/midnight-js-*, ws, etc.) without
-  // requiring the developer's project to install them. User's node_modules
-  // takes precedence — explicit project deps still win.
-  const existingNodePath = process.env.NODE_PATH ?? '';
-  const nodePath = OUR_NODE_MODULES
-    ? (existingNodePath ? `${existingNodePath}:${OUR_NODE_MODULES}` : OUR_NODE_MODULES)
-    : existingNodePath;
+  const cleanup = () => {
+    try { unlinkSync(scriptPath); } catch {}
+    if (createdSymlink) {
+      try { unlinkSync(userNodeModules); } catch {}
+    }
+  };
 
   return new Promise<string>((resolve, reject) => {
     const child = spawn('node', [scriptPath], {
@@ -484,7 +498,6 @@ async function executeScript(
       env: {
         ...process.env,
         NODE_NO_WARNINGS: '1',
-        ...(nodePath ? { NODE_PATH: nodePath } : {}),
       },
     });
 
@@ -504,7 +517,7 @@ async function executeScript(
     });
 
     child.on('close', (code) => {
-      try { unlinkSync(scriptPath); } catch {}
+      cleanup();
       if (code !== 0) {
         reject(new Error(stderr.trim() || `Script exited with code ${code}`));
         return;
@@ -513,7 +526,7 @@ async function executeScript(
     });
 
     child.on('error', (err) => {
-      try { unlinkSync(scriptPath); } catch {}
+      cleanup();
       reject(err);
     });
   });
