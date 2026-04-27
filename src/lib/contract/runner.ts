@@ -46,6 +46,13 @@ export interface RunnerOptions {
 
 export interface DeployOptions extends RunnerOptions {
   privateStateKey?: string;
+  /**
+   * Constructor arguments passed to the contract's `Constructor` (the WASM
+   * function the SDK invokes during `deployContract`). Forwarded to
+   * `deployContract({ args: [...] })`. Order matters — match the contract's
+   * Compact `constructor(...)` signature.
+   */
+  args?: unknown[];
 }
 
 export interface CallOptions extends RunnerOptions {
@@ -300,6 +307,11 @@ const providers = {
 
 function generateDeployScript(opts: DeployOptions): string {
   const privateStateKey = opts.privateStateKey ?? `${opts.contractName}PrivateState`;
+  // Constructor args are pre-serialized to JSON here (still in our process)
+  // so the generated script just spreads them. JSON-encodable values only —
+  // bigints not yet supported in this path; users pass them as decimal strings
+  // and the contract's Compact constructor decodes if it expects Uint<N>.
+  const argsLiteral = JSON.stringify(opts.args ?? []);
 
   return `
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
@@ -317,11 +329,13 @@ ${providerSetupCode(opts.managedDir, opts.networkConfig, privateStateKey)}
 
 import { deployContract } from '@midnight-ntwrk/midnight-js-contracts';
 
-process.stderr.write('Deploying contract...\\n');
+const constructorArgs = ${argsLiteral};
+process.stderr.write('Deploying contract' + (constructorArgs.length ? ' with ' + constructorArgs.length + ' constructor arg(s)...' : '...') + '\\n');
 const deployed = await deployContract(providers, {
   compiledContract: compiled,
   privateStateId: ${JSON.stringify(privateStateKey)},
   initialPrivateState: makeInitialPrivateState(),
+  args: constructorArgs,
 });
 
 const address = deployed.deployTxData?.public?.contractAddress ?? 'unknown';

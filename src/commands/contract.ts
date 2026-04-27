@@ -211,9 +211,27 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     args: { command: 'contract', subcommand: 'deploy', positionals: [], flags: { network } },
   });
 
+  // Constructor args via --args '<json>'. Same parsing as `mn contract call`:
+  // arrays are passed positionally; objects are unwrapped to Object.values
+  // (so the contract author can pick whichever shape feels natural).
+  const argsJson = getFlag(args, 'args');
+  let constructorArgs: unknown[] = [];
+  if (argsJson) {
+    try {
+      const parsed = JSON.parse(argsJson);
+      constructorArgs = Array.isArray(parsed) ? parsed : Object.values(parsed);
+    } catch (err) {
+      throw new Error(`Invalid --args JSON: ${(err as Error).message}`);
+    }
+  }
+
   if (!jsonMode) {
     process.stderr.write(keyValue('Contract', info.name) + '\n');
-    process.stderr.write(keyValue('Network', network) + '\n\n');
+    process.stderr.write(keyValue('Network', network) + '\n');
+    if (constructorArgs.length > 0) {
+      process.stderr.write(keyValue('Constructor args', String(constructorArgs.length)) + '\n');
+    }
+    process.stderr.write('\n');
   }
 
   // Pre-check: verify wallet has balance and dust before attempting deploy
@@ -231,6 +249,7 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
       managedDir: info.managedDir,
       contractName: info.name,
       servePort: serve.port,
+      args: constructorArgs,
       onMessage: (msg) => spinner.update(msg),
     });
 

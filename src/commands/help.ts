@@ -380,7 +380,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       'state                         Read ledger state of a deployed contract',
       '--address <addr>              Contract address (call, state)',
       '--circuit <name>              Circuit to call (call)',
-      '--args \'<json>\'               JSON arguments for circuit call (call)',
+      '--args \'<json>\'               JSON arguments — constructor args (deploy) or circuit args (call)',
       '--network <name>              Override network (default: undeployed)',
       '--path <dir>                  Path to dApp directory (inspect)',
       '--managed <dir>               Direct path to managed/<name> directory (inspect)',
@@ -389,6 +389,7 @@ const COMMAND_SPECS: CommandSpec[] = [
     examples: [
       'midnight contract inspect',
       'midnight contract deploy',
+      'midnight contract deploy --args \'{"deadlineSecs": 300}\'',
       'midnight contract call --address 0x123 --circuit submit_score --args \'{"score": 100, "alias": "TEST"}\'',
       'midnight contract state --address 0x123',
       'midnight contract deploy --json',
