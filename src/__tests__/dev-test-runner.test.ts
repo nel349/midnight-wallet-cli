@@ -36,7 +36,7 @@ describe('runTests', () => {
     });
     expect(result.success).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(result.command).toBe('sh -c exit 0');
   });
 
   it('resolves with success=false on non-zero exit', async () => {
@@ -59,6 +59,20 @@ describe('runTests', () => {
       commandOverride: { bin: 'sh', args: ['-c', 'exit 0'] },
     });
     expect(result.success).toBe(true);
+  });
+
+  it('aborts a running child via signal', async () => {
+    const ac = new AbortController();
+    const started = Date.now();
+    const promise = runTests({
+      project: project(),
+      signal: ac.signal,
+      commandOverride: { bin: 'sh', args: ['-c', 'sleep 30'] },
+    });
+    setTimeout(() => ac.abort(), 50);
+    const result = await promise;
+    expect(result.success).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   it('rejects cleanly when the binary is missing', async () => {

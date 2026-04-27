@@ -195,7 +195,7 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
         }
         testInFlight = true;
         try {
-          await runProjectTests(project);
+          await runProjectTests(project, abortController.signal);
         } finally {
           testInFlight = false;
         }
@@ -264,11 +264,11 @@ async function deployContract(project: ProjectInfo): Promise<void> {
   }
 }
 
-async function runProjectTests(project: ProjectInfo): Promise<void> {
+async function runProjectTests(project: ProjectInfo, signal?: AbortSignal): Promise<void> {
   process.stderr.write(dim(`\n  Running npm run ${project.testScript}...\n`));
   try {
     // runTests passes cwd: project.projectRoot to spawn — no parent chdir needed.
-    const result = await runTests({ project });
+    const result = await runTests({ project, signal });
     if (result.success) {
       process.stderr.write(`  ${dim('─')} Tests passed ${dim(`(${formatDuration(result.durationMs)})`)}\n`);
     } else {

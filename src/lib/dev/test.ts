@@ -1,6 +1,6 @@
 // Test runner for `mn dev`'s `t` keystroke.
-// Streams the project's npm test script output directly to stderr so users
-// see test progress in real time (Vitest/Jest/whatever prints as it runs).
+// Inherits the child's stdout and stderr so test output (Vitest/Jest/whatever)
+// streams to the user in real time without buffering.
 
 import { spawn } from 'node:child_process';
 import type { ProjectInfo } from './detect-project.ts';
@@ -21,9 +21,9 @@ export interface TestRunnerOptions {
 }
 
 /**
- * Run the project's npm test script, streaming stdout/stderr directly to
- * the parent process's stderr so the user sees live test output. Does not
- * buffer — long test suites show progress as each test completes.
+ * Run the project's npm test script, inheriting the child's stdout/stderr so
+ * the user sees live test output. Does not buffer — long test suites show
+ * progress as each test completes. Aborting the signal sends SIGTERM.
  */
 export async function runTests(opts: TestRunnerOptions): Promise<TestResult> {
   const { bin, args, label } = resolveCommand(opts);
