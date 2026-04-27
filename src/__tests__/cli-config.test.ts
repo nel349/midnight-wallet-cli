@@ -113,6 +113,11 @@ describe('getConfigValue', () => {
     expect(() => getConfigValue('unknown', TEST_DIR)).toThrow('Unknown config key');
     expect(() => getConfigValue('unknown', TEST_DIR)).toThrow('Valid keys:');
   });
+
+  it('accepts network-id as an alias for network (midnight-expert compat)', () => {
+    saveCliConfig({ network: 'preview' }, TEST_DIR);
+    expect(getConfigValue('network-id', TEST_DIR)).toBe('preview');
+  });
 });
 
 describe('setConfigValue', () => {
@@ -134,6 +139,11 @@ describe('setConfigValue', () => {
 
   it('throws for unknown key', () => {
     expect(() => setConfigValue('unknown', 'value', TEST_DIR)).toThrow('Unknown config key');
+  });
+
+  it('accepts network-id as an alias when setting (midnight-expert compat)', () => {
+    setConfigValue('network-id', 'preprod', TEST_DIR);
+    expect(getConfigValue('network', TEST_DIR)).toBe('preprod');
   });
 
   it('does not corrupt existing config on validation failure', () => {

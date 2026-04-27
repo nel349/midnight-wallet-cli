@@ -117,7 +117,10 @@ describe.skipIf(!HAS_INDEXER)('balance command — positional address with local
 
 describe('balance command — --indexer-ws override', () => {
   it('uses custom indexer WS URL and fails on invalid one', async () => {
-    const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--indexer-ws', 'ws://localhost:19999']);
+    // --no-cache forces a fresh fetch so the test actually hits the
+    // (broken) indexer URL instead of returning a cached result from
+    // an earlier test in this file.
+    const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--indexer-ws', 'ws://localhost:19999', '--no-cache']);
     try {
       await balanceCommand(args);
       expect.fail('Should have thrown');
@@ -138,6 +141,19 @@ describe.skipIf(!HAS_INDEXER)('balance command — JSON output', () => {
     expect(data.balances).toBeDefined();
     expect(typeof data.utxoCount).toBe('number');
     expect(typeof data.txCount).toBe('number');
+  });
+
+  it('exposes a top-level NIGHT alias for flat-shape consumers', async () => {
+    // Compatibility shim for integrators who jq for `.NIGHT` directly
+    // (e.g. midnight-expert's session health check). The nested
+    // `.balances.NIGHT` remains canonical; this is an additive mirror.
+    const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'undeployed', '--json']);
+    await balanceCommand(args);
+
+    const data = JSON.parse(io.stdout().trim());
+    if (data.balances?.NIGHT) {
+      expect(data.NIGHT).toBe(data.balances.NIGHT);
+    }
   });
 
   it('reports NIGHT balance in NIGHT units (not micro-NIGHT)', async () => {
@@ -166,6 +182,13 @@ describe.skipIf(!HAS_INDEXER)('balance command — JSON output', () => {
     expect(err).not.toContain('Address');
     expect(err).not.toContain('UTXOs');
     expect(err).not.toContain('─');
+  });
+});
+
+describe('balance command — network inference from address HRP', () => {
+  it('throws a clear error when --network conflicts with the address HRP', async () => {
+    const args = parseArgs(['balance', GENESIS_UNDEPLOYED_ADDRESS, '--network', 'preprod']);
+    await expect(balanceCommand(args)).rejects.toThrow(/belongs to undeployed.*--network is preprod/);
   });
 });
 

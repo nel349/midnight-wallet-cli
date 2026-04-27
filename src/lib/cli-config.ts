@@ -18,6 +18,22 @@ const DEFAULT_CLI_CONFIG: CliConfig = {
 
 const VALID_CONFIG_KEYS: readonly string[] = ['network', 'proof-server', 'node', 'indexer-ws', 'wallet'] as const;
 
+/**
+ * Aliases mapped to canonical config keys. Keeps integrations that learned
+ * a different name working without forcing them to update. Add carefully —
+ * each entry is a permanent compatibility surface.
+ *   network-id → network: midnight-expert's setup-test-wallets skill
+ *     instructs agents to read `network-id`. Resolve transparently so their
+ *     flow doesn't error at step 1.
+ */
+const CONFIG_KEY_ALIASES: Readonly<Record<string, string>> = {
+  'network-id': 'network',
+};
+
+function resolveConfigKey(key: string): string {
+  return CONFIG_KEY_ALIASES[key] ?? key;
+}
+
 const ENDPOINT_KEYS = new Set(['proof-server', 'node', 'indexer-ws']);
 
 function isValidUrl(value: string): boolean {
@@ -100,12 +116,13 @@ export function saveCliConfig(config: CliConfig, configDir?: string): void {
  * Get a single config value.
  */
 export function getConfigValue(key: string, configDir?: string): string {
+  const canonical = resolveConfigKey(key);
   const config = loadCliConfig(configDir);
 
-  if (key === 'network') return config.network;
-  if (key === 'wallet') return config.wallet ?? '(not set)';
-  if (ENDPOINT_KEYS.has(key)) {
-    const value = config[key as keyof CliConfig];
+  if (canonical === 'network') return config.network;
+  if (canonical === 'wallet') return config.wallet ?? '(not set)';
+  if (ENDPOINT_KEYS.has(canonical)) {
+    const value = config[canonical as keyof CliConfig];
     return typeof value === 'string' ? value : '(not set)';
   }
 
@@ -118,29 +135,30 @@ export function getConfigValue(key: string, configDir?: string): string {
  * Set a single config value with validation.
  */
 export function setConfigValue(key: string, value: string, configDir?: string): void {
+  const canonical = resolveConfigKey(key);
   const config = loadCliConfig(configDir);
 
-  if (key === 'network') {
+  if (canonical === 'network') {
     if (!isValidNetworkName(value)) {
       throw new Error(
         `Invalid network: "${value}"\nValid networks: preprod, preview, undeployed`
       );
     }
     config.network = value;
-  } else if (key === 'wallet') {
+  } else if (canonical === 'wallet') {
     if (!isValidWalletName(value)) {
       throw new Error(
         `Invalid wallet name: "${value}"\nWallet name must be a simple name (no path separators, .json suffix, or special characters).`
       );
     }
     config.wallet = value;
-  } else if (ENDPOINT_KEYS.has(key)) {
+  } else if (ENDPOINT_KEYS.has(canonical)) {
     if (!isValidUrl(value)) {
       throw new Error(
         `Invalid URL for "${key}": "${value}"\nMust start with http://, https://, ws://, or wss://`
       );
     }
-    config[key as 'proof-server' | 'node' | 'indexer-ws'] = value;
+    config[canonical as 'proof-server' | 'node' | 'indexer-ws'] = value;
   } else {
     throw new Error(
       `Unknown config key: "${key}"\nValid keys: ${VALID_CONFIG_KEYS.join(', ')}`
@@ -156,14 +174,15 @@ export function setConfigValue(key: string, value: string, configDir?: string): 
  * For optional keys: removes the key entirely.
  */
 export function unsetConfigValue(key: string, configDir?: string): void {
+  const canonical = resolveConfigKey(key);
   const config = loadCliConfig(configDir);
 
-  if (key === 'network') {
+  if (canonical === 'network') {
     config.network = DEFAULT_CLI_CONFIG.network;
-  } else if (key === 'wallet') {
+  } else if (canonical === 'wallet') {
     delete config.wallet;
-  } else if (ENDPOINT_KEYS.has(key)) {
-    delete config[key as 'proof-server' | 'node' | 'indexer-ws'];
+  } else if (ENDPOINT_KEYS.has(canonical)) {
+    delete config[canonical as 'proof-server' | 'node' | 'indexer-ws'];
   } else {
     throw new Error(
       `Unknown config key: "${key}"\nValid keys: ${VALID_CONFIG_KEYS.join(', ')}`

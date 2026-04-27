@@ -4,6 +4,7 @@
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { type ParsedArgs, getFlag, hasFlag, isMinimalMode } from '../lib/argv.ts';
+import { type NetworkName, isValidNetworkName } from '../lib/network.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
@@ -28,10 +29,42 @@ export default async function balanceCommand(args: ParsedArgs): Promise<void> {
   return walletBalance(args);
 }
 
+/**
+ * Pull the network name out of a Bech32m address HRP. Addresses look like
+ * `mn_addr_<network>1...` so we slice between the second underscore and the
+ * `1` separator. Returns null when the format doesn't match a known network.
+ */
+function inferNetworkFromAddress(address: string): NetworkName | null {
+  const match = address.match(/^mn_addr_([a-z]+)1/);
+  if (!match) return null;
+  const candidate = match[1];
+  return isValidNetworkName(candidate) ? candidate : null;
+}
+
 // ── Positional address: unshielded only via GraphQL ──
 
 async function addressBalance(args: ParsedArgs): Promise<void> {
   const address = args.subcommand!;
+
+  // Bech32m addresses encode the network in their HRP
+  // (mn_addr_undeployed1..., mn_addr_preprod1..., mn_addr_preview1...).
+  // When the caller didn't pass --network, infer from the address rather
+  // than defaulting to whatever the config says — otherwise users hit a
+  // confusing "expected HRP X, but was Y" error from the indexer.
+  // When --network is explicit and disagrees with the HRP, fail loudly so
+  // the mismatch surfaces at the CLI layer instead of as a GraphQL error.
+  const inferredNetwork = inferNetworkFromAddress(address);
+  const explicitNetwork = getFlag(args, 'network');
+  if (explicitNetwork && inferredNetwork && explicitNetwork !== inferredNetwork) {
+    throw new Error(
+      `Address belongs to ${inferredNetwork} but --network is ${explicitNetwork}.\n` +
+      `Drop --network (we'll infer from the address) or pass an address for ${explicitNetwork}.`
+    );
+  }
+  if (!explicitNetwork && inferredNetwork) {
+    args = { ...args, flags: { ...args.flags, network: inferredNetwork } };
+  }
+
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
 
   applyEndpointOverrides(networkConfig, {
@@ -44,6 +77,7 @@ async function addressBalance(args: ParsedArgs): Promise<void> {
 
   try {
     const result = await defaultRepository().unshielded(address, networkConfig, {
+      forceFresh: hasFlag(args, 'no-cache'),
       onProgress: (current, highest) => {
         if (highest > 0) {
           const pct = Math.round((current / highest) * 100);
@@ -60,13 +94,18 @@ async function addressBalance(args: ParsedArgs): Promise<void> {
         const key = isNativeToken(tokenType) ? 'NIGHT' : tokenType;
         balances[key] = isNativeToken(tokenType) ? toNight(amount) : amount.toString();
       }
+      // Top-level NIGHT alias mirrors the nested balances.NIGHT for
+      // consumers that read the flat shape (midnight-expert's session
+      // health hook does jq '.balance // .NIGHT // "unknown"'). The
+      // nested form remains the canonical source of truth.
+      const nightAlias = balances.NIGHT !== undefined ? { NIGHT: balances.NIGHT } : {};
       // Slim drops the (long) address echo and txCount — agents already
       // know what they asked for, and txCount is an internal sync detail.
       if (isMinimalMode(args)) {
-        writeJsonResult({ network: networkName, balances, utxoCount: result.utxoCount });
+        writeJsonResult({ network: networkName, balances, ...nightAlias, utxoCount: result.utxoCount });
         return;
       }
-      writeJsonResult({ address, network: networkName, balances, utxoCount: result.utxoCount, txCount: result.txCount });
+      writeJsonResult({ address, network: networkName, balances, ...nightAlias, utxoCount: result.utxoCount, txCount: result.txCount });
       return;
     }
 
