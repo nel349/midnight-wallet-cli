@@ -3,9 +3,37 @@
 // The generated script only needs contract SDK + RPC client — no wallet SDK.
 
 import { spawn } from 'node:child_process';
-import { writeFileSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { NetworkConfig } from '../network.ts';
+
+/**
+ * Walk up from this module to find the closest `node_modules` directory.
+ * The generated deploy/call script imports SDK packages by bare specifier
+ * (`@midnight-ntwrk/midnight-js-contracts`, `ws`, etc.); without help, Node
+ * resolves those against the user's project — which usually doesn't have them.
+ * We hand the script our own `node_modules` via `NODE_PATH` so it falls back
+ * to the CLI's bundled deps when the user's project is missing them.
+ *
+ * The user's `node_modules` still takes precedence (cwd-relative resolution
+ * runs first), so anyone deliberately pinning an SDK version still gets it.
+ */
+function findOurNodeModules(): string | null {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  // Bounded walk — node_modules should be a few levels up at most. Stop at
+  // filesystem root.
+  for (let i = 0; i < 8; i++) {
+    const candidate = join(dir, 'node_modules');
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+const OUR_NODE_MODULES = findOurNodeModules();
 
 export interface RunnerOptions {
   dappDir: string;
@@ -421,11 +449,24 @@ async function executeScript(
   const scriptPath = join(dappDir, `.mn-contract-${Date.now()}.mjs`);
   writeFileSync(scriptPath, script);
 
+  // Stitch the CLI's own node_modules into NODE_PATH so the generated script
+  // can import SDK packages (@midnight-ntwrk/midnight-js-*, ws, etc.) without
+  // requiring the developer's project to install them. User's node_modules
+  // takes precedence — explicit project deps still win.
+  const existingNodePath = process.env.NODE_PATH ?? '';
+  const nodePath = OUR_NODE_MODULES
+    ? (existingNodePath ? `${existingNodePath}:${OUR_NODE_MODULES}` : OUR_NODE_MODULES)
+    : existingNodePath;
+
   return new Promise<string>((resolve, reject) => {
     const child = spawn('node', [scriptPath], {
       cwd: dappDir,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_NO_WARNINGS: '1' },
+      env: {
+        ...process.env,
+        NODE_NO_WARNINGS: '1',
+        ...(nodePath ? { NODE_PATH: nodePath } : {}),
+      },
     });
 
     let stdout = '';
