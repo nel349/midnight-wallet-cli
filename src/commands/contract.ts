@@ -6,7 +6,16 @@ import { type ParsedArgs, getFlag, hasFlag, requireFlag } from '../lib/argv.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { header, keyValue } from '../ui/format.ts';
 import { bold, dim, teal, yellow, green } from '../ui/colors.ts';
-import { start as startSpinner } from '../ui/spinner.ts';
+import { start as startSpinner, type Spinner } from '../ui/spinner.ts';
+
+/**
+ * No-op spinner for `--json` callers. Suppresses chrome on stderr so
+ * programmatic consumers (agents, scripts) get a clean JSON-only stream
+ * on stdout with nothing on stderr to misinterpret.
+ */
+function silentSpinner(): Spinner {
+  return { update() {}, stop() {}, fail() {}, log() {} };
+}
 import {
   findContractInfo,
   formatCircuitSignature,
@@ -108,7 +117,9 @@ async function preflight(network: string, jsonMode: boolean): Promise<void> {
   const seedBuffer = Buffer.from(walletConfig.seed, 'hex');
   const address = walletConfig.addresses[network as NetworkName];
 
-  const spinner = startSpinner('Checking wallet...');
+  // In JSON mode, suppress the spinner entirely so stderr stays quiet for
+  // programmatic callers. The same pattern applies in handleDeploy/handleCall.
+  const spinner = jsonMode ? silentSpinner() : startSpinner('Checking wallet...');
   const repo = defaultRepository();
 
   try {
@@ -171,7 +182,7 @@ async function ensureServe(network: string, jsonMode: boolean): Promise<{ port: 
   }
 
   // Start serve in-process
-  const spinner = startSpinner('Starting mn serve...');
+  const spinner = jsonMode ? silentSpinner() : startSpinner('Starting mn serve...');
   const handle = await startServe({
     network,
     onMessage: (msg) => spinner.update(msg),
@@ -211,7 +222,7 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
   // Start mn serve (or reuse existing)
   const serve = await ensureServe(network, jsonMode);
 
-  const spinner = startSpinner('Deploying contract...');
+  const spinner = jsonMode ? silentSpinner() : startSpinner('Deploying contract...');
 
   try {
     const result = await runDeploy({
@@ -226,6 +237,9 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     spinner.stop(green('✓') + ' Contract deployed');
 
     if (jsonMode) {
+      // JSON path emits a single line of structured output on stdout. The
+      // bare address line below is for the human "pipe through head" workflow
+      // and would pollute the JSON stream.
       writeJsonResult({
         subcommand: 'deploy',
         contractName: info.name,
@@ -236,10 +250,9 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
       process.stderr.write('\n');
       process.stderr.write(keyValue('Address', result.contractAddress) + '\n');
       process.stderr.write('\n' + green('  ✓ Deploy successful') + '\n\n');
+      // Pipeable address on stdout for shell composition (e.g. `addr=$(mn contract deploy)`).
+      process.stdout.write(result.contractAddress + '\n');
     }
-
-    // Write address to stdout for piping
-    process.stdout.write(result.contractAddress + '\n');
   } catch (err) {
     spinner.fail('Deploy failed');
     throw err;
@@ -291,7 +304,7 @@ async function handleCall(args: ParsedArgs): Promise<void> {
   await preflight(network, jsonMode);
 
   const serve = await ensureServe(network, jsonMode);
-  const spinner = startSpinner(`Calling ${circuit}...`);
+  const spinner = jsonMode ? silentSpinner() : startSpinner(`Calling ${circuit}...`);
 
   try {
     const result = await runCall({
@@ -350,7 +363,7 @@ async function handleState(args: ParsedArgs): Promise<void> {
   }
 
   // Try parsed ledger state via runner (needs compiled contract in dApp)
-  const spinner = startSpinner('Querying contract state...');
+  const spinner = jsonMode ? silentSpinner() : startSpinner('Querying contract state...');
 
   try {
     const { info } = findContractInfo(dappDir);
