@@ -30,19 +30,25 @@ import { CoreWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
 // Cleaned up on revert (rejection) and on applyEvents (successful on-chain confirmation).
 const preSpendSnapshots = new Map<any, Uint8Array>();
 
-// ── Patch applyEvents: clean up snapshots when coins are confirmed on-chain ──
+// ── Patch applyEventsWithChanges: clean up snapshots when coins are confirmed on-chain ──
+//
+// SDK 4.0.0 renamed `applyEvents` to `applyEventsWithChanges` and changed its
+// return type from `CoreWallet` to `[CoreWallet, DustStateChanges[]]`.
 
-const _originalApplyEvents = CoreWallet.applyEvents;
+const _originalApplyEventsWithChanges = CoreWallet.applyEventsWithChanges;
 
-CoreWallet.applyEvents = function patchedApplyEvents(
+CoreWallet.applyEventsWithChanges = function patchedApplyEventsWithChanges(
   wallet: any, secretKey: any, events: any, currentTime: any,
 ): any {
-  const result = _originalApplyEvents.call(CoreWallet, wallet, secretKey, events, currentTime);
+  const result = _originalApplyEventsWithChanges.call(CoreWallet, wallet, secretKey, events, currentTime);
+
+  // result is [updatedWallet, stateChanges[]] in v4
+  const updatedWallet = Array.isArray(result) ? result[0] : result;
 
   // After applying events, pending entries for confirmed txs are filtered out.
   // Clean up any snapshots whose nullifiers are no longer in pendingDust.
-  if (preSpendSnapshots.size > 0 && result?.pendingDust) {
-    const stillPending = new Set(result.pendingDust.map((t: any) => t.nullifier));
+  if (preSpendSnapshots.size > 0 && updatedWallet?.pendingDust) {
+    const stillPending = new Set(updatedWallet.pendingDust.map((t: any) => t.nullifier));
     for (const nullifier of preSpendSnapshots.keys()) {
       if (!stillPending.has(nullifier)) {
         preSpendSnapshots.delete(nullifier);

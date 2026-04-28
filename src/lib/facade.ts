@@ -3,12 +3,15 @@ import {
   UnshieldedWallet,
   createKeystore,
   PublicKey,
-  InMemoryTransactionHistoryStorage,
 } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
 import { DustWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
 import { WalletFacade, type FacadeState } from '@midnight-ntwrk/wallet-sdk-facade';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
-import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
+import {
+  NetworkId,
+  InMemoryTransactionHistoryStorage,
+  TransactionHistoryStorage,
+} from '@midnight-ntwrk/wallet-sdk-abstractions';
 import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
@@ -89,7 +92,9 @@ export async function buildFacade(
       additionalFeeOverhead: DUST_COST_OVERHEAD,
       feeBlocksMargin: DUST_FEE_BLOCKS_MARGIN,
     },
-    txHistoryStorage: new InMemoryTransactionHistoryStorage(),
+    // SDK 4.0.0 made the schema explicit; use the unshielded wallet's standard
+    // TransactionHistoryEntryWithHash schema, matching the v1 builder's expectation.
+    txHistoryStorage: new InMemoryTransactionHistoryStorage(TransactionHistoryStorage.TransactionHistoryCommonSchema),
     provingServerUrl: new URL(networkConfig.proofServer),
     relayURL: new URL(networkConfig.node),
   };
