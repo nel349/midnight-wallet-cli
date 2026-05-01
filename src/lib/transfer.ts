@@ -43,6 +43,11 @@ export interface TransferParams {
   onDust?: (status: string) => void;
   onProving?: () => void;
   onSubmitting?: () => void;
+  /** Fires every second while waiting for chain finalization. `elapsedMs`
+   * is the time since the submit started. Use to drive an elapsed-time
+   * display so users see the wait is alive.
+   */
+  onSubmittingTick?: (elapsedMs: number) => void;
   onSyncWarning?: (tag: string, message: string) => void;
 }
 
@@ -353,6 +358,7 @@ async function buildAndSubmitTransfer(
   onProving?: () => void,
   onSubmitting?: () => void,
   onDust?: (status: string) => void,
+  onSubmittingTick?: (elapsedMs: number) => void,
 ): Promise<string> {
   const startTime = Date.now();
   // Use DUST_TIMEOUT_MS (2 min) not DUST_REGISTRATION_TIMEOUT_MS (10 min) —
@@ -404,7 +410,19 @@ async function buildAndSubmitTransfer(
 
       verbose('transfer', 'Submitting transaction to node...');
       onSubmitting?.();
-      const txHash = await bundle.facade.submitTransaction(finalizedTx);
+      // SDK v4's facade.submitTransaction blocks until block finalization
+      // (typically 12 to 30s on hosted networks). Tick a 1-second timer so
+      // callers can render an elapsed counter and not look stuck.
+      const submitStarted = Date.now();
+      const tickInterval = onSubmittingTick
+        ? setInterval(() => onSubmittingTick(Date.now() - submitStarted), 1000)
+        : undefined;
+      let txHash: string;
+      try {
+        txHash = await bundle.facade.submitTransaction(finalizedTx);
+      } finally {
+        if (tickInterval) clearInterval(tickInterval);
+      }
       verbose('transfer', `Transaction submitted: ${txHash}`);
       return txHash;
     } catch (err: any) {
@@ -480,6 +498,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
     onDust,
     onProving,
     onSubmitting,
+    onSubmittingTick,
     onSyncWarning,
   } = params;
 
@@ -538,6 +557,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
           onProving,
           onSubmitting,
           onDust,
+          onSubmittingTick,
         );
         return { txHash, amountMicroNight: amount };
       },

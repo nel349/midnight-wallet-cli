@@ -109,6 +109,36 @@ export function start(message: string): Spinner {
   return spinner;
 }
 
+/**
+ * Update `spinner` once a second with `${baseMessage} MM:SS` while `promise`
+ * is pending. Used for waits that can't report real progress (e.g. waiting
+ * for chain finalization) so users see something is moving, not stuck.
+ *
+ * The interval clears in a finally block so timeouts and rejections are
+ * also clean. Returns whatever `promise` resolves to.
+ */
+export async function trackElapsed<T>(
+  spinner: Spinner,
+  baseMessage: string,
+  promise: Promise<T>,
+): Promise<T> {
+  const started = Date.now();
+  const formatElapsed = (ms: number): string => {
+    const s = Math.floor(ms / 1000);
+    const mm = Math.floor(s / 60).toString().padStart(2, '0');
+    const ss = (s % 60).toString().padStart(2, '0');
+    return `${mm}:${ss}`;
+  };
+  const tick = () => spinner.update(`${baseMessage} ${formatElapsed(Date.now() - started)}`);
+  tick();
+  const interval = setInterval(tick, 1000);
+  try {
+    return await promise;
+  } finally {
+    clearInterval(interval);
+  }
+}
+
 export async function withSpinner<T>(message: string, fn: () => Promise<T>): Promise<T> {
   const spinner = start(message);
   try {

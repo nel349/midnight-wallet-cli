@@ -14,7 +14,7 @@ import { suppressSdkTransientErrors } from '../lib/facade.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { header, keyValue, divider, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
-import { start as startSpinner } from '../ui/spinner.ts';
+import { start as startSpinner, trackElapsed } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function transferCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
@@ -135,7 +135,13 @@ async function unshieldedTransfer(
         spinner.update('Generating ZK proof (this may take a few minutes)...');
       },
       onSubmitting() {
-        spinner.update('Submitting transaction...');
+        spinner.update('Submitting and waiting for finalization (typically 12 to 30s)...');
+      },
+      onSubmittingTick(elapsedMs: number) {
+        const s = Math.floor(elapsedMs / 1000);
+        const mm = Math.floor(s / 60).toString().padStart(2, '0');
+        const ss = (s % 60).toString().padStart(2, '0');
+        spinner.update(`Submitting and waiting for finalization... ${mm}:${ss} elapsed (typically 12 to 30s)`);
       },
       onSyncWarning(_tag, msg) {
         spinner.update(`Syncing wallet... (${msg}, retrying)`);
@@ -259,8 +265,11 @@ async function shieldedTransfer(
         spinner.update('Generating ZK proof (this may take a few minutes)...');
         const finalized = await bundle.facade.finalizeRecipe(signed);
 
-        spinner.update('Submitting transaction...');
-        const txId = await bundle.facade.submitTransaction(finalized);
+        const txId = await trackElapsed(
+          spinner,
+          'Submitting and waiting for finalization (typically 12 to 30s)...',
+          bundle.facade.submitTransaction(finalized),
+        );
         return String(txId);
       },
       {

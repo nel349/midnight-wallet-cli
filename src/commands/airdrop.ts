@@ -17,7 +17,7 @@ import { suppressSdkTransientErrors } from '../lib/facade.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { header, keyValue, divider, formatAddress, successMessage } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
-import { start as startSpinner } from '../ui/spinner.ts';
+import { start as startSpinner, trackElapsed } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function airdropCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
@@ -100,7 +100,13 @@ async function unshieldedAirdrop(
         spinner.update('Generating ZK proof (this may take a few minutes)...');
       },
       onSubmitting() {
-        spinner.update('Submitting transaction...');
+        spinner.update('Submitting and waiting for finalization (typically 12 to 30s)...');
+      },
+      onSubmittingTick(elapsedMs: number) {
+        const s = Math.floor(elapsedMs / 1000);
+        const mm = Math.floor(s / 60).toString().padStart(2, '0');
+        const ss = (s % 60).toString().padStart(2, '0');
+        spinner.update(`Submitting and waiting for finalization... ${mm}:${ss} elapsed (typically 12 to 30s)`);
       },
       onSyncWarning(_tag, msg) {
         spinner.update(`Syncing genesis wallet... (${msg}, retrying)`);
@@ -215,8 +221,15 @@ async function shieldedAirdrop(
         spinner.update('Generating ZK proof (this may take a few minutes)...');
         const finalized = await bundle.facade.finalizeRecipe(signed);
 
-        spinner.update('Submitting transaction...');
-        const txId = await bundle.facade.submitTransaction(finalized);
+        // SDK v4 facade.submitTransaction blocks until the chain finalizes
+        // the block (typically 12 to 30s on hosted networks, ~6 to 12s on
+        // localnet). trackElapsed updates the spinner once a second so
+        // users see the wait is alive, not stuck.
+        const txId = await trackElapsed(
+          spinner,
+          'Submitting and waiting for finalization (typically 12 to 30s)...',
+          bundle.facade.submitTransaction(finalized),
+        );
         return String(txId);
       },
       {
