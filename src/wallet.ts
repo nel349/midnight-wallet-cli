@@ -4,8 +4,9 @@
 // Also supports: midnight --mcp (starts MCP server for AI agent integration)
 
 import { parseArgs, hasFlag } from './lib/argv.ts';
-import { errorBox } from './ui/format.ts';
-import { classifyError } from './lib/exit-codes.ts';
+import { errorBox, usageBox } from './ui/format.ts';
+import { classifyError, EXIT_INVALID_ARGS } from './lib/exit-codes.ts';
+import { UsageError, isUsageError } from './lib/errors.ts';
 import { writeJsonError } from './lib/json-output.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
 import { migrateOldWallet } from './lib/wallet-config.ts';
@@ -129,7 +130,7 @@ async function run(): Promise<void> {
       return handler(args, signal);
     }
     default:
-      throw new Error(
+      throw new UsageError(
         `Unknown command: "${command}"\n` +
         `Run "midnight help" to see available commands.`
       );
@@ -147,12 +148,23 @@ run().then(() => {
     process.exit(0);
   }
 }).catch((err: Error) => {
-  if (jsonMode) {
+  // Usage errors (missing/unknown subcommand, bad args) render in yellow
+  // with a softer "Usage" framing. They are the user's prompt to fix and
+  // retry, not a system failure. Exit code 2 (INVALID_ARGS).
+  const message = err.message;
+  if (isUsageError(err)) {
+    if (jsonMode) {
+      writeJsonError(err, 'INVALID_ARGS', EXIT_INVALID_ARGS);
+    } else {
+      process.stderr.write('\n' + usageBox(message, 'Run "midnight help" for full usage.') + '\n\n');
+    }
+    process.exit(EXIT_INVALID_ARGS);
+  } else if (jsonMode) {
     const { exitCode, errorCode } = classifyError(err);
     writeJsonError(err, errorCode, exitCode);
     process.exit(exitCode);
   } else {
-    process.stderr.write('\n' + errorBox(err.message, 'Run "midnight help" for usage information.') + '\n\n');
+    process.stderr.write('\n' + errorBox(message, 'Run "midnight help" for usage information.') + '\n\n');
     const { exitCode } = classifyError(err);
     process.exit(exitCode);
   }

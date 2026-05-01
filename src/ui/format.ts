@@ -2,7 +2,7 @@
 // All functions return strings — callers decide where to write (stdout vs stderr)
 
 import { TOKEN_DECIMALS } from '../lib/constants.ts';
-import { teal, red, green, bold, dim, gray, isColorEnabled } from './colors.ts';
+import { teal, red, green, yellow, bold, dim, gray, isColorEnabled } from './colors.ts';
 
 const DEFAULT_WIDTH = 60;
 
@@ -148,6 +148,29 @@ export function errorBox(error: string, suggestion?: string): string {
   // Color the border red if colors enabled
   if (isColorEnabled()) {
     return output.replace(/[╔╗╚╝═║]/g, match => red(match));
+  }
+  return output;
+}
+
+// Usage hint box: yellow border, light style. Reserved for cases where the
+// user invoked the CLI with missing or wrong arguments (e.g. `mn wallet`
+// with no subcommand). Visually softer than errorBox so real errors keep
+// their alarming red.
+export function usageBox(message: string, suggestion?: string): string {
+  // Normalize: drop any leading "Usage:" the caller already added so we
+  // don't render "Usage: Usage: ...". The bold header is added below.
+  const normalized = message.replace(/^Usage:\s*/i, '');
+  const messageLines = normalized.split('\n');
+  const lines = messageLines.map((line, i) =>
+    i === 0 ? yellow(bold('Usage: ')) + yellow(line) : yellow(line)
+  );
+  if (suggestion) {
+    lines.push('');
+    lines.push(dim('Hint: ') + suggestion);
+  }
+  const output = box(lines, 'light');
+  if (isColorEnabled()) {
+    return output.replace(/[┌┐└┘─│]/g, match => yellow(match));
   }
   return output;
 }

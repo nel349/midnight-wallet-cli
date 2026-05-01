@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   header, divider, keyValue,
   toNight, formatNight, toDust, formatDust, formatAddress,
-  box, errorBox, successMessage,
+  box, errorBox, usageBox, successMessage,
 } from '../ui/format.ts';
 
 // Run format tests with NO_COLOR so we can assert exact string content
@@ -316,6 +316,40 @@ describe('errorBox', () => {
     const result = errorBox('Fail');
     expect(result).toContain('╔');
     expect(result).toContain('╝');
+  });
+});
+
+describe('usageBox', () => {
+  it('contains the usage message', () => {
+    const result = usageBox('Unknown subcommand: foo');
+    expect(result).toContain('Unknown subcommand: foo');
+  });
+
+  it('uses "Usage:" label, not "Error:"', () => {
+    const result = usageBox('do this thing');
+    expect(result).toContain('Usage:');
+    expect(result).not.toContain('Error:');
+  });
+
+  it('uses light box style, not heavy', () => {
+    const result = usageBox('hint');
+    expect(result).toContain('┌');
+    expect(result).toContain('┘');
+    expect(result).not.toContain('╔');
+  });
+
+  it('includes hint when provided', () => {
+    const result = usageBox('Missing key', 'Run mn help config');
+    expect(result).toContain('Run mn help config');
+    expect(result).toContain('Hint:');
+  });
+
+  it('does not double-prefix when message already starts with "Usage:"', () => {
+    const result = usageBox('Usage: mn wallet <subcommand>');
+    // Strip ANSI to count occurrences cleanly.
+    const plain = result.replace(/\x1b\[[0-9;]*m/g, '');
+    const matches = plain.match(/Usage:/g) ?? [];
+    expect(matches.length).toBe(1);
   });
 });
 

@@ -3,6 +3,7 @@
 
 import { spawn } from 'child_process';
 import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
+import { UsageError } from '../lib/errors.ts';
 import {
   checkDockerAvailable,
   ensureComposeFile,
@@ -252,7 +253,7 @@ export default async function localnetCommand(args: ParsedArgs): Promise<void> {
   const subcommand = args.subcommand;
 
   if (!subcommand || !isValidSubcommand(subcommand)) {
-    throw new Error(
+    throw new UsageError(
       `Usage: midnight localnet <${VALID_SUBCOMMANDS.join('|')}>\n\n` +
       `Subcommands:\n` +
       `  up        Start the local network\n` +

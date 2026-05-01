@@ -5,6 +5,7 @@
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { UsageError } from '../lib/errors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { header, keyValue, divider } from '../ui/format.ts';
 import { bold, dim, green, red, teal } from '../ui/colors.ts';
@@ -29,7 +30,7 @@ export default async function testCommand(args: ParsedArgs, signal?: AbortSignal
   const subcommand = args.subcommand;
 
   if (!subcommand || !isValidSubcommand(subcommand)) {
-    throw new Error(
+    throw new UsageError(
       `Usage: midnight test <${VALID_SUBCOMMANDS.join('|')}>\n\n` +
       `  run       Run test suites for the current dApp\n` +
       `  list      List available test suites\n` +
@@ -63,7 +64,7 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
     selectedSuite = suites.find(s => s.suite.name === suiteName);
     if (!selectedSuite) {
       const available = suites.map(s => s.suite.name).join(', ') || 'none found';
-      throw new Error(`Suite "${suiteName}" not found. Available: ${available}`);
+      throw new UsageError(`Suite "${suiteName}" not found. Available: ${available}`);
     }
   } else if (suites.length > 0) {
     selectedSuite = suites[0];

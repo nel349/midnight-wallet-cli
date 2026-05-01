@@ -2,6 +2,7 @@
 // cache clear [--network <name>] [--wallet <name|file>]
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
+import { UsageError } from '../lib/errors.ts';
 import { clearWalletCache } from '../lib/wallet-cache.ts';
 import { clearDustDirectCache, dustPublicKeyHexFromSeed } from '../lib/dust-direct-cache.ts';
 import { resolveWalletPath, loadWalletConfig } from '../lib/wallet-config.ts';
@@ -13,7 +14,7 @@ export default async function cacheCommand(args: ParsedArgs): Promise<void> {
   const action = args.subcommand;
 
   if (action !== 'clear') {
-    throw new Error(
+    throw new UsageError(
       `Usage: midnight cache clear [--network <name>] [--wallet <name|file>]`
     );
   }

@@ -4,6 +4,7 @@
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, isMinimalMode, rejectNoCacheForWrites } from '../lib/argv.ts';
+import { UsageError } from '../lib/errors.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
@@ -23,7 +24,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   const subcommand = args.subcommand;
 
   if (!subcommand || (subcommand !== 'register' && subcommand !== 'status')) {
-    throw new Error(
+    throw new UsageError(
       'Missing or invalid subcommand.\n' +
       'Usage:\n' +
       '  midnight dust register   Register NIGHT UTXOs for dust generation\n' +

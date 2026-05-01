@@ -3,6 +3,7 @@
 // config set <key> <value> → success message on stderr
 
 import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
+import { UsageError } from '../lib/errors.ts';
 import { getConfigValue, setConfigValue, unsetConfigValue, getValidConfigKeys } from '../lib/cli-config.ts';
 import { green } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
@@ -11,7 +12,7 @@ export default async function configCommand(args: ParsedArgs): Promise<void> {
   const action = args.subcommand;
 
   if (!action || !['get', 'set', 'unset'].includes(action)) {
-    throw new Error(
+    throw new UsageError(
       `Usage: midnight config <get|set|unset> <key> [value]\n` +
       `Valid keys: ${getValidConfigKeys().join(', ')}`
     );
@@ -19,7 +20,7 @@ export default async function configCommand(args: ParsedArgs): Promise<void> {
 
   const key = args.positionals[0];
   if (!key) {
-    throw new Error(
+    throw new UsageError(
       `Missing config key.\n` +
       `Valid keys: ${getValidConfigKeys().join(', ')}`
     );
@@ -43,7 +44,7 @@ export default async function configCommand(args: ParsedArgs): Promise<void> {
   } else {
     const value = args.positionals[1];
     if (value === undefined) {
-      throw new Error(`Missing value for config set.\nUsage: midnight config set ${key} <value>`);
+      throw new UsageError(`Missing value for config set.\nUsage: midnight config set ${key} <value>`);
     }
     setConfigValue(key, value);
     if (hasFlag(args, 'json')) {

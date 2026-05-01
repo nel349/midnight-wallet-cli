@@ -9,6 +9,7 @@ import { header } from '../ui/format.ts';
 import { animateMaterialize } from '../ui/animate.ts';
 import { COMMAND_BRIEFS, WORDMARK_BIG } from '../ui/art.ts';
 import { hasShownIntroThisSession, markIntroShown } from '../lib/intro-marker.ts';
+import { UsageError } from '../lib/errors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { PKG_NAME, PKG_VERSION, PKG_DESCRIPTION } from '../lib/pkg.ts';
 
@@ -935,7 +936,7 @@ export default async function helpCommand(args: ParsedArgs): Promise<void> {
   if (targetCommand) {
     const spec = COMMAND_SPECS.find(s => s.name === targetCommand);
     if (!spec) {
-      throw new Error(
+      throw new UsageError(
         `Unknown command: "${targetCommand}"\n` +
         `Available commands: ${COMMAND_SPECS.map(s => s.name).join(', ')}`
       );

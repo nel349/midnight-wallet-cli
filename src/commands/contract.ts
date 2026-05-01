@@ -3,6 +3,7 @@
 import { resolve } from 'node:path';
 import type { NetworkName } from '../lib/network.ts';
 import { type ParsedArgs, getFlag, hasFlag, requireFlag } from '../lib/argv.ts';
+import { UsageError } from '../lib/errors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { header, keyValue } from '../ui/format.ts';
 import { bold, dim, teal, yellow, green } from '../ui/colors.ts';
@@ -35,7 +36,7 @@ export default async function contractCommand(args: ParsedArgs, signal?: AbortSi
   const subcommand = args.subcommand;
 
   if (!subcommand || !isValidSubcommand(subcommand)) {
-    throw new Error(
+    throw new UsageError(
       `Usage: midnight contract <${VALID_SUBCOMMANDS.join('|')}>\n\n` +
       `  inspect   Show circuits, witnesses, and types for a compiled contract\n` +
       `  deploy    Deploy a contract to the network\n` +
@@ -282,7 +283,7 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
       const parsed = JSON.parse(argsJson);
       constructorArgs = Array.isArray(parsed) ? parsed : Object.values(parsed);
     } catch (err) {
-      throw new Error(`Invalid --args JSON: ${(err as Error).message}`);
+      throw new UsageError(`Invalid --args JSON: ${(err as Error).message}`);
     }
   }
 
@@ -387,7 +388,7 @@ async function handleCall(args: ParsedArgs): Promise<void> {
       const parsed = JSON.parse(argsJson);
       callArgs = Array.isArray(parsed) ? parsed : Object.values(parsed);
     } catch (err) {
-      throw new Error(`Invalid --args JSON: ${(err as Error).message}`);
+      throw new UsageError(`Invalid --args JSON: ${(err as Error).message}`);
     }
   }
 

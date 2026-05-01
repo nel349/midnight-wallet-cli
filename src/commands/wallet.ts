@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
 import { type ParsedArgs, getFlag, hasFlag, isMinimalMode } from '../lib/argv.ts';
+import { UsageError } from '../lib/errors.ts';
 import { generateMnemonic, mnemonicToSeedSync, mnemonicToEntropy, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
@@ -43,7 +44,7 @@ export default async function walletCommand(args: ParsedArgs): Promise<void> {
     case 'seed':
       return walletSeed(args);
     default:
-      throw new Error(
+      throw new UsageError(
         `Unknown wallet subcommand: "${subcommand ?? '(none)'}"\n` +
         `Available: generate, list, use, info, remove, seed\n` +
         `Run "midnight help wallet" for usage.`
