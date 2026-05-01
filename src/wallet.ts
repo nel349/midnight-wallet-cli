@@ -55,6 +55,10 @@ async function run(): Promise<void> {
       const { default: handler } = await import('./commands/help.ts');
       return handler(args);
     }
+    case 'manual': {
+      const { default: handler } = await import('./commands/manual.ts');
+      return handler(args);
+    }
     case 'wallet': {
       const { default: handler } = await import('./commands/wallet.ts');
       return handler(args);
@@ -156,7 +160,7 @@ run().then(() => {
     if (jsonMode) {
       writeJsonError(err, 'INVALID_ARGS', EXIT_INVALID_ARGS);
     } else {
-      process.stderr.write('\n' + usageBox(message, 'Run "midnight help" for full usage.') + '\n\n');
+      process.stderr.write('\n' + usageBox(message, 'Run "midnight manual" for the full reference, or "midnight help <command>" for one command.') + '\n\n');
     }
     process.exit(EXIT_INVALID_ARGS);
   } else if (jsonMode) {

@@ -72,6 +72,7 @@ export const COMMAND_BRIEFS: [name: string, brief: string][] = [
   ['serve',           'DApp Connector server'],
   ['test',            'Run dApp E2E tests'],
   ['help',            'Show command usage'],
+  ['manual',          'Full reference manual'],
 ];
 
 // Characters used for noise/static effect

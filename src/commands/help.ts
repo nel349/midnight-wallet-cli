@@ -469,6 +469,26 @@ const COMMAND_SPECS: CommandSpec[] = [
       commands: 'Array of command specs with jsonFields',
     },
   },
+  {
+    name: 'manual',
+    description: 'Full reference manual (long form, paged through $PAGER)',
+    usage: 'midnight manual [--no-pager] [--raw] [--json]',
+    flags: [
+      '--no-pager   Print straight to stdout, do not pipe through less',
+      '--raw        Strip ANSI colors (useful for piping to a file)',
+      '--json       Emit the manual text wrapped in a JSON object',
+    ],
+    examples: [
+      'midnight manual',
+      'midnight manual --no-pager | grep -i dust',
+      'midnight manual --raw > MANUAL.txt',
+    ],
+    jsonFields: {
+      name: 'CLI package name',
+      version: 'CLI version',
+      manual: 'Manual text (with ANSI colors)',
+    },
+  },
 ];
 
 // Build the right column: wordmark (lines 0-2), blank, then commands

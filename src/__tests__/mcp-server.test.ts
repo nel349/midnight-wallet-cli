@@ -38,7 +38,7 @@ describe('MCP tool coverage', () => {
   it('every CLI command has at least one MCP tool', () => {
     // CLI commands that should have MCP tools
     // serve/test/dev are long-running interactive, contract MCP tools planned for later
-    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'serve' && n !== 'test' && n !== 'contract' && n !== 'dev' && n !== 'generate');
+    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'manual' && n !== 'serve' && n !== 'test' && n !== 'contract' && n !== 'dev' && n !== 'generate');
 
     for (const cmd of cliCommands) {
       // Normalize: dust → midnight_dust_register, midnight_dust_status
@@ -57,7 +57,7 @@ describe('MCP tool coverage', () => {
 
   it('every COMMAND_SPEC with jsonFields is covered', () => {
     // serve/test are long-running, contract MCP tools planned for later
-    const commandsWithJson = COMMAND_SPECS.filter(s => s.jsonFields && s.name !== 'help' && s.name !== 'serve' && s.name !== 'test' && s.name !== 'contract' && s.name !== 'generate');
+    const commandsWithJson = COMMAND_SPECS.filter(s => s.jsonFields && s.name !== 'help' && s.name !== 'manual' && s.name !== 'serve' && s.name !== 'test' && s.name !== 'contract' && s.name !== 'generate');
     // Should have at least one tool per command
     expect(commandsWithJson.length).toBeGreaterThan(0);
     for (const spec of commandsWithJson) {
