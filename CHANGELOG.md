@@ -4,6 +4,8 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-01
+
 ### Added
 
 - **`mn dev` — iteration loop for Compact contract development.** Detects the project, ensures localnet is running, provisions reusable `dev-alice`/`dev-bob`/`dev-carol` wallets (with airdrop + dust register), watches `.compact` files and recompiles on save. Three keystrokes: `d` deploys the current artifact (uses `dev-alice` on `undeployed`), `t` runs the project's npm test script (`test:dev` if defined, else `test`), `q` quits cleanly. Works in monorepo layouts where the compile script lives in a sub-package.
@@ -22,6 +24,8 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 - **`docs/BEGINNER_JOURNEY.md`** — narrated walkthrough from an empty `/tmp` directory to a deployed and called counter contract, on both undeployed and preprod. Captures every paper-cut a first-time developer hits.
 - **`docs/MIDNIGHT_EXPERT_JOURNEY.md`** — companion log of running an external integrator's plugin flows against `mn` end-to-end, capturing six findings and the three additive aliases shipped in response.
 - **`docs/CLI_GUIDANCE_TICKETS.md`** — 13 ranked, actionable in-CLI improvements surfaced by the beginner journey, scoped S/M/L by effort, ready to pick off one at a time.
+- **`mn manual` — full reference manual.** New top-level command complementing the brief `mn help` cheat sheet and the `mn help --agent` AI-format reference. Twelve sections: NAME, SYNOPSIS, DESCRIPTION, INSTALLATION, CONCEPTS, COMMANDS (auto-generated from `COMMAND_SPECS`), COMMON FLOWS, CONFIGURATION, JSON OUTPUT, EXIT CODES, TROUBLESHOOTING, SEE ALSO. Pipes through `$PAGER` (default `less -R`) when stdout is a TTY, preserves ANSI colors, gives users `/` search and `q` to quit. Three flags: `--no-pager` skips pagination, `--raw` strips ANSI for piping to a file, `--json` wraps the manual in a structured object for agent ingestion.
+- **Cinematic intro plays once per shell session.** `mn` and `mn help` now animate the logo materialize on the first call in a shell session, and render the same layout statically on follow-up calls. Session is keyed by `TERM_SESSION_ID` (Apple Terminal, iTerm2), falling back to `ITERM_SESSION_ID`, then parent PID. Marker lives at `$TMPDIR/mn-intro-<session-key>`. Two new flags for explicit control: `--intro` forces the animation regardless of marker, `--no-intro` forces static. Non-TTY paths (CI, scripts, MCP) unchanged.
 
 ### Fixed
 
@@ -44,6 +48,7 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 - **Stderr no longer suppressed in `--json` mode.** Chrome (spinners, headers, progress) now flows to stderr during `--json` runs. Stdout remains JSON-only, so pipes like `mn cmd --json | jq` and redirects like `mn cmd --json 2>/dev/null` keep working. The previous `process.stderr.write` monkey-patch violated Node's stream-write callback contract in subtle ways and provided no benefit that a standard UNIX consumer actually depended on.
 - **MCP `tools/list` trimmed by ~40%** (9,488 → 5,663 B). Drops verbose prose from tool descriptions, redundant property descriptions, the `network` enum recitation, repeated override-URL fields, and the deprecated `midnight_generate` MCP tool (CLI `mn generate` still works). Saves ~1,090 tokens per agent session bootstrap.
 - **Wallet SDK upgraded to v4 (facade, dust) and v3 (shielded, unshielded).** `wallet-sdk-facade` and `wallet-sdk-dust-wallet` bumped from `^3.0.0` to `^4.0.0`. `wallet-sdk-shielded` and `wallet-sdk-unshielded-wallet` bumped from `^2.1.0` to `^3.0.0`. `midnight-js-network-id`, `midnight-js-types`, and `midnight-js-indexer-public-data-provider` bumped from `^4.0.2` to `^4.0.4` to deduplicate. Two breaking changes touched our code: dust-wallet 4.0 renamed `CoreWallet.applyEvents` to `applyEventsWithChanges` with a new tuple return (`dust-revert-patch.ts` updated), and unshielded-wallet 3.0 moved `InMemoryTransactionHistoryStorage` to `wallet-sdk-abstractions` and made the constructor require a `Schema` argument (`facade.ts` updated). Verified end-to-end on undeployed and preprod (real transfer alice → bob 1 NIGHT, tx `008736766b…`).
+- **Yellow `usageBox` for argument/syntax problems, red `errorBox` reserved for real errors.** Real failures (network, insufficient balance, file not found, SDK errors) keep the alarming red heavy-border box. Usage hints (missing or unknown subcommand, bad `--args` JSON, missing config key) now render in yellow with a light border and a "Usage" header instead of "Error". Exit code is 2 (`INVALID_ARGS`) for the usage path. Discriminated via a new `UsageError` class in `src/lib/errors.ts`; eleven existing throw sites converted across the dispatchers and arg-validation paths. Hint footer now points at `mn manual`.
 
 ### Removed
 

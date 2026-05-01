@@ -6,7 +6,8 @@ on our side without asking them to change anything.
 
 **Persona:** an AI agent inside Claude Code with the midnight-expert
 plugin loaded. Their `.mcp.json` pins `midnight-wallet-cli@latest`
-(currently v0.3.0 published, v0.3+ on this branch).
+(at the time of this walk, v0.3.0 was published; v0.4.0 is the
+next release).
 
 **Goal:** every midnight-expert flow that ran on v0.2.5 still runs on
 the next published version we ship, and the flows that were silently
