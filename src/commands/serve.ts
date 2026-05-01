@@ -159,7 +159,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       onResponse: (conn, req, durationMs, result, error, metadata) => {
         // Clean up any lingering spinner from an error path
         if (error && activeSpinner) {
-          activeSpinner.stop('Failed');
+          activeSpinner.fail('Failed');
           activeSpinner = undefined;
         }
 
@@ -233,7 +233,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       server = undefined;
       process.stderr.write(dim('  Server stopped.') + '\n\n');
     } catch (err) {
-      spinner.stop('Failed');
+      spinner.fail('Failed');
       if (server) { try { await server.close(); } catch { /* best-effort */ } }
       connector?.dispose();
       throw err;

@@ -131,7 +131,7 @@ async function unshieldedAirdrop(
     process.stderr.write(dim('  Note: Dust generation takes a few minutes on a fresh wallet.') + '\n');
     process.stderr.write(dim('        It will happen automatically on your first transfer.') + '\n\n');
   } catch (err) {
-    spinner.stop('Failed');
+    spinner.fail('Failed');
     if (err instanceof Error && err.message.toLowerCase().includes('dust')) {
       throw new Error(
         `${err.message}\n\n` +
@@ -245,7 +245,7 @@ async function shieldedAirdrop(
     process.stderr.write('\n' + divider() + '\n');
     process.stderr.write(dim('  Verify: midnight balance --shielded') + '\n\n');
   } catch (err) {
-    spinner.stop('Failed');
+    spinner.fail('Failed');
     throw err;
   } finally {
     restoreRpc();

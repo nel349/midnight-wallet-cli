@@ -163,7 +163,7 @@ async function unshieldedTransfer(
     process.stderr.write('\n' + divider() + '\n');
     process.stderr.write(dim('  Verify: midnight balance') + '\n\n');
   } catch (err) {
-    spinner.stop('Failed');
+    spinner.fail('Failed');
     throw err;
   }
 }
@@ -289,7 +289,7 @@ async function shieldedTransfer(
     process.stderr.write('\n' + divider() + '\n');
     process.stderr.write(dim('  Verify: midnight balance --shielded') + '\n\n');
   } catch (err) {
-    spinner.stop('Failed');
+    spinner.fail('Failed');
     throw err;
   } finally {
     restoreRpc();

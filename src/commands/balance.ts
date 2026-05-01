@@ -3,7 +3,8 @@
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
-import { type ParsedArgs, getFlag, hasFlag, isMinimalMode } from '../lib/argv.ts';
+import { type ParsedArgs, getFlag, hasFlag, isMinimalMode, isVerbose } from '../lib/argv.ts';
+import { enableVerbose, verbose } from '../lib/verbose.ts';
 import { type NetworkName, isValidNetworkName } from '../lib/network.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
@@ -44,7 +45,9 @@ function inferNetworkFromAddress(address: string): NetworkName | null {
 // ── Positional address: unshielded only via GraphQL ──
 
 async function addressBalance(args: ParsedArgs): Promise<void> {
+  if (isVerbose(args)) enableVerbose();
   const address = args.subcommand!;
+  verbose('balance', `address=${address}`);
 
   // Bech32m addresses encode the network in their HRP
   // (mn_addr_undeployed1..., mn_addr_preprod1..., mn_addr_preview1...).
@@ -139,7 +142,7 @@ async function addressBalance(args: ParsedArgs): Promise<void> {
 
     process.stderr.write('\n' + divider() + '\n\n');
   } catch (err) {
-    spinner.stop('Failed');
+    spinner.fail('Failed');
     throw err;
   }
 }
@@ -147,8 +150,11 @@ async function addressBalance(args: ParsedArgs): Promise<void> {
 // ── Wallet-based: full facade sync, both unshielded + shielded ──
 
 async function walletBalance(args: ParsedArgs): Promise<void> {
+  if (isVerbose(args)) enableVerbose();
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
+  verbose('balance', `network=${networkName} indexerWS=${networkConfig.indexerWS}`);
   const walletPath = resolveWalletPath(getFlag(args, 'wallet'));
+  verbose('balance', `wallet path=${walletPath}`);
   const config = loadWalletConfig(walletPath);
   const seedBuffer = Buffer.from(config.seed, 'hex');
   const address = config.addresses[networkName];
@@ -183,12 +189,14 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
 
     // ── Phase 1: fast unshielded via GraphQL (no facade, no proof server) ──
     if (!isJson) activeSpinner = startSpinner('Checking unshielded...');
+    verbose('balance', `phase=unshielded forceFresh=${noCache}`);
     const unshieldedResult = await defaultRepository().unshielded(address, networkConfig, {
       forceFresh: noCache,
       // Quiet by design — this finishes in <1s on most networks.
     });
     const unshieldedBalance = unshieldedResult.balances.get(nightToken) ?? 0n;
     const unshieldedUtxos = unshieldedResult.utxoCount;
+    verbose('balance', `unshielded fromCache=${unshieldedResult.fromCache} utxos=${unshieldedUtxos} txs=${unshieldedResult.txCount}`);
 
     if (activeSpinner) {
       activeSpinner.stop('Unshielded ready');
@@ -280,7 +288,7 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
     process.stdout.write(`SHIELDED_NIGHT=${shieldedBalance}\n`);
     process.stderr.write('\n' + divider() + '\n\n');
   } catch (err) {
-    activeSpinner?.stop('Failed');
+    activeSpinner?.fail('Failed');
     throw err;
   } finally {
     restoreRpc();

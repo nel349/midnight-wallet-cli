@@ -129,7 +129,7 @@ async function dustRegistrationPreCheck(
       unregisteredUtxos,
     };
   } catch (err) {
-    spinner.stop('Failed');
+    spinner.fail('Failed');
     throw err;
   }
 }
@@ -247,7 +247,7 @@ async function dustRegister(
         : `Dust tokens available: ${formatDust(dustBal)}`,
     ) + '\n\n');
   } catch (err) {
-    spinner.stop('Failed');
+    spinner.fail('Failed');
     throw err;
   }
 }
@@ -324,7 +324,7 @@ async function dustStatusDirect(
     }
     process.stderr.write('\n' + divider() + '\n\n');
   } catch (err) {
-    spinner.stop('Failed');
+    spinner.fail('Failed');
     throw err;
   }
 }

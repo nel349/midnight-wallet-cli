@@ -116,7 +116,7 @@ export async function withSpinner<T>(message: string, fn: () => Promise<T>): Pro
     spinner.stop();
     return result;
   } catch (err) {
-    spinner.stop(`Failed: ${message}`);
+    spinner.fail(`Failed: ${message}`);
     throw err;
   }
 }

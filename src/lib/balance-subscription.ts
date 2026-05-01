@@ -196,7 +196,10 @@ export function checkBalance(
       if (!settled) {
         settled = true;
         settle();
-        reject(new Error(`WebSocket connection failed: ${error.message}`));
+        const reason = error.message?.trim()
+          ? error.message
+          : `unable to reach ${indexerWS} (connection refused, DNS, or TLS error). Is the indexer running?`;
+        reject(new Error(`WebSocket connection failed: ${reason}`));
       }
     });
 
