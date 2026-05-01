@@ -8,6 +8,7 @@ import { bold, teal, gray, dim } from '../ui/colors.ts';
 import { header } from '../ui/format.ts';
 import { animateMaterialize } from '../ui/animate.ts';
 import { COMMAND_BRIEFS, WORDMARK_BIG } from '../ui/art.ts';
+import { hasShownIntroThisSession, markIntroShown } from '../lib/intro-marker.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { PKG_NAME, PKG_VERSION, PKG_DESCRIPTION } from '../lib/pkg.ts';
 
@@ -950,7 +951,18 @@ export default async function helpCommand(args: ParsedArgs): Promise<void> {
     return;
   }
   const rightColumn = buildRightColumn();
-  await animateMaterialize(undefined, rightColumn);
+
+  // Cinematic logo materialize plays only on the first invocation in this
+  // shell session. Follow-up calls render the same layout statically so
+  // viewers who just want the help text are not made to wait.
+  // Override with `--intro` to force the animation, `--no-intro` to skip it.
+  const forceIntro = hasFlag(args, 'intro');
+  const skipIntro = hasFlag(args, 'no-intro');
+  const seen = hasShownIntroThisSession();
+  const animated = forceIntro || (!skipIntro && !seen);
+
+  await animateMaterialize(undefined, rightColumn, { animated });
+  if (animated) markIntroShown();
 }
 
 export { COMMAND_SPECS };

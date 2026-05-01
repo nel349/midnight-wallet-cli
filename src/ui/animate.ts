@@ -26,20 +26,39 @@ function writeLine(text: string): void {
 // Logo materialize: noise → resolved logo on left
 // Right side: big wordmark types in (rows 0-2), then commands appear below
 // sideContent[0..2] = wordmark lines, sideContent[3+] = commands
-export async function animateMaterialize(signal?: AbortSignal, sideContent?: string[]): Promise<void> {
+//
+// `opts.animated` defaults to true. Pass false to render the final frame
+// statically (still respects colors). Used by `mn help` to play the
+// cinematic intro once per shell session and just print on follow-up calls.
+export async function animateMaterialize(
+  signal?: AbortSignal,
+  sideContent?: string[],
+  opts?: { animated?: boolean },
+): Promise<void> {
   const totalFrames = 20;
   const logoLines = MIDNIGHT_LOGO.split('\n');
   const logoLineCount = logoLines.length;
   const rightCol = 36; // column where right side starts
   const totalHeight = Math.max(logoLineCount, sideContent?.length ?? 0);
   const wordmarkLineCount = 3; // first 3 lines of sideContent are the wordmark
+  const animated = opts?.animated ?? true;
 
-  if (!isColorEnabled()) {
-    // Static render: side by side
+  if (!isColorEnabled() || !animated) {
+    // Static render: side by side. When colors are on, the wordmark stays
+    // bold-white to match the final animation frame.
+    const colored = isColorEnabled();
     for (let j = 0; j < totalHeight; j++) {
-      const left = (j < logoLineCount ? logoLines[j]! : '').padEnd(rightCol - 1);
-      const right = sideContent?.[j] ?? '';
-      process.stderr.write(left + right + '\n');
+      const leftRaw = j < logoLineCount ? logoLines[j]! : '';
+      const left = colored ? white(leftRaw).padEnd(rightCol + 9) : leftRaw.padEnd(rightCol - 1);
+      const rightRaw = sideContent?.[j] ?? '';
+      const right = colored && j < wordmarkLineCount && rightRaw
+        ? bold(white(rightRaw))
+        : rightRaw;
+      if (colored) {
+        process.stderr.write(leftRaw ? white(leftRaw) + `\x1b[${rightCol}G` + right + '\n' : `\x1b[${rightCol}G` + right + '\n');
+      } else {
+        process.stderr.write(left + right + '\n');
+      }
     }
     return;
   }
