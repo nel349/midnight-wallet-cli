@@ -109,6 +109,7 @@ const handlerLoaders: Record<string, () => Promise<{ default: CommandHandler }>>
   'wallet':          () => import('./commands/wallet.ts'),
   'status':          () => import('./commands/status.ts'),
   'contract':        () => import('./commands/contract.ts'),
+  'test':            () => import('./commands/test.ts'),
 };
 
 async function importHandler(name: string) {
@@ -707,6 +708,28 @@ const TOOLS: ToolDef[] = [
     async handler(params) {
       const args = buildArgs('contract', params, 'call');
       const handler = await importHandler('contract');
+      return captureCommand(handler, args);
+    },
+  },
+
+  // ── Test framework ───────────────────────────────────────────────
+  {
+    name: 'midnight_test_create',
+    description: 'Generate a CLI test scaffold (dapp.test.json + tests/suites/<name>/{suite,actions,assertions}.json) for the contract in the given dApp directory. Reads the contract via the same scan as midnight_contract_inspect; emits a deploy → state → call-each-impure-circuit → state action sequence with placeholder args you should review. Use { force: true } to overwrite existing files.',
+    annotations: { destructiveHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'dApp directory (defaults to cwd)' },
+        name: { type: 'string', description: 'Specific contract name when the project has multiple' },
+        suite: { type: 'string', description: 'Suite directory name under tests/suites/ (default "cli-default")' },
+        network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
+        force: { type: 'boolean', description: 'Overwrite existing files instead of aborting on collision' },
+      },
+    },
+    async handler(params) {
+      const args = buildArgs('test', params, 'create');
+      const handler = await importHandler('test');
       return captureCommand(handler, args);
     },
   },

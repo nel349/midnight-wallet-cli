@@ -19,7 +19,7 @@ import { runAssertions, type AssertionContext } from '../lib/test/assertions.ts'
 import { writeResult, readLatestResult, listResults } from '../lib/test/results.ts';
 import { runTeardown } from '../lib/test/teardown.ts';
 
-const VALID_SUBCOMMANDS = ['run', 'list', 'results'] as const;
+const VALID_SUBCOMMANDS = ['run', 'list', 'results', 'create'] as const;
 type Subcommand = typeof VALID_SUBCOMMANDS[number];
 
 function isValidSubcommand(s: string): s is Subcommand {
@@ -32,6 +32,7 @@ export default async function testCommand(args: ParsedArgs, signal?: AbortSignal
   if (!subcommand || !isValidSubcommand(subcommand)) {
     throw new UsageError(
       `Usage: midnight test <${VALID_SUBCOMMANDS.join('|')}>\n\n` +
+      `  create    Generate dapp.test.json + a CLI test suite from the contract\n` +
       `  run       Run test suites for the current dApp\n` +
       `  list      List available test suites\n` +
       `  results   Show latest test results\n\n` +
@@ -42,6 +43,8 @@ export default async function testCommand(args: ParsedArgs, signal?: AbortSignal
   const jsonMode = hasFlag(args, 'json');
 
   switch (subcommand) {
+    case 'create':
+      return handleCreate(args, jsonMode);
     case 'run':
       return handleRun(args, jsonMode, signal);
     case 'list':
@@ -49,6 +52,52 @@ export default async function testCommand(args: ParsedArgs, signal?: AbortSignal
     case 'results':
       return handleResults(args, jsonMode);
   }
+}
+
+// ── create ──
+
+async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> {
+  const { resolve } = await import('node:path');
+  const { findContractInfo } = await import('../lib/contract/inspect.ts');
+  const { buildScaffold } = await import('../lib/test/create.ts');
+  const { writeScaffold } = await import('../lib/test/create-writer.ts');
+  const { writeJsonResult } = await import('../lib/json-output.ts');
+
+  const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
+  const contractName = getFlag(args, 'name');
+  const suiteName = getFlag(args, 'suite');
+  const networkFlag = getFlag(args, 'network');
+  const force = hasFlag(args, 'force');
+
+  const { info } = findContractInfo(dappDir, contractName);
+
+  // Network defaults inside buildScaffold; only forward when the user set it
+  // explicitly so we don't accidentally widen the type.
+  const scaffold = buildScaffold(info.circuits, {
+    contractName: info.name,
+    suiteName,
+    network: networkFlag === 'preprod' || networkFlag === 'preview' || networkFlag === 'undeployed' ? networkFlag : undefined,
+  });
+
+  const result = writeScaffold(scaffold, { dappDir, force });
+
+  if (jsonMode) {
+    writeJsonResult({
+      subcommand: 'create',
+      contractName: info.name,
+      suiteName: scaffold.suiteName,
+      written: result.written,
+    });
+    return;
+  }
+
+  process.stderr.write('\n' + header(`Test scaffold: ${info.name}`) + '\n\n');
+  for (const path of result.written) {
+    process.stderr.write(`  ${green('✓')} ${path}\n`);
+  }
+  process.stderr.write('\n' + dim('  Next:') + '\n');
+  process.stderr.write(dim('    Edit ') + teal(`tests/suites/${scaffold.suiteName}/actions.json`) + dim(' — replace placeholder args with realistic values') + '\n');
+  process.stderr.write(dim('    Run  ') + teal('mn test run') + '\n\n');
 }
 
 // ── run ──
