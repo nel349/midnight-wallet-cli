@@ -30,15 +30,21 @@ const EXPECTED_TOOLS = [
   'midnight_localnet_down',
   'midnight_localnet_status',
   'midnight_localnet_clean',
+  'midnight_localnet_logs',
   'midnight_status',
   'midnight_confirm_operation',
+  'midnight_contract_inspect',
+  'midnight_contract_state',
+  'midnight_contract_deploy',
+  'midnight_contract_call',
 ];
 
 describe('MCP tool coverage', () => {
   it('every CLI command has at least one MCP tool', () => {
-    // CLI commands that should have MCP tools
-    // serve/test/dev are long-running interactive, contract MCP tools planned for later
-    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'manual' && n !== 'serve' && n !== 'test' && n !== 'contract' && n !== 'dev' && n !== 'generate');
+    // CLI commands that should have MCP tools.
+    // Exemptions: help/manual are info channels (skill resource serves agents),
+    // serve/test/dev are long-running interactive, generate is deprecated.
+    const cliCommands = COMMAND_SPECS.map(s => s.name).filter(n => n !== 'help' && n !== 'manual' && n !== 'serve' && n !== 'test' && n !== 'dev' && n !== 'generate');
 
     for (const cmd of cliCommands) {
       // Normalize: dust → midnight_dust_register, midnight_dust_status
@@ -51,13 +57,13 @@ describe('MCP tool coverage', () => {
     }
   });
 
-  it('has 25 expected tools', () => {
-    expect(EXPECTED_TOOLS).toHaveLength(25);
+  it('has 30 expected tools', () => {
+    expect(EXPECTED_TOOLS).toHaveLength(30);
   });
 
   it('every COMMAND_SPEC with jsonFields is covered', () => {
-    // serve/test are long-running, contract MCP tools planned for later
-    const commandsWithJson = COMMAND_SPECS.filter(s => s.jsonFields && s.name !== 'help' && s.name !== 'manual' && s.name !== 'serve' && s.name !== 'test' && s.name !== 'contract' && s.name !== 'generate');
+    // help/manual are info channels, serve/test/dev are long-running, generate is deprecated.
+    const commandsWithJson = COMMAND_SPECS.filter(s => s.jsonFields && s.name !== 'help' && s.name !== 'manual' && s.name !== 'serve' && s.name !== 'test' && s.name !== 'dev' && s.name !== 'generate');
     // Should have at least one tool per command
     expect(commandsWithJson.length).toBeGreaterThan(0);
     for (const spec of commandsWithJson) {

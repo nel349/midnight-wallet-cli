@@ -108,6 +108,7 @@ const handlerLoaders: Record<string, () => Promise<{ default: CommandHandler }>>
   'localnet':        () => import('./commands/localnet.ts'),
   'wallet':          () => import('./commands/wallet.ts'),
   'status':          () => import('./commands/status.ts'),
+  'contract':        () => import('./commands/contract.ts'),
 };
 
 async function importHandler(name: string) {
@@ -623,6 +624,106 @@ const TOOLS: ToolDef[] = [
   // },
   // status command disabled — currently being reworked
 
+  // ── Contract operations ──────────────────────────────────────────
+  {
+    name: 'midnight_contract_inspect',
+    description: 'Inspect a compiled Compact contract: name, circuits (with arg/return types), witnesses, compiler/language/runtime versions. Reads managed/<name>/compiler/contract-info.json under the dapp dir.',
+    annotations: { readOnlyHint: true, idempotentHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path to dApp directory (defaults to cwd)' },
+        managed: { type: 'string', description: 'Direct path to a managed/<name>/ directory (overrides path)' },
+      },
+    },
+    async handler(params) {
+      const args = buildArgs('contract', params, 'inspect');
+      const handler = await importHandler('contract');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_contract_state',
+    description: 'Read the current ledger state of a deployed contract. Returns the ledger fields as a JSON object.',
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'Contract address (hex)' },
+        wallet: { type: 'string' },
+        network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
+        path: { type: 'string', description: 'dApp directory (defaults to cwd; needed to find the compiled artifact for state decoding)' },
+      },
+      required: ['address'],
+    },
+    async handler(params) {
+      const args = buildArgs('contract', params, 'state');
+      const handler = await importHandler('contract');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_contract_deploy',
+    description: 'Deploy a compiled Compact contract (returns pending token; agent must show the description and redeem via midnight_confirm_operation).',
+    annotations: { destructiveHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wallet: { type: 'string' },
+        network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
+        args: { type: 'string', description: 'JSON-encoded array or object of constructor arguments' },
+        path: { type: 'string', description: 'dApp directory (defaults to cwd)' },
+      },
+    },
+    async handler(params) {
+      const args = buildArgs('contract', params, 'deploy');
+      const handler = await importHandler('contract');
+      return captureCommand(handler, args);
+    },
+  },
+  {
+    name: 'midnight_contract_call',
+    description: 'Call a circuit on a deployed contract (returns pending token; agent must show the description and redeem via midnight_confirm_operation).',
+    annotations: { destructiveHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        address: { type: 'string', description: 'Contract address (hex)' },
+        circuit: { type: 'string', description: 'Circuit name to invoke' },
+        wallet: { type: 'string' },
+        network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
+        args: { type: 'string', description: 'JSON-encoded array or object of circuit arguments' },
+        path: { type: 'string', description: 'dApp directory (defaults to cwd)' },
+      },
+      required: ['address', 'circuit'],
+    },
+    async handler(params) {
+      const args = buildArgs('contract', params, 'call');
+      const handler = await importHandler('contract');
+      return captureCommand(handler, args);
+    },
+  },
+
+  // ── Localnet logs ────────────────────────────────────────────────
+  {
+    name: 'midnight_localnet_logs',
+    description: 'Snapshot of recent localnet logs (last N lines per service, no streaming). Returns { tail, lines: string[] }.',
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tail: { type: 'string', description: 'Number of lines to retrieve (default 200)' },
+      },
+    },
+    async handler(params) {
+      const args = buildArgs('localnet', params, 'logs');
+      // tail default: 200 if not specified by agent
+      if (!args.flags.tail) args.flags.tail = '200';
+      const handler = await importHandler('localnet');
+      return captureCommand(handler, args);
+    },
+  },
+
   {
     name: 'midnight_confirm_operation',
     description: 'Redeem a pending token (confirm step).',
@@ -647,7 +748,11 @@ const TOOLS: ToolDef[] = [
  * a pending token; the agent must call midnight_confirm_operation with the
  * token to actually execute.
  */
-const REQUIRES_CONFIRMATION = new Set<string>(['midnight_transfer']);
+const REQUIRES_CONFIRMATION = new Set<string>([
+  'midnight_transfer',
+  'midnight_contract_deploy',
+  'midnight_contract_call',
+]);
 
 const confirmationStore = createConfirmationStore();
 
@@ -657,6 +762,14 @@ function describePendingOp(tool: string, params: Record<string, unknown>): strin
   switch (tool) {
     case 'midnight_transfer':
       return `Send ${params.amount} NIGHT from ${wallet} to ${params.to} on ${network}`;
+    case 'midnight_contract_deploy': {
+      const argsHint = params.args ? ` with args ${params.args}` : '';
+      return `Deploy contract from ${params.path ?? 'current directory'} as ${wallet} on ${network}${argsHint}`;
+    }
+    case 'midnight_contract_call': {
+      const argsHint = params.args ? ` with args ${params.args}` : '';
+      return `Call circuit ${params.circuit} on contract ${params.address} as ${wallet} on ${network}${argsHint}`;
+    }
     default:
       return `Execute ${tool} with ${JSON.stringify(params)}`;
   }

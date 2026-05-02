@@ -2,7 +2,7 @@
 // Subcommands: up, down, status, logs
 
 import { spawn } from 'child_process';
-import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
+import { type ParsedArgs, hasFlag, getFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import {
   checkDockerAvailable,
@@ -227,10 +227,39 @@ async function handleClean(jsonMode: boolean): Promise<void> {
   }
 }
 
-async function handleLogs(): Promise<void> {
+async function handleLogs(args: ParsedArgs): Promise<void> {
   const composePath = getComposePath();
+  const tail = getFlag(args, 'tail');
+  const jsonMode = hasFlag(args, 'json');
 
-  // Stream logs directly to terminal via spawn with inherited stdio
+  // --tail N (or --json) → finite snapshot, no streaming. Required by MCP.
+  if (tail !== undefined || jsonMode) {
+    const n = tail ?? '200';
+    const child = spawn('docker', ['compose', '-f', composePath, 'logs', '--tail', n, '--no-color'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    return new Promise<void>((resolve, reject) => {
+      child.on('close', (code) => {
+        if (code !== 0 && code !== null) {
+          reject(new Error(`docker compose logs exited with code ${code}: ${stderr.trim()}`));
+          return;
+        }
+        if (jsonMode) {
+          writeJsonResult({ tail: Number(n), lines: stdout.split('\n').filter(Boolean) });
+        } else {
+          process.stdout.write(stdout);
+        }
+        resolve();
+      });
+      child.on('error', reject);
+    });
+  }
+
+  // Default: stream logs directly to terminal via spawn with inherited stdio
   const child = spawn('docker', ['compose', '-f', composePath, 'logs', '-f'], {
     stdio: 'inherit',
   });
@@ -283,7 +312,7 @@ export default async function localnetCommand(args: ParsedArgs): Promise<void> {
     case 'status':
       return handleStatus(jsonMode);
     case 'logs':
-      return handleLogs();
+      return handleLogs(args);
     case 'clean':
       return handleClean(jsonMode);
   }
