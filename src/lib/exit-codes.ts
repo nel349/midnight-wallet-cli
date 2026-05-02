@@ -135,6 +135,7 @@ export function classifyError(err: Error): ClassifiedError {
     msg.includes('etimedout') ||
     msg.includes('websocket') ||
     msg.includes('connection refused') ||
+    msg.includes('request to ') && msg.includes(' failed, reason:') ||
     (msg.includes('network') && msg.includes('error'))
   ) {
     return { exitCode: EXIT_NETWORK_ERROR, errorCode: ERROR_CODES.NETWORK_ERROR };
@@ -142,4 +143,23 @@ export function classifyError(err: Error): ClassifiedError {
 
   // Fallback
   return { exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNKNOWN };
+}
+
+/**
+ * Rewrite error messages that ship a useless tail when the underlying cause
+ * is missing. node-fetch emits "request to <URL> failed, reason:" with an
+ * empty body when the cause did not carry a `.message`. Surface the URL plus
+ * a one-line cause hint so the message is actionable.
+ *
+ * Mirrors the WebSocket-side fix in src/lib/balance-subscription.ts.
+ */
+export function humanizeNetworkError(message: string): string {
+  // Match "request to <URL> failed, reason:" optionally followed by whitespace
+  // and an empty/whitespace-only tail.
+  const m = message.match(/^request to (\S+) failed, reason:\s*$/i);
+  if (m) {
+    const url = m[1];
+    return `request to ${url} failed: unable to reach ${url} (connection refused, DNS, or TLS error). Is the indexer running?`;
+  }
+  return message;
 }

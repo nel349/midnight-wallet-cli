@@ -2,6 +2,8 @@
 // Subcommands: up, down, status, logs
 
 import { spawn } from 'child_process';
+import { existsSync, rmSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { type ParsedArgs, hasFlag, getFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import {
@@ -162,14 +164,44 @@ async function handleDown(jsonMode: boolean): Promise<void> {
     clearWalletCache(undefined, 'undeployed');
     clearDustDirectCache('undeployed');
 
+    // Also wipe the dapp-local LevelDB private-state store if the user is
+    // running this from a dapp directory. The store survives `docker compose
+    // down --volumes` and refers to contract addresses that no longer exist
+    // after the chain reset, causing "NotOpenError: Database failed to open"
+    // (corruption) on the next `mn contract deploy/call`. Best-effort: only
+    // touches `./midnight-level-db` in the cwd, never scans the filesystem.
+    const leveldbWiped = wipeDappLevelDb();
+
     spinner.stop('Local network removed (containers, networks, volumes, caches)');
     if (jsonMode) {
-      writeJsonResult({ subcommand: 'down', status: 'removed', cachesCleared: true });
+      writeJsonResult({ subcommand: 'down', status: 'removed', cachesCleared: true, dappLevelDbWiped: leveldbWiped });
       return;
+    }
+    if (leveldbWiped) {
+      process.stderr.write(dim('  Also cleared dapp leveldb at ./midnight-level-db (private state from old chain)') + '\n');
     }
   } catch (err) {
     spinner.fail('Failed to tear down local network');
     throw err;
+  }
+}
+
+/**
+ * Wipe the LevelDB private-state store created by `levelPrivateStateProvider`
+ * during a previous `mn contract deploy/call`. The store lives at
+ * `<dappDir>/midnight-level-db` and holds contract private state keyed to the
+ * old chain's contract addresses. After `mn localnet down --volumes`, the
+ * chain is gone and re-using the store throws on open. Returns true iff
+ * something was removed.
+ */
+function wipeDappLevelDb(): boolean {
+  const dir = resolve(process.cwd(), 'midnight-level-db');
+  if (!existsSync(dir)) return false;
+  try {
+    rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
   }
 }
 

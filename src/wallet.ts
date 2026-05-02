@@ -5,7 +5,7 @@
 
 import { parseArgs, hasFlag } from './lib/argv.ts';
 import { errorBox, usageBox } from './ui/format.ts';
-import { classifyError, EXIT_INVALID_ARGS } from './lib/exit-codes.ts';
+import { classifyError, humanizeNetworkError, EXIT_INVALID_ARGS } from './lib/exit-codes.ts';
 import { UsageError, isUsageError } from './lib/errors.ts';
 import { writeJsonError } from './lib/json-output.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
@@ -155,7 +155,7 @@ run().then(() => {
   // Usage errors (missing/unknown subcommand, bad args) render in yellow
   // with a softer "Usage" framing. They are the user's prompt to fix and
   // retry, not a system failure. Exit code 2 (INVALID_ARGS).
-  const message = err.message;
+  const message = humanizeNetworkError(err.message);
   if (isUsageError(err)) {
     if (jsonMode) {
       writeJsonError(err, 'INVALID_ARGS', EXIT_INVALID_ARGS);
