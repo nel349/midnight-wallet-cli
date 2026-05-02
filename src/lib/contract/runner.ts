@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NetworkConfig } from '../network.ts';
 import { WITNESS_FILE_CANDIDATES } from './witness-discovery.ts';
+import { coerceArg } from './arg-coerce.ts';
 
 /**
  * Walk up from this module to find the closest `node_modules` directory.
@@ -313,24 +314,32 @@ const providers = {
 /**
  * Inline arg-coercion helper for the generated bridge script. Compact
  * circuits use only a small set of runtime types (BigInt for Uint, Uint8Array
- * for Bytes, plus primitives), but JSON arg payloads — coming from CLI
- * `--args` flags or MCP `args` params — can only encode numbers, strings,
- * arrays, objects, and booleans. We coerce predictably:
- *   - number → BigInt              (Uint<N> circuit args)
- *   - array of 0–255 ints → Uint8Array  (Bytes<N> circuit args)
- * Strings, bigints, booleans, nested objects pass through unchanged. We
- * deliberately do not try to detect hex-encoded strings as bytes — that
- * would silently misinterpret real string args (e.g. bboard.post("1234")).
+ * for Bytes, primitives, plus structs of these), but JSON arg payloads —
+ * coming from CLI `--args` flags or MCP `args` params — can only encode
+ * numbers, strings, arrays, objects, and booleans. We coerce predictably:
+ *
+ *   - number              → BigInt              (Uint<N> circuit args within
+ *                                                Number.MAX_SAFE_INTEGER)
+ *   - "123n"              → BigInt(123)         (BigInt literal syntax — for
+ *                                                values bigger than what JSON
+ *                                                numbers can carry safely;
+ *                                                e.g. registerProvider's
+ *                                                256-bit field elements)
+ *   - array of 0–255 ints → Uint8Array          (Bytes<N> circuit args)
+ *   - object              → recurse into values (Struct args; field types
+ *                                                inferred per-value)
+ *   - array (non-byte)    → recurse into items
+ *
+ * Plain strings, booleans, null, and Uint8Array pass through unchanged.
+ *
+ * Implementation lives in arg-coerce.ts so we can unit-test it directly.
+ * Here it's serialized via .toString() and bound to a stable `coerceArg`
+ * const in the generated bridge — bun's minifier mangles the function's
+ * own name, so we can't rely on the inlined body declaring it under the
+ * expected identifier. Wrapping in parens + assigning to const keeps the
+ * call site (`...map(coerceArg)`) referring to the right thing regardless.
  */
-const ARG_COERCE_FN = `
-function coerceArg(a) {
-  if (typeof a === 'number') return BigInt(a);
-  if (Array.isArray(a) && a.length > 0 && a.every(x => typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= 255)) {
-    return Uint8Array.from(a);
-  }
-  return a;
-}
-`;
+const ARG_COERCE_FN = `\nconst coerceArg = (${coerceArg.toString()});\n`;
 
 function generateDeployScript(opts: DeployOptions): string {
   const privateStateKey = opts.privateStateKey ?? `${opts.contractName}PrivateState`;

@@ -229,7 +229,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 ### Available MCP Tools
 
-Once connected, your AI agent gets access to 25 tools:
+Once connected, your AI agent gets access to 30 tools:
 
 | Tool | Description |
 |------|-------------|
@@ -245,19 +245,26 @@ Once connected, your AI agent gets access to 25 tools:
 | `midnight_inspect_cost` | Show block cost limits |
 | `midnight_airdrop` | Fund wallet from genesis |
 | `midnight_transfer` | Send NIGHT tokens (returns a pending token; confirm with `midnight_confirm_operation`) |
-| `midnight_confirm_operation` | Execute a previously-returned pending operation (transfer confirmation flow) |
+| `midnight_confirm_operation` | Execute a previously-returned pending operation (transfer/contract confirmation flow) |
 | `midnight_dust_register` | Register UTXOs for dust generation |
 | `midnight_dust_status` | Check dust status (slim by default) |
 | `midnight_config_get` | Read config value |
 | `midnight_config_set` | Write config value |
 | `midnight_config_unset` | Remove config value |
 | `midnight_cache_clear` | Clear wallet state cache |
-| `midnight_status` | Network health check (indexer + node + proof server latency) |
 | `midnight_localnet_up` | Start local network |
 | `midnight_localnet_stop` | Stop local network |
 | `midnight_localnet_down` | Remove local network |
 | `midnight_localnet_status` | Show service status |
 | `midnight_localnet_clean` | Remove conflicting containers |
+| `midnight_localnet_logs` | Snapshot of recent logs from each service |
+| `midnight_contract_inspect` | Read circuits, witnesses, ledger shape from a compiled contract; lists `siblings` for multi-contract projects |
+| `midnight_contract_state` | Query a deployed contract's ledger state |
+| `midnight_contract_deploy` | Deploy a compiled contract (returns pending token; confirm with `midnight_confirm_operation`) |
+| `midnight_contract_call` | Call a circuit on a deployed contract (returns pending token; auto-coerces numbers/`"123n"` strings to BigInt and `[0–255]` arrays to Uint8Array) |
+| `midnight_test_create` | Generate a CLI or browser test scaffold from the compiled contract |
+
+Every response carries `_serverVersion` so a stale MCP server (CLI on disk says X, responses still say Y) is detectable — see "Stale MCP server" in `docs/SKILL.md`.
 
 #### Agent-slim responses
 

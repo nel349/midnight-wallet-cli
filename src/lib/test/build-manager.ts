@@ -34,11 +34,27 @@ export async function startBuild(options: BuildOptions): Promise<BuildHandle> {
     onMessage = () => {},
   } = options;
 
-  // Kill any existing process on the port
+  // Three cases when the port is taken:
+  //   1. It's already serving our URL with 200 → reuse, no rebuild.
+  //   2. It's bound but the URL doesn't 200 → unknown process; kill it, then
+  //      spawn fresh. (Most likely a stale `npm run dev` from a prior session.)
+  //   3. Port is free → spawn fresh.
+  // Reuse saves 30–90s of vite startup on repeated test runs.
   if (await isPortInUse(port)) {
-    onMessage(`Port ${port} already in use, killing existing process`);
+    if (await checkUrl(url)) {
+      onMessage(`Reusing existing dev server on port ${port} (URL responds 200)`);
+      return {
+        port,
+        // Caller-typed BuildHandle requires `child` and `stop`. We didn't
+        // spawn anything, so the child reference is a no-op shim and stop
+        // does nothing — we don't tear down processes we didn't start.
+        child: { kill: () => true } as unknown as ChildProcess,
+        stop() { /* not ours to stop */ },
+      };
+    }
+    onMessage(`Port ${port} in use by an unresponsive process — killing it`);
     await killProcessOnPort(port);
-    // Brief pause for port release
+    // Brief pause for port release.
     await new Promise(r => setTimeout(r, 2_000));
   }
 

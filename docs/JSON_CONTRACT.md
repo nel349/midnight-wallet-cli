@@ -157,6 +157,21 @@ rule once formally documented here.)
 }
 ```
 
+### `mn contract inspect --json`
+
+```jsonc
+{
+  "name": "counter",
+  "compilerVersion": "0.30.0",
+  "languageVersion": "0.22.0",
+  "runtimeVersion": "0.15.0",
+  "managedDir": "/path/to/managed/counter",
+  "siblings": [],            // names of other contracts in the same managed/ dir; empty for single-contract projects
+  "circuits": [{ "name": "increment", "pure": false, "proof": true, "arguments": [], "returnType": "void" }],
+  "witnesses": []
+}
+```
+
 ### `mn contract deploy --json`
 
 ```jsonc
@@ -165,6 +180,58 @@ rule once formally documented here.)
   "contractName": "counter",
   "address": "9b3e083bf850ca17983d34110337d384d2dc626da8223c3fb2dbd3f8a2df35a3",
   "network": "preprod"
+}
+```
+
+### `mn contract call --json`
+
+```jsonc
+{
+  "subcommand": "call",
+  "contractName": "counter",
+  "circuit": "increment",
+  "address": "9b3e083bf850ca17983d34110337d384d2dc626da8223c3fb2dbd3f8a2df35a3",
+  "network": "preprod",
+  "status": "success"
+}
+```
+
+### `mn contract state --json`
+
+```jsonc
+{
+  "subcommand": "state",
+  "address": "9b3e083bf850ca17983d34110337d384d2dc626da8223c3fb2dbd3f8a2df35a3",
+  "network": "preprod",
+  "fields": { "round": "1", "owner": "511eff…" },     // scalars as strings (BigInt-safe)
+  "maps":   { "providers": { "size": 1 } }            // maps reported by entry count
+}
+```
+
+### `mn test create --json`
+
+```jsonc
+{
+  "subcommand": "create",
+  "contractName": "counter",
+  "suiteName": "cli-default",
+  "strategy": "cli",                                  // "cli" or "browser"
+  "written": [
+    "/path/to/dapp.test.json",
+    "/path/to/tests/suites/cli-default/suite.json",
+    "/path/to/tests/suites/cli-default/actions.json",
+    "/path/to/tests/suites/cli-default/assertions.json"
+  ]
+}
+```
+
+### `mn localnet logs --json`
+
+```jsonc
+{
+  "subcommand": "logs",
+  "tail": 200,
+  "lines": ["…"]
 }
 ```
 
@@ -180,26 +247,63 @@ not currently supported; if added, output will be `{"key": "...", "value": "..."
 
 ## MCP tool names
 
-Every tool name shipped in `src/mcp-server.ts` is stable. The current
-24 tools (which midnight-expert documents as 25 due to a prior off-by-one):
+Every tool name shipped in `src/mcp-server.ts` is stable. Current 31 tools:
 
 ```
-midnight_address              midnight_airdrop
-midnight_balance              midnight_cache_clear
+# Wallet management
+midnight_wallet_generate      midnight_wallet_list
+midnight_wallet_use           midnight_wallet_info
+midnight_wallet_remove        midnight_generate (deprecated, kept)
+
+# Balance & info
+midnight_info                 midnight_balance
+midnight_address              midnight_genesis_address
+midnight_inspect_cost
+
+# Transactions
+midnight_airdrop              midnight_transfer
+midnight_dust_register        midnight_dust_status
+
+# Consent
+midnight_confirm_operation
+
+# Configuration
 midnight_config_get           midnight_config_set
-midnight_config_unset         midnight_dust_register
-midnight_dust_status          midnight_generate (deprecated, kept)
-midnight_genesis_address      midnight_info
-midnight_inspect_cost         midnight_localnet_clean
+midnight_config_unset         midnight_cache_clear
+
+# Local network
+midnight_localnet_up          midnight_localnet_stop
 midnight_localnet_down        midnight_localnet_status
-midnight_localnet_stop        midnight_localnet_up
-midnight_transfer             midnight_wallet_generate
-midnight_wallet_info          midnight_wallet_list
-midnight_wallet_remove        midnight_wallet_use
+midnight_localnet_clean       midnight_localnet_logs
+
+# Contracts
+midnight_contract_inspect     midnight_contract_state
+midnight_contract_deploy      midnight_contract_call
+
+# Test framework
+midnight_test_create
 ```
 
 Tool **parameter names** are also stable. A new optional parameter is
 additive; renaming or removing one is a major bump.
+
+## MCP response envelope
+
+Every MCP tool response — success, error, or pending-confirmation token —
+carries a `_serverVersion` field with the server's `package.json` version.
+Use it to detect a stale server (CLI on disk says X, responses still say
+Y means the user's MCP client is talking to a long-lived process from an
+older install). Underscore prefix marks it as metadata, distinct from
+tool-shape data fields.
+
+```jsonc
+// success:
+{ "subcommand": "deploy", "address": "9b3e…", "_serverVersion": "0.4.0" }
+// error:
+{ "error": true, "code": "DUST_REQUIRED", "message": "…", "_serverVersion": "0.4.0" }
+// pending-token:
+{ "pending": true, "token": "uuid", "description": "…", "_serverVersion": "0.4.0" }
+```
 
 ## Compatibility aliases (additive shims)
 

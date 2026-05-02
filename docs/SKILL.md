@@ -67,14 +67,25 @@ Use `midnight_contract_*` MCP tools (or `mn contract` CLI). Flow: `compact compi
 
 **Multi-contract projects.** Inspect returns a `siblings: string[]` field listing other contracts under the same `managed/`. Pick one with `name: "<contract>"` on inspect/deploy/call/state.
 
-**Arg encoding for circuits.** The MCP `args` param is a JSON string. The bridge auto-coerces:
-- `number` → `BigInt` (any Compact `Uint<N>` arg)
-- array of 0–255 ints → `Uint8Array` (any Compact `Bytes<N>` arg, e.g. `[1,2,3,...,32]`)
-Pass strings as JSON strings; arrays of larger values stay as arrays. No hex-string detection — `"1234"` stays a string.
+**Arg encoding for circuits.** The MCP `args` param is a JSON string. The bridge auto-coerces, recursing into objects and arrays:
+- `number` (integer, within `Number.MAX_SAFE_INTEGER`) → `BigInt`
+- `"123n"` (BigInt-literal syntax) → `BigInt(123)` — required for values beyond safe-integer range, e.g. 256-bit field elements in elliptic-curve points like `{x: "3577…n", y: "5455…n"}`
+- array of `[0–255]` ints → `Uint8Array` (any Compact `Bytes<N>` arg, e.g. `[1,2,3,…,32]`)
+- objects: each value coerced under the same rules → `Struct` args
+- arrays (non-byte): each element coerced
+
+Plain strings, booleans, fractional numbers, and `null` pass through unchanged. No hex-string detection — `"1234"` stays a string.
 
 **Compatibility caveat — runtime version skew.** Contracts compiled with an older `compactc` may fail at deploy/call with a message like `Version mismatch: compiled code expects <X>, runtime is <Y>`. The CLI bundles one specific `@midnight-ntwrk/compact-runtime` version; if the user's contract was compiled against a different one, recompile the contract with a matching `compactc` rather than asking the user to downgrade `mn`. `midnight_contract_inspect` shows the compiled `runtimeVersion` so you can flag the mismatch before attempting deploy.
 
 **Stale MCP server.** Every MCP response carries `_serverVersion`. If the user upgraded `midnight-wallet-cli` but `_serverVersion` lags `mn --version`, the MCP client is talking to a long-lived stale process. Tell them to disconnect and re-add the MCP server (a /mcp reconnect alone will not respawn it).
+
+### User wants to scaffold tests for a contract
+Use `midnight_test_create({ path, strategy })`. Strategies:
+- `"cli"` (default) — emits `dapp.test.json` + `tests/suites/cli-default/{suite,actions,assertions}.json` with deploy → state → one call per impure circuit → state. Placeholder args; user reviews and edits before `mn test run`.
+- `"browser"` — additionally needs `port` and `build-cmd`; emits `prompt.md` instead of `actions.json`. Claude drives the UI per `prompt.md`.
+
+Run via `midnight_test_run` (CLI: `mn test run --suite <name>`). Browser strategy supports `browserMode: "vision"` (screenshots — default), `"dom"` (accessibility tree, faster, requires `chrome-devtools-mcp`), `"script"` (direct JS, fastest, requires `chrome-devtools-mcp`). Pre-flight detects missing `chrome-devtools-mcp` and orphan automation Chromes from prior crashes.
 
 ## Safety rules (non-negotiable)
 

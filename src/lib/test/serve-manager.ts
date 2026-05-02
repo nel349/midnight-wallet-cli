@@ -68,13 +68,6 @@ export async function probeServeNetwork(port: number): Promise<string | null> {
   });
 }
 
-/** SDK network id strings as reported by mn serve's getConnectionStatus. */
-const NETWORK_TO_SDK_ID: Record<string, string> = {
-  preprod: 'PreProd',
-  preview: 'Preview',
-  undeployed: 'Undeployed',
-};
-
 /**
  * Ensure a serve is running on the configured port. If one already runs and
  * matches the requested network, reuses it (returned handle's stop() is a
@@ -82,6 +75,12 @@ const NETWORK_TO_SDK_ID: Record<string, string> = {
  * network's serve is bound, throws with a clear, actionable message —
  * silently reusing the wrong network leads to deeply confusing test failures.
  * If nothing is bound, starts a fresh serve.
+ *
+ * Network comparison is case-insensitive: the running serve reports its
+ * network in the lowercase abstractions form ('undeployed') as of the
+ * getConnectionStatus fix, but the requestedNetwork may arrive in either
+ * form depending on caller. Normalizing both sides keeps the check robust
+ * across that change without re-introducing the case-sensitivity bug.
  */
 export async function startServeOrReuse(options: ServeManagerOptions): Promise<ServeHandle> {
   const port = options.port ?? DEFAULT_SERVE_PORT;
@@ -90,7 +89,6 @@ export async function startServeOrReuse(options: ServeManagerOptions): Promise<S
 
   if (await isPortInUse(port)) {
     const actualSdkId = await probeServeNetwork(port);
-    const expectedSdkId = NETWORK_TO_SDK_ID[requestedNetwork];
 
     if (!actualSdkId) {
       throw new Error(
@@ -98,9 +96,10 @@ export async function startServeOrReuse(options: ServeManagerOptions): Promise<S
         `Free the port (e.g. \`lsof -nP -iTCP:${port} -sTCP:LISTEN\` then \`kill <pid>\`) and retry.`,
       );
     }
-    if (expectedSdkId && actualSdkId !== expectedSdkId) {
+    const actualNetwork = actualSdkId.toLowerCase();
+    if (actualNetwork !== requestedNetwork) {
       throw new Error(
-        `mn serve is already running on port ${port} for network ${actualSdkId.toLowerCase()}, ` +
+        `mn serve is already running on port ${port} for network ${actualNetwork}, ` +
         `but this run needs ${requestedNetwork}. Stop the wrong-network serve first ` +
         `(\`pkill -f 'mn serve'\`) and retry.`,
       );

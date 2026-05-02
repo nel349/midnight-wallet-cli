@@ -424,7 +424,12 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     },
 
     getConnectionStatus: async () => {
-      return { status: 'connected', networkId: networkConfig.networkId };
+      // Return the lowercase abstractions form (e.g. 'undeployed'), matching
+      // what addresses are encoded with. dApps that round-trip this back into
+      // setNetworkId() and then decode an address would otherwise hit a
+      // case-sensitivity mismatch — bech32m HRPs are lowercase, so encoder
+      // and getConnectionStatus must agree on the lowercase form.
+      return { status: 'connected', networkId };
     },
 
     // ── Write Methods (7) — require terminal approval ──

@@ -327,21 +327,33 @@ const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'test',
-    description: 'Run E2E tests for Midnight dApps',
-    usage: 'midnight test <run|list|results> [--suite <name>] [--json]',
+    description: 'Generate and run E2E test suites for Midnight dApps',
+    usage: 'midnight test <create|run|list|results> [options]',
     flags: [
+      'create                        Generate a test scaffold from the contract (CLI or browser strategy)',
       'run                           Run test suites for the current dApp',
       'list                          List available test suites',
       'results                       Show latest test results',
-      '--suite <name>                Select a specific test suite',
+      '--suite <name>                Select a specific test suite (run, create)',
       '--all                         Show all results (with results subcommand)',
+      '--strategy cli|ui             Scaffold strategy (create — interactive prompt if omitted)',
+      '--name <contract>             Specific contract name in multi-contract projects (create)',
+      '--path <dir>                  dApp directory (default: cwd)',
+      '--network <name>              Network for the generated suite (default: undeployed)',
+      '--port <n>                    Browser strategy: dev server port (create --strategy ui)',
+      '--build-cmd <cmd>             Browser strategy: build/serve command',
+      '--build-dir <subdir>          Browser strategy: subdirectory the build runs in (monorepo case)',
+      '--url <url>                   Browser strategy: full URL Claude opens (default http://localhost:<port>/)',
+      '--force                       Overwrite existing scaffold files (create)',
       '--json                        Output structured JSON',
     ],
     examples: [
+      'midnight test create',
+      'midnight test create --strategy cli --force',
+      'midnight test create --strategy ui --port 4173 --build-cmd "npm run dev"',
       'midnight test run',
       'midnight test run --suite e2e-gameplay',
       'midnight test list',
-      'midnight test results',
       'midnight test results --all --json',
     ],
     jsonFields: {
@@ -382,10 +394,12 @@ const COMMAND_SPECS: CommandSpec[] = [
       'state                         Read ledger state of a deployed contract',
       '--address <addr>              Contract address (call, state)',
       '--circuit <name>              Circuit to call (call)',
-      '--args \'<json>\'               JSON arguments — constructor args (deploy) or circuit args (call)',
+      '--args \'<json>\'               JSON arguments — constructor args (deploy) or circuit args (call). Numbers auto-coerce to BigInt; "123n" strings parse as BigInt; arrays of 0–255 ints become Uint8Array',
       '--network <name>              Override network (default: undeployed)',
-      '--path <dir>                  Path to dApp directory (inspect)',
-      '--managed <dir>               Direct path to managed/<name> directory (inspect)',
+      '--path <dir>                  dApp directory (all subcommands; default: cwd)',
+      '--managed <dir>               Direct path to managed/<name>/ directory (all subcommands)',
+      '--name <contract>             Specific contract when the project ships multiple (all subcommands)',
+      '--wallet <name>               Wallet to use for the operation (deploy, call, state)',
       '--json                        Output structured JSON',
     ],
     examples: [
@@ -685,7 +699,7 @@ DApp developers connect via the midnight-wallet-connector npm package:
   import { createWalletClient } from 'midnight-wallet-connector';
   const wallet = await createWalletClient({
     url: 'ws://localhost:9932',
-    networkId: 'Undeployed',  // or 'PreProd', 'Preview'
+    networkId: 'undeployed',  // or 'preprod', 'preview' — lowercase per @midnight-ntwrk/wallet-sdk-abstractions
   });
   const balances = await wallet.getUnshieldedBalances();
 
@@ -770,7 +784,7 @@ Setup:
 If not installed globally, use "command": "npx" with
 "args": ["-y", "midnight-wallet-cli@latest", "--mcp"].
 
-AVAILABLE MCP TOOLS (25)
+AVAILABLE MCP TOOLS (31)
 ────────────────────────
 
   Wallet Management
@@ -810,9 +824,25 @@ AVAILABLE MCP TOOLS (25)
   midnight_localnet_down       Full teardown (volumes + undeployed cache)           —
   midnight_localnet_status     Show service status and ports                        —
   midnight_localnet_clean      Remove conflicting containers                        —
+  midnight_localnet_logs       Snapshot of recent logs from each service            —
+
+  Contracts (Compact smart contracts)
+  midnight_contract_inspect    Read circuits, witnesses, ledger shape from         path / managed / name
+                               compiled artifact (no chain access needed)
+  midnight_contract_state      Query a deployed contract's ledger state            address, path
+  midnight_contract_deploy     Deploy a compiled contract (two-step pending token) path / managed
+  midnight_contract_call       Call a circuit on a deployed contract               address, circuit
+                               (two-step pending token; args auto-coerce numbers
+                               and "123n" strings to BigInt, [0–255] to Uint8Array)
+
+  Test Framework
+  midnight_test_create         Generate a CLI or browser test scaffold from the    path, strategy,
+                               compiled contract                                   port, build-cmd
 
 Optional params shared by wallet tools: wallet, network.
-All tools return JSON. Errors: {error, code, message}.
+All tools return JSON. Every response carries _serverVersion so a stale
+MCP server (CLI on disk says X, responses still say Y) is detectable.
+Errors: {error, code, message, _serverVersion}.
 
 TOOL ANNOTATIONS (MCP safety hints)
 ───────────────────────────────────

@@ -18,6 +18,12 @@ You have access to the `midnight-wallet-cli` MCP server. This is the **core** sk
 | "Am I registered for dust?" | `midnight_dust_status()` |
 | "Start localnet" / "start a local network" | `midnight_localnet_up()` |
 | "Stop localnet" | `midnight_localnet_stop()` |
+| "Show localnet logs" / "what's the indexer doing" | `midnight_localnet_logs({ tail: "200" })` |
+| "Inspect this contract" / "what circuits does this dApp expose" | `midnight_contract_inspect({ path })` |
+| "Deploy this contract" / "deploy on undeployed" | `midnight_contract_deploy({ path, wallet, network })` — two-step pending token |
+| "Call circuit X" / "submit a score" | `midnight_contract_call({ address, circuit, args })` — two-step pending token |
+| "What's the contract state?" / "read the ledger" | `midnight_contract_state({ address, path })` |
+| "Generate tests for this contract" / "scaffold a test suite" | `midnight_test_create({ path })` (default cli; pass `strategy: "browser"` + `port` + `build-cmd` for UI tests) |
 
 ## Safety rules (non-negotiable)
 

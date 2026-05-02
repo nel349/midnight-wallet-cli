@@ -306,10 +306,14 @@ describe('dapp-connector', () => {
   });
 
   describe('getConnectionStatus', () => {
-    it('returns connected status with networkId', async () => {
+    it('returns connected status with the lowercase abstractions networkId', async () => {
+      // Bech32m HRPs are lowercase and addresses are encoded with the lowercase
+      // abstractions form ('undeployed'). getConnectionStatus must report the
+      // same lowercase form so dApps that round-trip the value back into
+      // setNetworkId() before decoding addresses don't see a case-mismatch.
       connector = createConnector();
       const result = await connector.handlers.getConnectionStatus({}, ctx());
-      expect(result).toEqual({ status: 'connected', networkId: 'Undeployed' });
+      expect(result).toEqual({ status: 'connected', networkId: 'undeployed' });
     });
   });
 
