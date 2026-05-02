@@ -132,20 +132,20 @@ describe('buildScaffold', () => {
 
   it('action sequence: deploy, state, one call per impure circuit, final state', () => {
     const out = buildScaffold(circuits, { contractName: 'x' });
-    const ids = out.actions.actions.map((a) => a.id);
+    const ids = out.actions!.actions.map((a) => a.id);
     expect(ids).toEqual(['deploy', 'check-initial', 'call-submit_score', 'call-reveal', 'check-final']);
   });
 
   it('skips pure circuits in the action sequence', () => {
     const out = buildScaffold(circuits, { contractName: 'x' });
-    const calls = out.actions.actions.filter((a) => a.type === 'contract-call').map((a) => a.circuit);
+    const calls = out.actions!.actions.filter((a) => a.type === 'contract-call').map((a) => a.circuit);
     expect(calls).not.toContain('pure_helper');
   });
 
   it('includes args object only for circuits that take parameters', () => {
     const out = buildScaffold(circuits, { contractName: 'x' });
-    const submit = out.actions.actions.find((a) => a.circuit === 'submit_score');
-    const reveal = out.actions.actions.find((a) => a.circuit === 'reveal');
+    const submit = out.actions!.actions.find((a) => a.circuit === 'submit_score');
+    const reveal = out.actions!.actions.find((a) => a.circuit === 'reveal');
     expect(submit?.args).toEqual({ score: 0 });
     expect(reveal?.args).toBeUndefined();
   });
@@ -157,6 +157,88 @@ describe('buildScaffold', () => {
       params: { port: 4242 },
       expect: 'pass',
     });
+  });
+
+  it('cli scaffold has actions and no prompt', () => {
+    const out = buildScaffold(circuits, { contractName: 'x' });
+    expect(out.actions).not.toBeNull();
+    expect(out.prompt).toBeNull();
+  });
+});
+
+describe('buildScaffold (browser strategy)', () => {
+  const noCircuits: CircuitInfo[] = [];
+
+  it('throws when browser options are missing', () => {
+    expect(() => buildScaffold(noCircuits, { contractName: 'x', strategy: 'browser' }))
+      .toThrow(/browser options/i);
+  });
+
+  it('emits prompt.md and no actions.json', () => {
+    const out = buildScaffold(noCircuits, {
+      contractName: 'starship',
+      strategy: 'browser',
+      browser: { port: 4173, buildCmd: 'npm run dev' },
+    });
+    expect(out.prompt).toBeTruthy();
+    expect(out.prompt).toContain('starship');
+    expect(out.prompt).toContain('http://localhost:4173/');
+    expect(out.actions).toBeNull();
+  });
+
+  it('defaults the suite name to ui-default and timeout to 600', () => {
+    const out = buildScaffold(noCircuits, {
+      contractName: 'x',
+      strategy: 'browser',
+      browser: { port: 4173, buildCmd: 'npm run dev' },
+    });
+    expect(out.suiteName).toBe('ui-default');
+    expect(out.suite.timeout).toBe(600);
+    expect(out.suite.strategy).toBe('browser');
+  });
+
+  it('appends build-and-serve to prep and propagates UI fields to dapp config', () => {
+    const out = buildScaffold(noCircuits, {
+      contractName: 'x',
+      strategy: 'browser',
+      browser: { port: 3000, buildCmd: 'pnpm dev', buildDir: 'web', url: 'http://example.test:3000/' },
+    });
+    expect(out.dappConfig.prep).toEqual([
+      'cache-clear', 'localnet-up', 'balance:1000', 'dust', 'mn-serve', 'build-and-serve',
+    ]);
+    expect(out.dappConfig.port).toBe(3000);
+    expect(out.dappConfig.buildCmd).toBe('pnpm dev');
+    expect(out.dappConfig.buildDir).toBe('web');
+    expect(out.dappConfig.url).toBe('http://example.test:3000/');
+  });
+
+  it('omits buildDir from dapp config when not given', () => {
+    const out = buildScaffold(noCircuits, {
+      contractName: 'x',
+      strategy: 'browser',
+      browser: { port: 4173, buildCmd: 'npm run dev' },
+    });
+    expect(out.dappConfig.buildDir).toBeUndefined();
+  });
+
+  it('defaults url to http://localhost:<port>/ when not given', () => {
+    const out = buildScaffold(noCircuits, {
+      contractName: 'x',
+      strategy: 'browser',
+      browser: { port: 5173, buildCmd: 'npm run dev' },
+    });
+    expect(out.dappConfig.url).toBe('http://localhost:5173/');
+  });
+
+  it('includes both claude-exit-ok and serve-port-listening assertions', () => {
+    const out = buildScaffold(noCircuits, {
+      contractName: 'x',
+      strategy: 'browser',
+      browser: { port: 4173, buildCmd: 'npm run dev' },
+    });
+    const ids = out.assertions.post.map((a) => a.id);
+    expect(ids).toContain('claude-exit-ok');
+    expect(ids).toContain('serve-port-listening');
   });
 });
 
@@ -185,11 +267,12 @@ describe('writeScaffold', () => {
     const dir = freshDir('basic');
     const result = writeScaffold(basicScaffold(), { dappDir: dir });
 
-    expect(result.written.map((p) => p.replace(dir + '/', ''))).toEqual([
+    const rel = result.written.map((p) => p.replace(dir + '/', '')).sort();
+    expect(rel).toEqual([
       'dapp.test.json',
-      'tests/suites/cli-default/suite.json',
       'tests/suites/cli-default/actions.json',
       'tests/suites/cli-default/assertions.json',
+      'tests/suites/cli-default/suite.json',
     ]);
 
     for (const path of result.written) {
@@ -220,5 +303,24 @@ describe('writeScaffold', () => {
     writeFileSync(join(dir, 'dapp.test.json'), '{"existing":true}');
     writeScaffold(basicScaffold(), { dappDir: dir, force: true });
     expect(JSON.parse(readFileSync(join(dir, 'dapp.test.json'), 'utf-8')).name).toBe('demo');
+  });
+
+  it('writes prompt.md instead of actions.json for browser scaffolds', () => {
+    const dir = freshDir('browser');
+    const browserScaffold = buildScaffold([], {
+      contractName: 'demo',
+      strategy: 'browser',
+      browser: { port: 4173, buildCmd: 'npm run dev' },
+    });
+    const result = writeScaffold(browserScaffold, { dappDir: dir });
+    const rel = result.written.map((p) => p.replace(dir + '/', ''));
+    expect(rel).toContain('tests/suites/ui-default/prompt.md');
+    expect(rel).toContain('tests/suites/ui-default/suite.json');
+    expect(rel).toContain('tests/suites/ui-default/assertions.json');
+    expect(rel).not.toContain('tests/suites/ui-default/actions.json');
+    expect(existsSync(join(dir, 'tests', 'suites', 'ui-default', 'actions.json'))).toBe(false);
+    // prompt.md is plain markdown, not JSON
+    const promptBody = readFileSync(join(dir, 'tests', 'suites', 'ui-default', 'prompt.md'), 'utf-8');
+    expect(promptBody).toContain('demo');
   });
 });

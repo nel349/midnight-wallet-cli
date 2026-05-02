@@ -715,15 +715,20 @@ const TOOLS: ToolDef[] = [
   // ── Test framework ───────────────────────────────────────────────
   {
     name: 'midnight_test_create',
-    description: 'Generate a CLI test scaffold (dapp.test.json + tests/suites/<name>/{suite,actions,assertions}.json) for the contract in the given dApp directory. Reads the contract via the same scan as midnight_contract_inspect; emits a deploy → state → call-each-impure-circuit → state action sequence with placeholder args you should review. Use { force: true } to overwrite existing files.',
+    description: 'Generate a test scaffold for the contract in the given dApp directory. Default strategy "cli" emits dapp.test.json + tests/suites/cli-default/{suite,actions,assertions}.json with deploy → state → call-each-impure-circuit → state. Strategy "browser" emits tests/suites/ui-default/{suite,prompt,assertions}.json plus the browser fields in dapp.test.json — required: port, build-cmd; optional: build-dir, url. Use force:true to overwrite.',
     annotations: { destructiveHint: true },
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'dApp directory (defaults to cwd)' },
         name: { type: 'string', description: 'Specific contract name when the project has multiple' },
-        suite: { type: 'string', description: 'Suite directory name under tests/suites/ (default "cli-default")' },
+        suite: { type: 'string', description: 'Suite directory name under tests/suites/ (default "cli-default" for cli, "ui-default" for browser)' },
+        strategy: { type: 'string', enum: ['cli', 'browser'], description: 'cli (default): drive contracts via actions.json. browser: drive a real UI via Claude + Chrome via prompt.md.' },
         network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
+        port: { type: 'string', description: 'Browser strategy only — dev server port (e.g. "4173").' },
+        'build-cmd': { type: 'string', description: 'Browser strategy only — shell command that builds + serves the UI (e.g. "npm run dev").' },
+        'build-dir': { type: 'string', description: 'Browser strategy only — subdir the build runs in (monorepo case).' },
+        url: { type: 'string', description: 'Browser strategy only — full URL Claude opens (default http://localhost:<port>/).' },
         force: { type: 'boolean', description: 'Overwrite existing files instead of aborting on collision' },
       },
     },

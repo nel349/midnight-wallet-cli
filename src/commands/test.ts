@@ -61,7 +61,10 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   const { findContractInfo } = await import('../lib/contract/inspect.ts');
   const { buildScaffold } = await import('../lib/test/create.ts');
   const { writeScaffold } = await import('../lib/test/create-writer.ts');
+  const { isInteractive, promptStrategy, promptBrowserOptions } = await import('../lib/test/create-prompt.ts');
   const { writeJsonResult } = await import('../lib/json-output.ts');
+  type CreateStrategy = import('../lib/test/create.ts').CreateStrategy;
+  type BrowserOptions = import('../lib/test/create.ts').BrowserOptions;
 
   const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
   const contractName = getFlag(args, 'name');
@@ -69,13 +72,68 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   const networkFlag = getFlag(args, 'network');
   const force = hasFlag(args, 'force');
 
+  // Strategy: --strategy <cli|ui|browser>; in interactive mode, prompt when
+  // unset; in --json/MCP, default to cli (preserves prior behavior + keeps
+  // the call non-blocking).
+  const strategyFlag = (getFlag(args, 'strategy') ?? '').toLowerCase();
+  let strategy: CreateStrategy;
+  if (strategyFlag === 'cli' || strategyFlag === 'browser') {
+    strategy = strategyFlag;
+  } else if (strategyFlag === 'ui') {
+    strategy = 'browser';
+  } else if (strategyFlag === '') {
+    strategy = jsonMode || !isInteractive() ? 'cli' : await promptStrategy();
+  } else {
+    throw new UsageError(`Unknown strategy "${strategyFlag}". Use "cli" or "ui".`);
+  }
+
+  // Browser options: collect from flags first, prompt for any missing pieces
+  // when interactive, error in --json mode if anything's still missing.
+  let browser: BrowserOptions | undefined;
+  if (strategy === 'browser') {
+    const portFlag = getFlag(args, 'port');
+    const buildCmdFlag = getFlag(args, 'build-cmd');
+    const buildDirFlag = getFlag(args, 'build-dir');
+    const urlFlag = getFlag(args, 'url');
+
+    const prefilled: Partial<BrowserOptions> = {};
+    if (portFlag !== undefined) {
+      const p = parseInt(portFlag, 10);
+      if (!Number.isFinite(p) || p <= 0 || p > 65535) {
+        throw new UsageError(`Invalid --port "${portFlag}" — must be 1–65535.`);
+      }
+      prefilled.port = p;
+    }
+    if (buildCmdFlag !== undefined) prefilled.buildCmd = buildCmdFlag;
+    if (buildDirFlag !== undefined) prefilled.buildDir = buildDirFlag;
+    if (urlFlag !== undefined) prefilled.url = urlFlag;
+
+    const allProvided = prefilled.port !== undefined && prefilled.buildCmd !== undefined;
+    if (jsonMode || !isInteractive()) {
+      if (!allProvided) {
+        throw new UsageError(
+          `Browser strategy needs --port and --build-cmd (and optionally --build-dir, --url) when running non-interactively.`
+        );
+      }
+      // Cast is safe — allProvided proved port + buildCmd are set.
+      browser = {
+        port: prefilled.port!,
+        buildCmd: prefilled.buildCmd!,
+        buildDir: prefilled.buildDir,
+        url: prefilled.url,
+      };
+    } else {
+      browser = await promptBrowserOptions(prefilled);
+    }
+  }
+
   const { info } = findContractInfo(dappDir, contractName);
 
-  // Network defaults inside buildScaffold; only forward when the user set it
-  // explicitly so we don't accidentally widen the type.
   const scaffold = buildScaffold(info.circuits, {
     contractName: info.name,
     suiteName,
+    strategy,
+    browser,
     network: networkFlag === 'preprod' || networkFlag === 'preview' || networkFlag === 'undeployed' ? networkFlag : undefined,
   });
 
@@ -86,6 +144,7 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
       subcommand: 'create',
       contractName: info.name,
       suiteName: scaffold.suiteName,
+      strategy,
       written: result.written,
     });
     return;
@@ -96,7 +155,11 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
     process.stderr.write(`  ${green('✓')} ${path}\n`);
   }
   process.stderr.write('\n' + dim('  Next:') + '\n');
-  process.stderr.write(dim('    Edit ') + teal(`tests/suites/${scaffold.suiteName}/actions.json`) + dim(' — replace placeholder args with realistic values') + '\n');
+  if (strategy === 'browser') {
+    process.stderr.write(dim('    Edit ') + teal(`tests/suites/${scaffold.suiteName}/prompt.md`) + dim(' — describe your dApp\'s user flow') + '\n');
+  } else {
+    process.stderr.write(dim('    Edit ') + teal(`tests/suites/${scaffold.suiteName}/actions.json`) + dim(' — replace placeholder args with realistic values') + '\n');
+  }
   process.stderr.write(dim('    Run  ') + teal('mn test run') + '\n\n');
 }
 

@@ -21,10 +21,12 @@ export interface WriteResult {
 }
 
 /**
- * Persist the scaffold to disk. Layout:
+ * Persist the scaffold to disk. Layout depends on strategy:
+ *
  *   <dappDir>/dapp.test.json
  *   <dappDir>/tests/suites/<suiteName>/suite.json
- *   <dappDir>/tests/suites/<suiteName>/actions.json
+ *   <dappDir>/tests/suites/<suiteName>/actions.json     (cli only)
+ *   <dappDir>/tests/suites/<suiteName>/prompt.md        (browser only)
  *   <dappDir>/tests/suites/<suiteName>/assertions.json
  *
  * Without --force, any pre-existing target file aborts the write and no
@@ -35,12 +37,21 @@ export function writeScaffold(scaffold: ScaffoldOutput, options: WriteOptions): 
   const { dappDir, force = false } = options;
   const suiteDir = join(dappDir, 'tests', 'suites', scaffold.suiteName);
 
-  const targets: { path: string; body: unknown }[] = [
-    { path: join(dappDir, 'dapp.test.json'), body: scaffold.dappConfig },
-    { path: join(suiteDir, 'suite.json'), body: scaffold.suite },
-    { path: join(suiteDir, 'actions.json'), body: scaffold.actions },
-    { path: join(suiteDir, 'assertions.json'), body: scaffold.assertions },
+  type Target =
+    | { path: string; kind: 'json'; body: unknown }
+    | { path: string; kind: 'text'; body: string };
+
+  const targets: Target[] = [
+    { path: join(dappDir, 'dapp.test.json'), kind: 'json', body: scaffold.dappConfig },
+    { path: join(suiteDir, 'suite.json'), kind: 'json', body: scaffold.suite },
+    { path: join(suiteDir, 'assertions.json'), kind: 'json', body: scaffold.assertions },
   ];
+  if (scaffold.actions) {
+    targets.push({ path: join(suiteDir, 'actions.json'), kind: 'json', body: scaffold.actions });
+  }
+  if (scaffold.prompt) {
+    targets.push({ path: join(suiteDir, 'prompt.md'), kind: 'text', body: scaffold.prompt });
+  }
 
   if (!force) {
     const existing = targets.filter((t) => existsSync(t.path)).map((t) => t.path);
@@ -54,9 +65,12 @@ export function writeScaffold(scaffold: ScaffoldOutput, options: WriteOptions): 
 
   mkdirSync(suiteDir, { recursive: true });
   const written: string[] = [];
-  for (const { path, body } of targets) {
-    writeFileSync(path, JSON.stringify(body, null, 2) + '\n');
-    written.push(path);
+  for (const target of targets) {
+    const body = target.kind === 'json'
+      ? JSON.stringify(target.body, null, 2) + '\n'
+      : target.body;
+    writeFileSync(target.path, body);
+    written.push(target.path);
   }
 
   return { written };
