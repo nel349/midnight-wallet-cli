@@ -310,12 +310,34 @@ const providers = {
 
 // ── Script generation ──
 
+/**
+ * Inline arg-coercion helper for the generated bridge script. Compact
+ * circuits use only a small set of runtime types (BigInt for Uint, Uint8Array
+ * for Bytes, plus primitives), but JSON arg payloads — coming from CLI
+ * `--args` flags or MCP `args` params — can only encode numbers, strings,
+ * arrays, objects, and booleans. We coerce predictably:
+ *   - number → BigInt              (Uint<N> circuit args)
+ *   - array of 0–255 ints → Uint8Array  (Bytes<N> circuit args)
+ * Strings, bigints, booleans, nested objects pass through unchanged. We
+ * deliberately do not try to detect hex-encoded strings as bytes — that
+ * would silently misinterpret real string args (e.g. bboard.post("1234")).
+ */
+const ARG_COERCE_FN = `
+function coerceArg(a) {
+  if (typeof a === 'number') return BigInt(a);
+  if (Array.isArray(a) && a.length > 0 && a.every(x => typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= 255)) {
+    return Uint8Array.from(a);
+  }
+  return a;
+}
+`;
+
 function generateDeployScript(opts: DeployOptions): string {
   const privateStateKey = opts.privateStateKey ?? `${opts.contractName}PrivateState`;
   // Constructor args are pre-serialized to JSON here (still in our process)
-  // so the generated script just spreads them. JSON-encodable values only —
-  // bigints not yet supported in this path; users pass them as decimal strings
-  // and the contract's Compact constructor decodes if it expects Uint<N>.
+  // so the generated script just spreads them. The coerceArg helper inside
+  // the bridge then upgrades number → BigInt and number[] → Uint8Array, the
+  // two coercions Compact circuits invariably need.
   const argsLiteral = JSON.stringify(opts.args ?? []);
 
   return `
@@ -334,7 +356,8 @@ ${providerSetupCode(opts.managedDir, opts.networkConfig, privateStateKey)}
 
 import { deployContract } from '@midnight-ntwrk/midnight-js-contracts';
 
-const constructorArgs = ${argsLiteral};
+${ARG_COERCE_FN}
+const constructorArgs = (${argsLiteral}).map(coerceArg);
 process.stderr.write('Deploying contract' + (constructorArgs.length ? ' with ' + constructorArgs.length + ' constructor arg(s)...' : '...') + '\\n');
 const deployed = await deployContract(providers, {
   compiledContract: compiled,
@@ -380,9 +403,8 @@ const deployed = await findDeployedContract(providers, {
 });
 
 process.stderr.write('Calling ${opts.circuit}...\\n');
-// Convert numeric args to BigInt (Compact runtime requires BigInt for all integers)
-const rawArgs = ${JSON.stringify(opts.args ?? [])};
-const args = rawArgs.map(a => typeof a === 'number' ? BigInt(a) : a);
+${ARG_COERCE_FN}
+const args = (${JSON.stringify(opts.args ?? [])}).map(coerceArg);
 await deployed.callTx.${opts.circuit}(...args);
 
 console.log(JSON.stringify({ status: 'success', circuit: ${JSON.stringify(opts.circuit)} }));
@@ -460,6 +482,54 @@ process.exit(0);
 
 // ── Script execution ──
 
+/**
+ * Names of npm packages the generated bridge script (and the user's compiled
+ * contract module) bare-import. When any of these are missing from the user's
+ * node_modules, overlayMidnightSdk symlinks ours into theirs so resolution
+ * succeeds. `@midnight-ntwrk` is a scope — symlinking the whole scope dir
+ * brings every SDK package along in one shot.
+ */
+const SDK_OVERLAY_NAMES = ['@midnight-ntwrk', 'ws'] as const;
+
+/**
+ * Make our SDK packages resolvable from `userNodeModules`. Two cases:
+ *   1. User has no node_modules at all → symlink the whole tree (cheap, the
+ *      pre-existing fast path).
+ *   2. User has a node_modules dir but is missing one of SDK_OVERLAY_NAMES
+ *      (common for "compile-only" projects that ship Compact source +
+ *      managed artifacts but never `npm install`-ed the SDK) → symlink the
+ *      missing top-level entries individually so we don't clobber what they
+ *      DO have.
+ *
+ * Returns the list of paths to remove on cleanup, in reverse-creation order.
+ */
+function overlayMidnightSdk(userNodeModules: string): string[] {
+  if (!OUR_NODE_MODULES) return [];
+  const created: string[] = [];
+
+  // Fast path: no user node_modules → whole-tree symlink.
+  if (!existsSync(userNodeModules)) {
+    try {
+      symlinkSync(OUR_NODE_MODULES, userNodeModules);
+      created.push(userNodeModules);
+    } catch { /* leave alone — caller will get a clean module-not-found from node */ }
+    return created;
+  }
+
+  // Per-package overlay: only fill in what's missing. Never replace existing
+  // entries — the user might be pinning a specific version we shouldn't shadow.
+  for (const name of SDK_OVERLAY_NAMES) {
+    const target = join(OUR_NODE_MODULES, name);
+    const link = join(userNodeModules, name);
+    if (!existsSync(target) || existsSync(link)) continue;
+    try {
+      symlinkSync(target, link);
+      created.push(link);
+    } catch { /* ignore — at worst the bridge fails with a clear ERR_MODULE_NOT_FOUND */ }
+  }
+  return created;
+}
+
 async function executeScript(
   dappDir: string,
   script: string,
@@ -471,23 +541,24 @@ async function executeScript(
   //   1. the generated script.mjs (in dappDir)
   //   2. the user's compiled contract/index.js (under managed/<name>/)
   //   3. the user's witnesses.js (under dist/ or src/)
-  // All three live somewhere under dappDir, so a single symlink at
-  // dappDir/node_modules satisfies all of them. We only create it if the
-  // user has no node_modules of their own, and we remove it on the way out
-  // so the dapp dir is left exactly as we found it.
+  // All three live somewhere under dappDir, so symlinking ours into the
+  // dApp's node_modules satisfies all of them. overlayMidnightSdk handles
+  // both the empty-tree and missing-package cases; cleanup removes only
+  // what we created so the dApp dir ends up exactly as we found it.
   const userNodeModules = join(dappDir, 'node_modules');
-  const createdSymlink = OUR_NODE_MODULES && !existsSync(userNodeModules);
-  if (createdSymlink) {
-    try { symlinkSync(OUR_NODE_MODULES!, userNodeModules); } catch { /* user keeps whatever they had */ }
-  }
+  const overlayPaths = overlayMidnightSdk(userNodeModules);
 
   const scriptPath = join(dappDir, `.mn-contract-${Date.now()}.mjs`);
   writeFileSync(scriptPath, script);
 
   const cleanup = () => {
     try { unlinkSync(scriptPath); } catch {}
-    if (createdSymlink) {
-      try { unlinkSync(userNodeModules); } catch {}
+    // Remove overlay symlinks in reverse order of creation. unlinkSync on a
+    // symlink only removes the link, never the target — safe even if the
+    // user's node_modules dir was created by us (it's a symlink itself in
+    // that case, so it goes too).
+    for (const p of overlayPaths.slice().reverse()) {
+      try { unlinkSync(p); } catch {}
     }
   };
 

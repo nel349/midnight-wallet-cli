@@ -60,14 +60,24 @@ export default async function contractCommand(args: ParsedArgs, signal?: AbortSi
 
 // ── Inspect ──
 
-async function handleInspect(args: ParsedArgs): Promise<void> {
-  const jsonMode = hasFlag(args, 'json');
-
+/**
+ * Resolve the directory to scan for managed/<name>/. Honours --managed
+ * (direct path to a managed/<name>/ dir, used by all four subcommands) and
+ * --path (dApp root, the more common case). When both are set --managed
+ * wins because it's the more specific signal.
+ */
+function resolveScanDir(args: ParsedArgs): string {
   const managedFlag = getFlag(args, 'managed');
   const pathFlag = getFlag(args, 'path');
-  const startDir = resolve(managedFlag ?? pathFlag ?? process.cwd());
+  return resolve(managedFlag ?? pathFlag ?? process.cwd());
+}
 
-  const { info } = findContractInfo(startDir);
+async function handleInspect(args: ParsedArgs): Promise<void> {
+  const jsonMode = hasFlag(args, 'json');
+  const startDir = resolveScanDir(args);
+  const contractName = getFlag(args, 'name');
+
+  const { info } = findContractInfo(startDir, contractName);
 
   if (jsonMode) {
     writeJsonResult(toJsonOutput(info));
@@ -98,6 +108,14 @@ async function handleInspect(args: ParsedArgs): Promise<void> {
     for (const witness of info.witnesses) {
       process.stderr.write(`    ${formatWitnessSignature(witness)}\n`);
     }
+  }
+
+  if (info.siblings.length > 0) {
+    process.stderr.write('\n' + bold('  Other contracts in this project') + '\n');
+    for (const name of info.siblings) {
+      process.stderr.write(`    ${teal(name)}\n`);
+    }
+    process.stderr.write('\n' + dim('  Inspect a sibling: mn contract inspect --name <name>') + '\n');
   }
 
   process.stderr.write('\n');
@@ -250,7 +268,12 @@ async function ensureServe(network: string, jsonMode: boolean, wallet?: string):
 
 async function handleDeploy(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
+  // dApp dir for runner/witness discovery is --path (or cwd). --managed only
+  // tells us where contract-info.json lives; the runner still needs the
+  // project root to load witnesses.js and write the level-db cache.
   const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
+  const scanDir = resolveScanDir(args);
+  const contractName = getFlag(args, 'name');
 
   const { runDeploy } = await import('../lib/contract/runner.ts');
   const { resolveNetwork } = await import('../lib/resolve-network.ts');
@@ -259,7 +282,7 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     process.stderr.write('\n' + header('Contract Deploy') + '\n\n');
   }
 
-  const { info } = findContractInfo(dappDir);
+  const { info } = findContractInfo(scanDir, contractName);
 
   // Fail fast when the contract declares witnesses but no compiled
   // witnesses.js is on disk — otherwise the SDK throws a cryptic
@@ -373,6 +396,8 @@ function writeNextStepsHint(address: string, circuits: { name: string; arguments
 async function handleCall(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
   const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
+  const scanDir = resolveScanDir(args);
+  const contractName = getFlag(args, 'name');
 
   const address = requireFlag(args, 'address', 'contract address');
   const circuit = requireFlag(args, 'circuit', 'circuit name');
@@ -385,7 +410,7 @@ async function handleCall(args: ParsedArgs): Promise<void> {
     process.stderr.write('\n' + header('Contract Call') + '\n\n');
   }
 
-  const { info } = findContractInfo(dappDir);
+  const { info } = findContractInfo(scanDir, contractName);
 
   let callArgs: unknown[] = [];
   if (argsJson) {
@@ -453,6 +478,8 @@ async function handleCall(args: ParsedArgs): Promise<void> {
 async function handleState(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
   const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
+  const scanDir = resolveScanDir(args);
+  const contractName = getFlag(args, 'name');
   const address = requireFlag(args, 'address', 'contract address');
 
   const { resolveNetwork } = await import('../lib/resolve-network.ts');
@@ -473,7 +500,7 @@ async function handleState(args: ParsedArgs): Promise<void> {
   const spinner = jsonMode ? silentSpinner() : startSpinner('Querying contract state...');
 
   try {
-    const { info } = findContractInfo(dappDir);
+    const { info } = findContractInfo(scanDir, contractName);
 
     const result = await runState({
       dappDir,

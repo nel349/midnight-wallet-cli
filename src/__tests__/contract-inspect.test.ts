@@ -174,6 +174,7 @@ describe('findContractInfo', () => {
     const { info } = findContractInfo(dir);
     expect(info.name).toBe('mycontract');
     expect(info.compilerVersion).toBe('0.30.0');
+    expect(info.siblings).toEqual([]);
   });
 
   it('discovers contract in contract/src/managed/', () => {
@@ -183,11 +184,69 @@ describe('findContractInfo', () => {
     expect(info.name).toBe('deepcontract');
   });
 
+  it('discovers contract in contracts/ (plural) — create-mn-app layout', () => {
+    const dir = join(tmpBase, 'test-plural');
+    createContractInfo(join(dir, 'contracts'), 'helloworld');
+    const { info } = findContractInfo(dir);
+    expect(info.name).toBe('helloworld');
+  });
+
+  it('discovers contract in contracts/src/managed/', () => {
+    const dir = join(tmpBase, 'test-plural-src');
+    createContractInfo(join(dir, 'contracts', 'src'), 'pluralsrc');
+    const { info } = findContractInfo(dir);
+    expect(info.name).toBe('pluralsrc');
+  });
+
   it('discovers contract via --managed (compiler/ parent)', () => {
     const dir = join(tmpBase, 'test3');
     createContractInfo(dir, 'direct');
     const { info } = findContractInfo(join(dir, 'managed', 'direct'));
     expect(info.name).toBe('direct');
+  });
+
+  it('returns first contract alphabetically and lists siblings when project has multiple', () => {
+    const dir = join(tmpBase, 'test-multi');
+    createContractInfo(dir, 'zeta');
+    createContractInfo(dir, 'alpha');
+    createContractInfo(dir, 'beta');
+    const { info } = findContractInfo(dir);
+    expect(info.name).toBe('alpha');
+    expect(info.siblings).toEqual(['beta', 'zeta']);
+  });
+
+  it('selects a specific contract by name when provided', () => {
+    const dir = join(tmpBase, 'test-multi-named');
+    createContractInfo(dir, 'access-control');
+    createContractInfo(dir, 'counter');
+    createContractInfo(dir, 'discovery-core');
+    const { info } = findContractInfo(dir, 'counter');
+    expect(info.name).toBe('counter');
+    expect(info.siblings).toEqual(['access-control', 'discovery-core']);
+  });
+
+  it('errors with available list when named contract is not present', () => {
+    const dir = join(tmpBase, 'test-bad-name');
+    createContractInfo(dir, 'foo');
+    createContractInfo(dir, 'bar');
+    expect(() => findContractInfo(dir, 'baz')).toThrow(/Contract "baz" not found.*Available: bar, foo/s);
+  });
+
+  it('parses pre-0.30 contract-info.json without compiler-version', () => {
+    const dir = join(tmpBase, 'test-old-format');
+    const managedDir = join(dir, 'managed', 'oldcontract', 'compiler');
+    mkdirSync(managedDir, { recursive: true });
+    // Older Compact emitted contract-info.json without the version trio.
+    writeFileSync(join(managedDir, 'contract-info.json'), JSON.stringify({
+      circuits: [{ name: 'tick', pure: true, proof: false, arguments: [], 'result-type': { 'type-name': 'Uint' } }],
+      witnesses: [],
+    }));
+    const { info } = findContractInfo(dir);
+    expect(info.name).toBe('oldcontract');
+    expect(info.compilerVersion).toBe('unknown');
+    expect(info.languageVersion).toBe('unknown');
+    expect(info.runtimeVersion).toBe('unknown');
+    expect(info.circuits).toHaveLength(1);
   });
 
   it('throws when no contract found', () => {
@@ -226,6 +285,7 @@ describe('toJsonOutput', () => {
       compilerVersion: '1.0.0',
       languageVersion: '1.0.0',
       runtimeVersion: '1.0.0',
+      siblings: [],
       circuits: [{
         name: 'call_me',
         pure: false,

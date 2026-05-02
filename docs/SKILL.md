@@ -61,7 +61,20 @@ At step 5 the user is ready to transact.
 **Never skip step 2–3.** The whole point of the token flow is that the user sees the exact operation before funds move.
 
 ### User wants to deploy a contract
-Use `mn contract` commands (not MCP tools yet). Flow: `compact compile` in the project → `mn contract inspect` to verify artifacts → `mn contract deploy --network <n>` → returns address → `mn contract call --address <addr> --circuit <name> --args '<json>'` to exercise it.
+Use `midnight_contract_*` MCP tools (or `mn contract` CLI). Flow: `compact compile` in the project → `midnight_contract_inspect({ path })` to verify artifacts → `midnight_contract_deploy({ path, wallet, network })` → returns address → `midnight_contract_call({ address, circuit, args, ... })` to exercise it. State reads via `midnight_contract_state({ address, ... })`.
+
+**Project layouts handled.** The scan looks for `managed/<name>/compiler/contract-info.json` under: project root, `contract/`, `contract/src/`, `contracts/`, `contracts/src/`, `src/`. If none match, pass `managed: "<full path to managed/<name>/>"` directly.
+
+**Multi-contract projects.** Inspect returns a `siblings: string[]` field listing other contracts under the same `managed/`. Pick one with `name: "<contract>"` on inspect/deploy/call/state.
+
+**Arg encoding for circuits.** The MCP `args` param is a JSON string. The bridge auto-coerces:
+- `number` → `BigInt` (any Compact `Uint<N>` arg)
+- array of 0–255 ints → `Uint8Array` (any Compact `Bytes<N>` arg, e.g. `[1,2,3,...,32]`)
+Pass strings as JSON strings; arrays of larger values stay as arrays. No hex-string detection — `"1234"` stays a string.
+
+**Compatibility caveat — runtime version skew.** Contracts compiled with an older `compactc` may fail at deploy/call with a message like `Version mismatch: compiled code expects <X>, runtime is <Y>`. The CLI bundles one specific `@midnight-ntwrk/compact-runtime` version; if the user's contract was compiled against a different one, recompile the contract with a matching `compactc` rather than asking the user to downgrade `mn`. `midnight_contract_inspect` shows the compiled `runtimeVersion` so you can flag the mismatch before attempting deploy.
+
+**Stale MCP server.** Every MCP response carries `_serverVersion`. If the user upgraded `midnight-wallet-cli` but `_serverVersion` lags `mn --version`, the MCP client is talking to a long-lived stale process. Tell them to disconnect and re-add the MCP server (a /mcp reconnect alone will not respawn it).
 
 ## Safety rules (non-negotiable)
 

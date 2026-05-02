@@ -36,58 +36,88 @@ export interface ContractInfo {
   runtimeVersion: string;
   circuits: CircuitInfo[];
   witnesses: WitnessInfo[];
+  /** Other contract names found alongside this one in the same managed/ dir. Empty when single-contract. */
+  siblings: string[];
 }
 
 // ── Discovery ──
 
 const CONTRACT_INFO_FILENAME = 'contract-info.json';
 
+// Candidate subdirectories that may contain a `managed/` directory. Order
+// matters only for tie-breaking; the first match wins. Includes both
+// `contract/` (singular — original midnight-libraries layout) and
+// `contracts/` (plural — used by create-mn-app's hello-world template and
+// many community projects). Without the plural variant, those projects
+// silently miss our scan and force users into `--managed`.
+const SCAN_CANDIDATES = [
+  '',
+  'contract/src',
+  'contract',
+  'contracts/src',
+  'contracts',
+  'src',
+] as const;
+
 /**
  * Find contract-info.json by scanning for managed/<name>/compiler/contract-info.json.
- * Searches the given directory and common subdirectories (contract/src, src).
+ * Searches the given directory and common subdirectories (contract/src, contracts/src, src).
+ *
+ * If `contractName` is given, only returns that specific contract (errors if not found).
+ * Otherwise returns the first contract discovered alphabetically; siblings are populated
+ * with the other contract names so callers can offer disambiguation.
  */
-export function findContractInfo(startDir: string): { info: ContractInfo; infoPath: string } {
-  // Try direct managed dir first (--managed flag)
+export function findContractInfo(startDir: string, contractName?: string): { info: ContractInfo; infoPath: string } {
+  // Try direct managed dir first (--managed flag points at managed/<name>/)
   const directPath = join(startDir, 'compiler', CONTRACT_INFO_FILENAME);
   if (existsSync(directPath)) {
-    return loadContractInfo(directPath, startDir);
+    return loadContractInfo(directPath, startDir, []);
   }
 
-  // Scan for managed/*/compiler/contract-info.json in candidate directories
-  const candidates = [
-    startDir,
-    join(startDir, 'contract', 'src'),
-    join(startDir, 'contract'),
-    join(startDir, 'src'),
-  ];
-
-  for (const dir of candidates) {
-    const managedDir = join(dir, 'managed');
+  for (const sub of SCAN_CANDIDATES) {
+    const managedDir = sub ? join(startDir, sub, 'managed') : join(startDir, 'managed');
     if (!existsSync(managedDir)) continue;
 
     let entries: string[];
     try {
-      entries = readdirSync(managedDir);
+      entries = readdirSync(managedDir).sort();
     } catch {
       continue;
     }
 
-    for (const entry of entries) {
-      const infoPath = join(managedDir, entry, 'compiler', CONTRACT_INFO_FILENAME);
-      if (existsSync(infoPath)) {
-        return loadContractInfo(infoPath, join(managedDir, entry));
+    // Filter to only entries with a real contract-info.json
+    const present = entries.filter((entry) =>
+      existsSync(join(managedDir, entry, 'compiler', CONTRACT_INFO_FILENAME))
+    );
+    if (present.length === 0) continue;
+
+    let chosen: string;
+    if (contractName) {
+      if (!present.includes(contractName)) {
+        throw new Error(
+          `Contract "${contractName}" not found in ${managedDir}\n` +
+          `Available: ${present.join(', ')}`
+        );
       }
+      chosen = contractName;
+    } else {
+      chosen = present[0];
     }
+
+    const siblings = present.filter((n) => n !== chosen);
+    const infoPath = join(managedDir, chosen, 'compiler', CONTRACT_INFO_FILENAME);
+    return loadContractInfo(infoPath, join(managedDir, chosen), siblings);
   }
 
   throw new Error(
     `No compiled contract found in ${startDir}\n` +
     `Expected: managed/<name>/compiler/${CONTRACT_INFO_FILENAME}\n` +
+    `Searched: ${SCAN_CANDIDATES.map((s) => s ? `${s}/managed/` : 'managed/').join(', ')}\n` +
     `Run "compact compile" first, or use --managed <path> to specify the managed directory.`
   );
 }
 
-function loadContractInfo(infoPath: string, managedDir: string): { info: ContractInfo; infoPath: string } {
+function loadContractInfo(infoPath: string, managedDir: string, siblings: string[]): { info: ContractInfo; infoPath: string } {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(infoPath, 'utf-8'));
@@ -95,30 +125,31 @@ function loadContractInfo(infoPath: string, managedDir: string): { info: Contrac
     throw new Error(`Failed to parse ${infoPath}: ${(err as Error).message}`);
   }
 
-  const info = parseContractInfo(raw, infoPath, managedDir);
+  const info = parseContractInfo(raw, infoPath, managedDir, siblings);
   return { info, infoPath };
 }
 
 // ── Parsing & Validation ──
 
-function parseContractInfo(raw: unknown, path: string, managedDir: string): ContractInfo {
+function parseContractInfo(raw: unknown, path: string, managedDir: string, siblings: string[]): ContractInfo {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error(`${path}: must be a JSON object`);
   }
 
   const obj = raw as Record<string, unknown>;
 
-  if (typeof obj['compiler-version'] !== 'string') {
-    throw new Error(`${path}: missing "compiler-version"`);
-  }
+  // Older Compact compilers (pre-0.30) omit the version trio. Default to
+  // 'unknown' so the contract is still inspectable; the user sees the gap
+  // explicitly in the rendered output rather than a hard parse error.
+  const compilerVersion = typeof obj['compiler-version'] === 'string' ? (obj['compiler-version'] as string) : 'unknown';
+  const languageVersion = typeof obj['language-version'] === 'string' ? (obj['language-version'] as string) : 'unknown';
+  const runtimeVersion = typeof obj['runtime-version'] === 'string' ? (obj['runtime-version'] as string) : 'unknown';
 
-  if (!Array.isArray(obj.circuits)) {
-    throw new Error(`${path}: missing "circuits" array`);
-  }
-
-  if (!Array.isArray(obj.witnesses)) {
-    throw new Error(`${path}: missing "witnesses" array`);
-  }
+  // circuits/witnesses default to [] when absent so an essentially-empty
+  // contract still loads cleanly. A real "this file is corrupt" surfaces
+  // earlier in JSON.parse.
+  const circuits = Array.isArray(obj.circuits) ? (obj.circuits as CircuitInfo[]) : [];
+  const witnesses = Array.isArray(obj.witnesses) ? (obj.witnesses as WitnessInfo[]) : [];
 
   // Derive contract name from the managed directory name
   const name = basename(managedDir);
@@ -126,11 +157,12 @@ function parseContractInfo(raw: unknown, path: string, managedDir: string): Cont
   return {
     name,
     managedDir,
-    compilerVersion: obj['compiler-version'] as string,
-    languageVersion: (obj['language-version'] as string) ?? 'unknown',
-    runtimeVersion: (obj['runtime-version'] as string) ?? 'unknown',
-    circuits: obj.circuits as CircuitInfo[],
-    witnesses: obj.witnesses as WitnessInfo[],
+    compilerVersion,
+    languageVersion,
+    runtimeVersion,
+    circuits,
+    witnesses,
+    siblings,
   };
 }
 
@@ -212,6 +244,7 @@ export function toJsonOutput(info: ContractInfo): Record<string, unknown> {
     languageVersion: info.languageVersion,
     runtimeVersion: info.runtimeVersion,
     managedDir: info.managedDir,
+    siblings: info.siblings,
     circuits: info.circuits.map(c => ({
       name: c.name,
       pure: c.pure,

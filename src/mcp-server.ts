@@ -627,13 +627,14 @@ const TOOLS: ToolDef[] = [
   // ── Contract operations ──────────────────────────────────────────
   {
     name: 'midnight_contract_inspect',
-    description: 'Inspect a compiled Compact contract: name, circuits (with arg/return types), witnesses, compiler/language/runtime versions. Reads managed/<name>/compiler/contract-info.json under the dapp dir.',
+    description: 'Inspect a compiled Compact contract: name, circuits (with arg/return types), witnesses, compiler/language/runtime versions. Reads managed/<name>/compiler/contract-info.json under the dapp dir. Returns a `siblings` array listing other contracts in the same project — call again with `name` to inspect a sibling.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Path to dApp directory (defaults to cwd)' },
         managed: { type: 'string', description: 'Direct path to a managed/<name>/ directory (overrides path)' },
+        name: { type: 'string', description: 'Specific contract name to inspect when the project has multiple (see siblings field)' },
       },
     },
     async handler(params) {
@@ -653,6 +654,8 @@ const TOOLS: ToolDef[] = [
         wallet: { type: 'string' },
         network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
         path: { type: 'string', description: 'dApp directory (defaults to cwd; needed to find the compiled artifact for state decoding)' },
+        managed: { type: 'string', description: 'Direct path to a managed/<name>/ directory (overrides path-based contract scan)' },
+        name: { type: 'string', description: 'Specific contract name when the project has multiple' },
       },
       required: ['address'],
     },
@@ -673,6 +676,8 @@ const TOOLS: ToolDef[] = [
         network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
         args: { type: 'string', description: 'JSON-encoded array or object of constructor arguments' },
         path: { type: 'string', description: 'dApp directory (defaults to cwd)' },
+        managed: { type: 'string', description: 'Direct path to a managed/<name>/ directory (overrides path-based contract scan)' },
+        name: { type: 'string', description: 'Specific contract name when the project has multiple' },
       },
     },
     async handler(params) {
@@ -694,6 +699,8 @@ const TOOLS: ToolDef[] = [
         network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
         args: { type: 'string', description: 'JSON-encoded array or object of circuit arguments' },
         path: { type: 'string', description: 'dApp directory (defaults to cwd)' },
+        managed: { type: 'string', description: 'Direct path to a managed/<name>/ directory (overrides path-based contract scan)' },
+        name: { type: 'string', description: 'Specific contract name when the project has multiple' },
       },
       required: ['address', 'circuit'],
     },
@@ -853,20 +860,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return {
       content: [{
         type: 'text' as const,
-        text: JSON.stringify({
+        text: JSON.stringify(stamp({
           pending: true,
           token: pending.token,
           description: pending.description,
           tool: pending.tool,
           expiresAt: new Date(pending.expiresAt).toISOString(),
           nextStep: 'Show the description to the user, get explicit consent, then call midnight_confirm_operation with this token.',
-        }, null, 2),
+        }), null, 2),
       }],
     };
   }
 
   return executeTool(name, params);
 });
+
+/**
+ * Stamp every MCP response with the server's PKG_VERSION so callers can
+ * detect a stale server (CLI on disk says X, MCP responses say Y → restart
+ * the MCP client). Underscore prefix marks it as metadata, distinct from
+ * tool-shape data fields.
+ */
+function stamp<T extends Record<string, unknown>>(payload: T): T & { _serverVersion: string } {
+  return { ...payload, _serverVersion: PKG_VERSION };
+}
 
 async function executeTool(name: string, params: Record<string, unknown>) {
   const tool = TOOLS.find((t) => t.name === name);
@@ -875,7 +892,7 @@ async function executeTool(name: string, params: Record<string, unknown>) {
   try {
     const result = await tool.handler(params);
     return {
-      content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      content: [{ type: 'text' as const, text: JSON.stringify(stamp(result), null, 2) }],
     };
   } catch (err) {
     return errorResponse(err instanceof Error ? err : new Error(String(err)));
@@ -887,7 +904,7 @@ function errorResponse(error: Error) {
   return {
     content: [{
       type: 'text' as const,
-      text: JSON.stringify({ error: true, code: errorCode, message: trimAgentMessage(error.message) }),
+      text: JSON.stringify(stamp({ error: true, code: errorCode, message: trimAgentMessage(error.message) })),
     }],
     isError: true,
   };
