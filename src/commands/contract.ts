@@ -105,7 +105,7 @@ async function handleInspect(args: ParsedArgs): Promise<void> {
 
 // ── Preflight check: balance + dust before deploy/call ──
 
-async function preflight(network: string, jsonMode: boolean): Promise<void> {
+async function preflight(network: string, jsonMode: boolean, wallet?: string): Promise<void> {
   const { loadWalletConfig, resolveWalletPath } = await import('../lib/wallet-config.ts');
   const { resolveNetwork } = await import('../lib/resolve-network.ts');
   const { defaultRepository } = await import('../lib/wallet-data-repository.ts');
@@ -114,7 +114,11 @@ async function preflight(network: string, jsonMode: boolean): Promise<void> {
   const { config: networkConfig } = resolveNetwork({
     args: { command: 'contract', subcommand: undefined, positionals: [], flags: { network } },
   });
-  const walletConfig = loadWalletConfig(resolveWalletPath());
+  // resolveWalletPath honours --wallet when passed; without the arg, it
+  // falls back to the active wallet from config. Forwarding the user's
+  // --wallet flag here keeps the preflight check aligned with the wallet
+  // that the actual deploy/call will use.
+  const walletConfig = loadWalletConfig(resolveWalletPath(wallet));
   const seedBuffer = Buffer.from(walletConfig.seed, 'hex');
   const address = walletConfig.addresses[network as NetworkName];
 
@@ -199,7 +203,7 @@ async function probeServeNetwork(port: number): Promise<string | null> {
   });
 }
 
-async function ensureServe(network: string, jsonMode: boolean): Promise<{ port: number; stop: () => Promise<void> }> {
+async function ensureServe(network: string, jsonMode: boolean, wallet?: string): Promise<{ port: number; stop: () => Promise<void> }> {
   const { startServe } = await import('../lib/test/serve-manager.ts');
   const { DEFAULT_SERVE_PORT } = await import('../lib/constants.ts');
 
@@ -235,6 +239,7 @@ async function ensureServe(network: string, jsonMode: boolean): Promise<{ port: 
   const spinner = jsonMode ? silentSpinner() : startSpinner('Starting mn serve...');
   const handle = await startServe({
     network,
+    wallet,
     onMessage: (msg) => spinner.update(msg),
   });
   spinner.stop('mn serve ready (port ' + handle.port + ')');
@@ -245,7 +250,7 @@ async function ensureServe(network: string, jsonMode: boolean): Promise<{ port: 
 
 async function handleDeploy(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
-  const dappDir = resolve(process.cwd());
+  const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
 
   const { runDeploy } = await import('../lib/contract/runner.ts');
   const { resolveNetwork } = await import('../lib/resolve-network.ts');
@@ -297,10 +302,10 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
   }
 
   // Pre-check: verify wallet has balance and dust before attempting deploy
-  await preflight(network, jsonMode);
+  await preflight(network, jsonMode, getFlag(args, 'wallet'));
 
   // Start mn serve (or reuse existing)
-  const serve = await ensureServe(network, jsonMode);
+  const serve = await ensureServe(network, jsonMode, getFlag(args, 'wallet'));
 
   const spinner = jsonMode ? silentSpinner() : startSpinner('Deploying contract...');
 
@@ -367,7 +372,7 @@ function writeNextStepsHint(address: string, circuits: { name: string; arguments
 
 async function handleCall(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
-  const dappDir = resolve(process.cwd());
+  const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
 
   const address = requireFlag(args, 'address', 'contract address');
   const circuit = requireFlag(args, 'circuit', 'circuit name');
@@ -403,9 +408,9 @@ async function handleCall(args: ParsedArgs): Promise<void> {
     process.stderr.write(keyValue('Address', address.slice(0, 20) + '...') + '\n\n');
   }
 
-  await preflight(network, jsonMode);
+  await preflight(network, jsonMode, getFlag(args, 'wallet'));
 
-  const serve = await ensureServe(network, jsonMode);
+  const serve = await ensureServe(network, jsonMode, getFlag(args, 'wallet'));
   const spinner = jsonMode ? silentSpinner() : startSpinner(`Calling ${circuit}...`);
 
   try {
@@ -447,7 +452,7 @@ async function handleCall(args: ParsedArgs): Promise<void> {
 
 async function handleState(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
-  const dappDir = resolve(process.cwd());
+  const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
   const address = requireFlag(args, 'address', 'contract address');
 
   const { resolveNetwork } = await import('../lib/resolve-network.ts');
