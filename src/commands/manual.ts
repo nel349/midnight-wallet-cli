@@ -232,7 +232,6 @@ export function buildManual(): string {
   out.push('');
   out.push(`  Repository:        ${dim('github.com/nel349/midnight-wallet-cli')}`);
   out.push(`  JSON contract:     ${dim('docs/JSON_CONTRACT.md')}`);
-  out.push(`  Beginner journey:  ${dim('docs/BEGINNER_JOURNEY.md')}`);
   out.push('');
 
   return out.join('\n');
