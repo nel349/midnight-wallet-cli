@@ -184,78 +184,14 @@ async function preflight(network: string, jsonMode: boolean, wallet?: string): P
 
 // ── Serve lifecycle for deploy/call ──
 
-/** Map CLI network name (lowercase) to the SDK networkId the serve reports. */
-const NETWORK_TO_SDK_ID: Record<string, string> = {
-  preprod: 'PreProd',
-  preview: 'Preview',
-  undeployed: 'Undeployed',
-};
-
-/**
- * Ask an mn serve listening on `port` what network it serves. Sends a single
- * getConnectionStatus RPC. Returns the SDK networkId string ("PreProd" etc.)
- * on success, or null on any timeout/error/parse failure (callers treat null
- * as "unknown — refuse to reuse").
- */
-async function probeServeNetwork(port: number): Promise<string | null> {
-  const WebSocket = (await import('ws')).default;
-  return new Promise<string | null>((resolve) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-    const timeout = setTimeout(() => { try { ws.close(); } catch {} resolve(null); }, 2000);
-    ws.on('open', () => {
-      ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getConnectionStatus', params: {} }));
-    });
-    ws.on('message', (data: Buffer) => {
-      clearTimeout(timeout);
-      try {
-        const msg = JSON.parse(data.toString());
-        const id = msg?.result?.networkId;
-        ws.close();
-        resolve(typeof id === 'string' ? id : null);
-      } catch {
-        ws.close();
-        resolve(null);
-      }
-    });
-    ws.on('error', () => { clearTimeout(timeout); resolve(null); });
-  });
-}
-
 async function ensureServe(network: string, jsonMode: boolean, wallet?: string): Promise<{ port: number; stop: () => Promise<void> }> {
-  const { startServe } = await import('../lib/test/serve-manager.ts');
-  const { DEFAULT_SERVE_PORT } = await import('../lib/constants.ts');
+  const { startServeOrReuse } = await import('../lib/test/serve-manager.ts');
 
-  // Check if serve is already running on the default port
-  const net = await import('net');
-  const portInUse = await new Promise<boolean>((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(1000);
-    socket.on('connect', () => { socket.destroy(); resolve(true); });
-    socket.on('timeout', () => { socket.destroy(); resolve(false); });
-    socket.on('error', () => resolve(false));
-    socket.connect(DEFAULT_SERVE_PORT, '127.0.0.1');
-  });
-
-  if (portInUse) {
-    // Probe the existing serve. Reuse only if it serves the requested network;
-    // otherwise refuse loudly so the user stops the wrong-network serve instead
-    // of getting a cryptic "expect 'preprod' found 'undeployed'" mid-deploy.
-    const expectedSdkId = NETWORK_TO_SDK_ID[network];
-    const actualSdkId = await probeServeNetwork(DEFAULT_SERVE_PORT);
-    if (actualSdkId && expectedSdkId && actualSdkId !== expectedSdkId) {
-      throw new Error(
-        `mn serve is already running on port ${DEFAULT_SERVE_PORT} for network ${actualSdkId.toLowerCase()}, ` +
-        `but this command needs ${network}.\n` +
-        `Stop the running serve first (e.g. pkill -f 'mn serve') or run this command on the matching network.`
-      );
-    }
-    if (!jsonMode) process.stderr.write(dim('  mn serve already running on port ' + DEFAULT_SERVE_PORT) + '\n');
-    return { port: DEFAULT_SERVE_PORT, stop: async () => {} };
-  }
-
-  // Start serve in-process
+  // startServeOrReuse handles port-in-use detection: if a compatible mn
+  // serve is already running we reuse it (no-op stop), if a different
+  // network's serve owns the port we throw with an actionable message.
   const spinner = jsonMode ? silentSpinner() : startSpinner('Starting mn serve...');
-  const handle = await startServe({
+  const handle = await startServeOrReuse({
     network,
     wallet,
     onMessage: (msg) => spinner.update(msg),

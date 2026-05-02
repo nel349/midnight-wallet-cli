@@ -15,7 +15,7 @@ import { GENESIS_SEED } from '../constants.ts';
 import { deriveUnshieldedAddress } from '../derive-address.ts';
 
 import type { DappTestConfig, PrepStepId, PrepStepResult, PrepContext, PrepCallbacks } from './types.ts';
-import { startServe } from './serve-manager.ts';
+import { startServeOrReuse } from './serve-manager.ts';
 import { startBuild } from './build-manager.ts';
 
 /**
@@ -336,7 +336,12 @@ async function stepDust(config: DappTestConfig, callbacks: PrepCallbacks): Promi
 async function stepMnServe(config: DappTestConfig, ctx: PrepContext, callbacks: PrepCallbacks): Promise<void> {
   callbacks.onMessage('Starting mn serve...');
 
-  const handle = await startServe({
+  // startServeOrReuse probes the port first: if a compatible mn serve is
+  // already running it gets reused (with a no-op stop), if a stale/wrong-
+  // network serve owns the port we throw with an actionable message rather
+  // than silently double-binding and falling back to whatever was there
+  // before.
+  const handle = await startServeOrReuse({
     port: undefined, // use default
     network: config.network,
     onMessage: (msg) => callbacks.onMessage(`[serve] ${msg}`),
