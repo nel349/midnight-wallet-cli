@@ -1,6 +1,7 @@
 // Prep runner — execute prep steps defined in dapp.test.json by calling existing lib functions.
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { clearWalletCache } from '../wallet-cache.ts';
@@ -96,28 +97,22 @@ const LOCALNET_TIMEOUT_MS = 30_000; // 30s for Docker health
 const LOCALNET_MAX_RETRIES = 2;
 const INDEXER_PROBE_TIMEOUT_MS = 30_000; // 30s for indexer to start responding after Docker healthy
 
-/** Probe the indexer HTTP endpoint to verify it's actually responding. */
+/**
+ * Probe the indexer HTTP endpoint to verify it's actually responding.
+ * Drops curl's `-f` flag — any response, including 4xx, means the server
+ * is alive; we only need TCP + HTTP framing, not a 2xx body. Connection
+ * refused / DNS failure / timeout still throws, which is what we want
+ * to treat as "not ready".
+ */
 function probeIndexer(): boolean {
   try {
-    const { execSync } = require('node:child_process') as typeof import('node:child_process');
-    // Any response (even 400/405) means the server is alive — we just need TCP+HTTP
     execSync(
-      'curl -sf -o /dev/null http://localhost:8088/api/v3/graphql --max-time 3',
+      'curl -s -o /dev/null http://localhost:8088/api/v3/graphql --max-time 3',
       { timeout: 5_000, stdio: ['pipe', 'pipe', 'pipe'] },
     );
     return true;
   } catch {
-    // curl returns non-zero for HTTP errors (400, 405, etc.) with -f flag — try without -f
-    try {
-      const { execSync: exec2 } = require('node:child_process') as typeof import('node:child_process');
-      exec2(
-        'curl -s -o /dev/null http://localhost:8088/api/v3/graphql --max-time 3',
-        { timeout: 5_000, stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 

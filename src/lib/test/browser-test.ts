@@ -1,7 +1,7 @@
 // Browser test — launch Claude to run a browser-based test.
 // Supports three modes: vision (--chrome, screenshots), dom (accessibility tree), script (JS evaluation).
 
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -38,7 +38,6 @@ const MCP_CHROME_PROFILE_MARKER = 'chrome-devtools-mcp/chrome-profile';
  * different profile, so this never touches it.
  */
 function killOrphanMcpChromes(onMessage: (msg: string) => void): void {
-  const { execSync } = require('node:child_process') as typeof import('node:child_process');
   let pids: string;
   try {
     pids = execSync(

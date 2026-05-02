@@ -11,20 +11,26 @@ function run(args: string[]): string {
   }).trim();
 }
 
+// Each test spawns `npx tsx` against the CLI entry point. Cold spawn +
+// ts module load on a loaded machine routinely exceeds vitest's 5s default
+// (the wall-clock work is real and bounded). Bumping the per-test timeout
+// to 15s removes the flake without masking actual regressions.
+const SPAWN_TIMEOUT_MS = 15_000;
+
 describe('--version flag', () => {
   it('prints version with --version', () => {
     const output = run(['--version']);
     expect(output).toMatch(/^\d+\.\d+\.\d+$/);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it('prints version with -v', () => {
     const output = run(['-v']);
     expect(output).toMatch(/^\d+\.\d+\.\d+$/);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it('prints the version from package.json', () => {
     const { version } = require('../../package.json');
     const output = run(['-v']);
     expect(output).toBe(version);
-  });
+  }, SPAWN_TIMEOUT_MS);
 });

@@ -56,6 +56,64 @@ export default async function testCommand(args: ParsedArgs, signal?: AbortSignal
 
 // ── create ──
 
+import type { CreateStrategy, BrowserOptions } from '../lib/test/create.ts';
+
+type NetworkOpt = 'preprod' | 'preview' | 'undeployed';
+
+/** Allow either canonical strategy names or the friendlier "ui" alias. */
+function parseStrategyFlag(flag: string | undefined): CreateStrategy | undefined {
+  const normalized = (flag ?? '').toLowerCase();
+  if (normalized === '') return undefined;
+  if (normalized === 'cli' || normalized === 'browser') return normalized;
+  if (normalized === 'ui') return 'browser';
+  throw new UsageError(`Unknown strategy "${flag}". Use "cli" or "ui".`);
+}
+
+/** Narrow a free-form network flag down to the supported set, or undefined. */
+function parseNetworkFlag(flag: string | undefined): NetworkOpt | undefined {
+  return flag === 'preprod' || flag === 'preview' || flag === 'undeployed' ? flag : undefined;
+}
+
+/** Collect browser-specific flags into a partial; throws on bad port. */
+function collectBrowserFlags(args: ParsedArgs): Partial<BrowserOptions> {
+  const out: Partial<BrowserOptions> = {};
+  const portFlag = getFlag(args, 'port');
+  if (portFlag !== undefined) {
+    const port = parseInt(portFlag, 10);
+    if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+      throw new UsageError(`Invalid --port "${portFlag}" — must be 1–65535.`);
+    }
+    out.port = port;
+  }
+  const buildCmd = getFlag(args, 'build-cmd');
+  if (buildCmd !== undefined) out.buildCmd = buildCmd;
+  const buildDir = getFlag(args, 'build-dir');
+  if (buildDir !== undefined) out.buildDir = buildDir;
+  const url = getFlag(args, 'url');
+  if (url !== undefined) out.url = url;
+  return out;
+}
+
+/**
+ * Resolve browser options for non-interactive mode (--json or piped stdin):
+ * port + build-cmd are required, the rest are optional. Throws with an
+ * actionable message if either is missing — interactive callers prompt
+ * instead of throwing.
+ */
+function browserOptionsFromFlags(prefilled: Partial<BrowserOptions>): BrowserOptions {
+  if (prefilled.port === undefined || prefilled.buildCmd === undefined) {
+    throw new UsageError(
+      `Browser strategy needs --port and --build-cmd (and optionally --build-dir, --url) when running non-interactively.`,
+    );
+  }
+  return {
+    port: prefilled.port,
+    buildCmd: prefilled.buildCmd,
+    buildDir: prefilled.buildDir,
+    url: prefilled.url,
+  };
+}
+
 async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> {
   const { resolve } = await import('node:path');
   const { findContractInfo } = await import('../lib/contract/inspect.ts');
@@ -63,68 +121,27 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   const { writeScaffold } = await import('../lib/test/create-writer.ts');
   const { isInteractive, promptStrategy, promptBrowserOptions } = await import('../lib/test/create-prompt.ts');
   const { writeJsonResult } = await import('../lib/json-output.ts');
-  type CreateStrategy = import('../lib/test/create.ts').CreateStrategy;
-  type BrowserOptions = import('../lib/test/create.ts').BrowserOptions;
 
   const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
   const contractName = getFlag(args, 'name');
   const suiteName = getFlag(args, 'suite');
-  const networkFlag = getFlag(args, 'network');
+  const network = parseNetworkFlag(getFlag(args, 'network'));
   const force = hasFlag(args, 'force');
+  const interactive = !jsonMode && isInteractive();
 
-  // Strategy: --strategy <cli|ui|browser>; in interactive mode, prompt when
-  // unset; in --json/MCP, default to cli (preserves prior behavior + keeps
-  // the call non-blocking).
-  const strategyFlag = (getFlag(args, 'strategy') ?? '').toLowerCase();
-  let strategy: CreateStrategy;
-  if (strategyFlag === 'cli' || strategyFlag === 'browser') {
-    strategy = strategyFlag;
-  } else if (strategyFlag === 'ui') {
-    strategy = 'browser';
-  } else if (strategyFlag === '') {
-    strategy = jsonMode || !isInteractive() ? 'cli' : await promptStrategy();
-  } else {
-    throw new UsageError(`Unknown strategy "${strategyFlag}". Use "cli" or "ui".`);
-  }
+  // Strategy: explicit flag → that. Interactive + unset → prompt. Otherwise default
+  // to cli (preserves prior behavior; keeps --json / MCP non-blocking).
+  const strategyFlag = parseStrategyFlag(getFlag(args, 'strategy'));
+  const strategy: CreateStrategy = strategyFlag ?? (interactive ? await promptStrategy() : 'cli');
 
-  // Browser options: collect from flags first, prompt for any missing pieces
-  // when interactive, error in --json mode if anything's still missing.
+  // Browser options: flag-driven in non-interactive mode (or hard fail), prompt
+  // for missing pieces in interactive mode.
   let browser: BrowserOptions | undefined;
   if (strategy === 'browser') {
-    const portFlag = getFlag(args, 'port');
-    const buildCmdFlag = getFlag(args, 'build-cmd');
-    const buildDirFlag = getFlag(args, 'build-dir');
-    const urlFlag = getFlag(args, 'url');
-
-    const prefilled: Partial<BrowserOptions> = {};
-    if (portFlag !== undefined) {
-      const p = parseInt(portFlag, 10);
-      if (!Number.isFinite(p) || p <= 0 || p > 65535) {
-        throw new UsageError(`Invalid --port "${portFlag}" — must be 1–65535.`);
-      }
-      prefilled.port = p;
-    }
-    if (buildCmdFlag !== undefined) prefilled.buildCmd = buildCmdFlag;
-    if (buildDirFlag !== undefined) prefilled.buildDir = buildDirFlag;
-    if (urlFlag !== undefined) prefilled.url = urlFlag;
-
-    const allProvided = prefilled.port !== undefined && prefilled.buildCmd !== undefined;
-    if (jsonMode || !isInteractive()) {
-      if (!allProvided) {
-        throw new UsageError(
-          `Browser strategy needs --port and --build-cmd (and optionally --build-dir, --url) when running non-interactively.`
-        );
-      }
-      // Cast is safe — allProvided proved port + buildCmd are set.
-      browser = {
-        port: prefilled.port!,
-        buildCmd: prefilled.buildCmd!,
-        buildDir: prefilled.buildDir,
-        url: prefilled.url,
-      };
-    } else {
-      browser = await promptBrowserOptions(prefilled);
-    }
+    const prefilled = collectBrowserFlags(args);
+    browser = interactive
+      ? await promptBrowserOptions(prefilled)
+      : browserOptionsFromFlags(prefilled);
   }
 
   const { info } = findContractInfo(dappDir, contractName);
@@ -134,7 +151,7 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
     suiteName,
     strategy,
     browser,
-    network: networkFlag === 'preprod' || networkFlag === 'preview' || networkFlag === 'undeployed' ? networkFlag : undefined,
+    network,
   });
 
   const result = writeScaffold(scaffold, { dappDir, force });
@@ -154,12 +171,11 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   for (const path of result.written) {
     process.stderr.write(`  ${green('✓')} ${path}\n`);
   }
+  const editTarget = strategy === 'browser'
+    ? { file: 'prompt.md', hint: `describe your dApp's user flow` }
+    : { file: 'actions.json', hint: 'replace placeholder args with realistic values' };
   process.stderr.write('\n' + dim('  Next:') + '\n');
-  if (strategy === 'browser') {
-    process.stderr.write(dim('    Edit ') + teal(`tests/suites/${scaffold.suiteName}/prompt.md`) + dim(' — describe your dApp\'s user flow') + '\n');
-  } else {
-    process.stderr.write(dim('    Edit ') + teal(`tests/suites/${scaffold.suiteName}/actions.json`) + dim(' — replace placeholder args with realistic values') + '\n');
-  }
+  process.stderr.write(dim('    Edit ') + teal(`tests/suites/${scaffold.suiteName}/${editTarget.file}`) + dim(` — ${editTarget.hint}`) + '\n');
   process.stderr.write(dim('    Run  ') + teal('mn test run') + '\n\n');
 }
 
