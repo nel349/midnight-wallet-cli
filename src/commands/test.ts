@@ -119,8 +119,11 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   const { findContractInfo } = await import('../lib/contract/inspect.ts');
   const { buildScaffold } = await import('../lib/test/create.ts');
   const { writeScaffold } = await import('../lib/test/create-writer.ts');
-  const { isInteractive, promptStrategy, promptBrowserOptions } = await import('../lib/test/create-prompt.ts');
+  const promptHelpers = await import('../lib/test/create-prompt.ts');
   const { writeJsonResult } = await import('../lib/json-output.ts');
+  const { isInteractive, promptStrategy, promptBrowserOptions, promptCircuit, promptScreen, promptGoal } = promptHelpers;
+  const ai = await import('../lib/test/ai-scaffold.ts');
+  const { discoverScreens } = await import('../lib/test/discover-screens.ts');
 
   const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
   const contractName = getFlag(args, 'name');
@@ -128,6 +131,9 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   const network = parseNetworkFlag(getFlag(args, 'network'));
   const force = hasFlag(args, 'force');
   const interactive = !jsonMode && isInteractive();
+  const goalFlag = getFlag(args, 'goal');
+  const screenFlag = getFlag(args, 'screen');
+  const noAi = hasFlag(args, 'no-ai');
 
   // Strategy: explicit flag → that. Interactive + unset → prompt. Otherwise default
   // to cli (preserves prior behavior; keeps --json / MCP non-blocking).
@@ -146,13 +152,15 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
 
   const { info } = findContractInfo(dappDir, contractName);
 
-  const scaffold = buildScaffold(info.circuits, {
-    contractName: info.name,
-    suiteName,
-    strategy,
-    browser,
-    network,
-  });
+  // AI mode is opt-in (default ON when interactive + claude available, or when
+  // --goal/--screen flags are present). --no-ai forces deterministic.
+  const aiAvailable = !noAi && ai.isClaudeAvailable();
+  const aiOptIn = !noAi && (goalFlag !== undefined || screenFlag !== undefined || (interactive && aiAvailable));
+
+  const scaffold = aiOptIn
+    ? await tryAiScaffold({ strategy, info, dappDir, browser, network, suiteName, goalFlag, screenFlag, interactive, ai, promptCircuit, promptScreen, promptGoal, discoverScreens })
+      ?? buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network })
+    : buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network });
 
   const result = writeScaffold(scaffold, { dappDir, force });
 
@@ -162,6 +170,7 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
       contractName: info.name,
       suiteName: scaffold.suiteName,
       strategy,
+      aiAssisted: aiOptIn && scaffold.suiteName !== `cli-default` && scaffold.suiteName !== `ui-default`,
       written: result.written,
     });
     return;
@@ -172,11 +181,89 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
     process.stderr.write(`  ${green('✓')} ${path}\n`);
   }
   const editTarget = strategy === 'browser'
-    ? { file: 'prompt.md', hint: `describe your dApp's user flow` }
-    : { file: 'actions.json', hint: 'replace placeholder args with realistic values' };
+    ? { file: 'prompt.md', hint: `review the AI-generated user flow` }
+    : { file: 'actions.json', hint: 'review the AI-generated actions and args' };
   process.stderr.write('\n' + dim('  Next:') + '\n');
   process.stderr.write(dim('    Edit ') + teal(`tests/suites/${scaffold.suiteName}/${editTarget.file}`) + dim(` — ${editTarget.hint}`) + '\n');
   process.stderr.write(dim('    Run  ') + teal('mn test run') + '\n\n');
+}
+
+/**
+ * Try the AI scaffolder; return null on any failure so the caller can fall
+ * back to the deterministic path. Failures we tolerate: no claude CLI,
+ * malformed AI response, hallucinated circuit, user typed "skip" at a prompt.
+ */
+type AiScaffoldDeps = {
+  strategy: CreateStrategy;
+  info: import('../lib/contract/inspect.ts').ContractInfo;
+  dappDir: string;
+  browser: BrowserOptions | undefined;
+  network: ReturnType<typeof parseNetworkFlag>;
+  suiteName: string | undefined;
+  goalFlag: string | undefined;
+  screenFlag: string | undefined;
+  interactive: boolean;
+  ai: typeof import('../lib/test/ai-scaffold.ts');
+  promptCircuit: typeof import('../lib/test/create-prompt.ts').promptCircuit;
+  promptScreen: typeof import('../lib/test/create-prompt.ts').promptScreen;
+  promptGoal: typeof import('../lib/test/create-prompt.ts').promptGoal;
+  discoverScreens: typeof import('../lib/test/discover-screens.ts').discoverScreens;
+};
+
+async function tryAiScaffold(deps: AiScaffoldDeps): Promise<import('../lib/test/create.ts').ScaffoldOutput | null> {
+  try {
+    if (!deps.ai.isClaudeAvailable()) {
+      return null;
+    }
+
+    const goal = deps.goalFlag ?? (deps.interactive ? await deps.promptGoal() : undefined);
+
+    if (deps.strategy === 'cli') {
+      return await aiCliScaffold(deps, goal);
+    }
+    return await aiUiScaffold(deps, goal);
+  } catch (err) {
+    process.stderr.write(`\n  ${dim('AI scaffold failed, falling back to deterministic:')} ${(err as Error).message}\n`);
+    return null;
+  }
+}
+
+async function aiCliScaffold(deps: AiScaffoldDeps, goal: string | undefined): Promise<import('../lib/test/create.ts').ScaffoldOutput | null> {
+  const targetCircuit = deps.interactive
+    ? await deps.promptCircuit(deps.info.circuits)
+    : deps.info.circuits.find((c) => !c.pure);
+  if (!targetCircuit) return null;
+
+  const sourcePath = deps.ai.findContractSourcePath(deps.info.managedDir);
+  return deps.ai.generateCliScaffoldWithAI({
+    contract: deps.info,
+    contractSourcePath: sourcePath,
+    targetCircuit,
+    goal,
+    network: deps.network,
+    suiteName: deps.suiteName,
+  });
+}
+
+async function aiUiScaffold(deps: AiScaffoldDeps, goal: string | undefined): Promise<import('../lib/test/create.ts').ScaffoldOutput | null> {
+  if (!deps.browser) return null; // browser opts couldn't be collected
+  const candidates = deps.discoverScreens(deps.dappDir);
+  const screen = deps.screenFlag
+    ? candidates.find((c) => c.name === deps.screenFlag || c.component === deps.screenFlag)
+    : (deps.interactive ? await deps.promptScreen(candidates) : candidates[0]);
+  if (!screen) return null;
+
+  return deps.ai.generateUiScaffoldWithAI({
+    contract: deps.info,
+    screen,
+    url: deps.browser.url ?? `http://localhost:${deps.browser.port}/`,
+    port: deps.browser.port,
+    buildCmd: deps.browser.buildCmd,
+    buildDir: deps.browser.buildDir,
+    goal,
+    network: deps.network,
+    suiteName: deps.suiteName,
+  });
 }
 
 // ── run ──
