@@ -121,10 +121,13 @@ function decideDappConfigPolicy(
   let existing: { name?: unknown };
   try {
     existing = JSON.parse(readFileSync(path, 'utf-8')) as { name?: unknown };
-  } catch {
+  } catch (err) {
     // Corrupt JSON — treat as conflicting; user should clean up by hand.
+    // Include the parse error so the user sees what's broken (e.g. line/col),
+    // not just "not valid JSON".
+    const cause = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `${path} exists but is not valid JSON. Fix or remove it (or pass --force to overwrite).`,
+      `${path} exists but is not valid JSON: ${cause}\nFix or remove it (or pass --force to overwrite).`,
     );
   }
 

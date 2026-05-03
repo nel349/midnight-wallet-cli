@@ -7,7 +7,7 @@
 // Code auth — no API key plumbing needed.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import type { CircuitInfo, ContractInfo } from '../contract/inspect.ts';
@@ -108,8 +108,10 @@ export const claudeSubprocessRunner: ClaudeRunner = async (prompt) => {
       maxBuffer: 4 * 1024 * 1024,
     });
   } catch (err) {
-    const e = err as NodeJS.ErrnoException;
-    if (e.code === 'ENOENT') {
+    // ENOENT from execFileSync is the "claude not on PATH" case; surface
+    // an actionable install hint instead of the raw error. Anything else
+    // re-throws so the caller's catch (in tryAiScaffold) can decide.
+    if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(
         'claude CLI not found on PATH. Install Claude Code (npm install -g @anthropic-ai/claude-code) ' +
         'or run mn test create without --goal / --screen for the deterministic scaffolder.',
@@ -152,7 +154,8 @@ function extractJsonFence<T>(raw: string): T {
   try {
     return JSON.parse(match[1]) as T;
   } catch (err) {
-    throw new Error(`JSON inside the fence failed to parse: ${(err as Error).message}`);
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`JSON inside the fence failed to parse: ${detail}`);
   }
 }
 
@@ -204,10 +207,15 @@ function normalizeAndValidateCliResponse(response: AiCliResponse, contract: Cont
 }
 
 function extractActionsArray(response: AiCliResponse): import('./types.ts').TestAction[] | null {
+  // Accept the natural top-level array Claude tends to emit:
+  //   { actions: [ {...}, {...} ] }
   if (Array.isArray(response.actions)) return response.actions;
-  if (response.actions && Array.isArray((response.actions as TestActions).actions)) {
-    return (response.actions as TestActions).actions;
-  }
+
+  // And the canonical wrapped form the type system expects:
+  //   { actions: { actions: [ {...}, {...} ] } }
+  const wrapped = response.actions as TestActions | undefined;
+  if (wrapped && Array.isArray(wrapped.actions)) return wrapped.actions;
+
   return null;
 }
 
@@ -367,10 +375,21 @@ export async function generateUiScaffoldWithAI(
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+/**
+ * Read a numeric `port` field out of an assertion's params, regardless of
+ * whether the assertion came from us or the model. Both ai-scaffold's
+ * baseline-injection paths previously inlined this same cast — extracted
+ * to one place so the assertion-shape assumption lives in a single spot.
+ */
+function getAssertionPort(assertion: import('./types.ts').AssertionCheck): number | undefined {
+  const params = assertion.params as { port?: number } | undefined;
+  return typeof params?.port === 'number' ? params.port : undefined;
+}
+
 /** Add port-listening if the model omitted it; idempotent if already there. */
 function ensurePortListening(assertions: TestAssertions, port: number): TestAssertions {
   const hasPortListening = assertions.post.some(
-    (a) => a.type === 'port-listening' && (a.params as { port?: number } | undefined)?.port === port,
+    (a) => a.type === 'port-listening' && getAssertionPort(a) === port,
   );
   if (hasPortListening) return assertions;
   return {
@@ -393,7 +412,7 @@ function ensureBrowserBaseline(assertions: TestAssertions, port: number): TestAs
     ];
   }
   const hasPortListening = post.some(
-    (a) => a.type === 'port-listening' && (a.params as { port?: number } | undefined)?.port === port,
+    (a) => a.type === 'port-listening' && getAssertionPort(a) === port,
   );
   if (!hasPortListening) {
     post = [
@@ -450,8 +469,7 @@ export function findContractSourcePath(managedDir: string): string | undefined {
 
   let entries: string[];
   try {
-    const fs = require('node:fs') as typeof import('node:fs');
-    entries = fs.readdirSync(srcDir);
+    entries = readdirSync(srcDir);
   } catch {
     return undefined;
   }

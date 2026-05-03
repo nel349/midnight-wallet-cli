@@ -311,11 +311,11 @@ describe('writeScaffold', () => {
       .toThrow(/exists with name "someotherproject" but this scaffold targets "demo"/);
   });
 
-  it('rejects an existing dapp.test.json that is not valid JSON', () => {
+  it('rejects an existing dapp.test.json that is not valid JSON, including the parse cause', () => {
     const dir = freshDir('corrupt');
     writeFileSync(join(dir, 'dapp.test.json'), 'this is not json');
     expect(() => writeScaffold(basicScaffold(), { dappDir: dir }))
-      .toThrow(/not valid JSON/);
+      .toThrow(/not valid JSON:.*Unexpected/s);
   });
 
   it('refuses to overwrite an existing suite dir without --force, suggests --suite', () => {
