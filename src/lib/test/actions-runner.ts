@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import type { TestAction, DappTestConfig } from './types.ts';
 import type { NetworkConfig } from '../network.ts';
 import { runDeploy, runCall, runState, type StateResult } from '../contract/runner.ts';
-import { findContractInfo } from '../contract/inspect.ts';
+import { findContractInfo, type ContractInfo } from '../contract/inspect.ts';
+import { analyzeWitnessDependencies } from './circuit-witness-deps.ts';
+import { findContractSourcePath } from './ai-scaffold.ts';
 
 export interface ActionResult {
   id: string;
@@ -49,6 +51,15 @@ export async function runActions(options: ActionsRunnerOptions): Promise<ActionR
 
   const { info } = findContractInfo(dappDir);
 
+  // Pre-flight: build the witness-dependency map once so each contract-call
+  // action can fail fast with a clear message if its target circuit reads
+  // private state that's only populated by the dApp UI. Without this, the
+  // SDK crashes ~30s in with a deep WASM "Cannot read properties of
+  // undefined" trace that doesn't name the actual problem (witness +
+  // private state). Source-dependent: when the .compact source isn't
+  // findable we skip the analysis and let the SDK error speak for itself.
+  const witnessDeps = computeWitnessDeps(info);
+
   for (const action of actions) {
     onActionStart?.(action);
     const start = Date.now();
@@ -61,6 +72,7 @@ export async function runActions(options: ActionsRunnerOptions): Promise<ActionR
         contractName: info.name,
         servePort,
         contractAddress,
+        witnessDeps,
         onMessage,
       });
 
@@ -102,6 +114,9 @@ interface ExecutionContext {
   contractName: string;
   servePort: number;
   contractAddress?: string;
+  /** Map of circuit → witnesses it transitively calls. Empty when the
+   *  contract source wasn't findable; pre-flight is then a no-op. */
+  witnessDeps: Map<string, string[]>;
   onMessage?: (msg: string) => void;
 }
 
@@ -158,6 +173,18 @@ async function executeCall(action: TestAction, ctx: ExecutionContext): Promise<A
   }
   if (!action.circuit) {
     throw new Error(`Action "${action.id}": missing circuit name.`);
+  }
+
+  // Pre-flight: bail before calling the SDK if the target circuit reads
+  // private state (witness call). The CLI can't populate that state, so
+  // the SDK would crash with a cryptic "Cannot read properties of
+  // undefined" trace. Throw a clear, named message instead.
+  const usedWitnesses = ctx.witnessDeps.get(action.circuit);
+  if (usedWitnesses && usedWitnesses.length > 0) {
+    throw new Error(
+      `Circuit "${action.circuit}" reads private state via witness ${usedWitnesses.join(', ')}. ` +
+      `That state is populated by the dApp UI; CLI tests can't provide it.`,
+    );
   }
 
   // Snapshot state before call (for diff)
@@ -313,6 +340,23 @@ async function executeWalletCmd(action: TestAction, _ctx: ExecutionContext): Pro
     duration: 0,
     message: `wallet-cmd: ${action.cmd ?? 'no command'} (not yet implemented)`,
   };
+}
+
+// ── Witness dependency pre-flight ──
+
+/**
+ * Build the witness-dependency map for the contract under test. Returns
+ * an empty map (analysis silently skipped) when the .compact source isn't
+ * findable — pre-flight stays opt-in so we never break existing suites
+ * just because the source layout doesn't match our heuristics.
+ */
+function computeWitnessDeps(info: ContractInfo): Map<string, string[]> {
+  if (info.witnesses.length === 0) return new Map();
+  const sourcePath = findContractSourcePath(info.managedDir);
+  if (!sourcePath || !existsSync(sourcePath)) return new Map();
+  const source = readFileSync(sourcePath, 'utf-8');
+  const witnessNames = info.witnesses.map((w) => w.name);
+  return analyzeWitnessDependencies(source, witnessNames).byCircuit;
 }
 
 // ── State diff utility ──

@@ -16,6 +16,7 @@ import type { ScaffoldOutput } from './create.ts';
 import { buildCliPrompt, buildUiPrompt, RESPONSE_FENCE, renderContractSummary } from './ai-prompts.ts';
 import type { ScreenCandidate } from './discover-screens.ts';
 import { placeholderArgsFor } from './create.ts';
+import { analyzeWitnessDependencies } from './circuit-witness-deps.ts';
 
 // ── Public types ───────────────────────────────────────────────────
 
@@ -348,6 +349,16 @@ export async function generateCliScaffoldWithAI(
     ? readFileSync(inputs.contractSourcePath, 'utf-8')
     : undefined;
 
+  // Map of circuit → witnesses it transitively calls. Used twice: (1) tell
+  // Claude which circuits to avoid as setup steps, (2) report excluded
+  // circuits to the user so the "missing" coverage isn't silent. Only
+  // computable when we have the source — without it we silently skip the
+  // analysis (and the scaffold may still succeed on simple contracts).
+  const witnessNames = inputs.contract.witnesses.map((w) => w.name);
+  const witnessDeps = contractSource
+    ? analyzeWitnessDependencies(contractSource, witnessNames).byCircuit
+    : new Map<string, string[]>();
+
   // Pre-compute a placeholder args object for the target circuit. Passing
   // it to the model as a "starting shape" prevents Claude from dropping
   // required fields — the most common AI quality failure (resulted in
@@ -367,6 +378,7 @@ export async function generateCliScaffoldWithAI(
     contractSource,
     targetCircuit: inputs.targetCircuit,
     startingArgs,
+    witnessDependentCircuits: witnessDeps,
     goal: inputs.goal,
   });
 
@@ -401,6 +413,19 @@ export async function generateCliScaffoldWithAI(
   // dropped it. Cheap to add once; idempotent if it's already there.
   const assertions = ensurePortListening(response.assertions, servePort);
 
+  // Surface every UI-dependent circuit the scaffold left out, EXCEPT the
+  // target itself: if the user explicitly asked for it, we passed it
+  // through to Claude and don't want to also flag it as "skipped". Lets
+  // the caller print "Skipped (UI-only): X uses witness Y" so the user
+  // understands the coverage gap up front rather than discovering it 30s
+  // into a failed run.
+  const excludedCircuits = [...witnessDeps.entries()]
+    .filter(([name]) => name !== inputs.targetCircuit?.name)
+    .map(([name, witnesses]) => ({
+      name,
+      reason: `uses witness ${witnesses.join(', ')} (private state — UI-only)`,
+    }));
+
   return {
     dappConfig,
     suite,
@@ -408,6 +433,7 @@ export async function generateCliScaffoldWithAI(
     assertions,
     prompt: null,
     suiteName,
+    excludedCircuits: excludedCircuits.length > 0 ? excludedCircuits : undefined,
   };
 }
 
@@ -560,28 +586,45 @@ function goalSlug(goal: string | undefined): string | undefined {
 
 /**
  * Best-effort lookup of the contract's .compact source given its managed
- * directory. Walks up from `managed/<name>/` looking for `src/<name>.compact`
- * or `src/*.compact`. Returns undefined on miss; caller proceeds without
- * source context and just uses the contract summary.
+ * directory. Returns undefined on miss; callers proceed without source
+ * context (deterministic fallback for AI scaffolder, no-op pre-flight
+ * for the actions runner).
+ *
+ * Two real-world layouts we have to support:
+ *  - create-mn-app: `<dapp>/managed/<name>/` with source at
+ *    `<dapp>/src/<name>.compact`. Source dir = ../../src/.
+ *  - midnight-libraries / monorepo (e.g. zkloan): `<x>/managed/<name>/`
+ *    with source at `<x>/<name>.compact` (NO extra `src/` subdir).
+ *    Source dir = ../.
+ *
+ * We try each candidate dir in order, preferring a file matching the
+ * contract name, falling back to any `.compact` file in that dir.
  */
 export function findContractSourcePath(managedDir: string): string | undefined {
-  // managed/<name>/ → ../../src/<name>.compact is the create-mn-app convention
-  const srcDir = join(dirname(dirname(managedDir)), 'src');
-  if (!existsSync(srcDir)) return undefined;
-
-  // Try the conventionally-named one first, then any .compact file in src/.
   const contractName = managedDir.split('/').pop();
-  if (contractName) {
-    const conventional = join(srcDir, `${contractName}.compact`);
-    if (existsSync(conventional)) return conventional;
-  }
+  // Order matters: dirname-of-managed wins for layouts where source sits
+  // alongside `managed/`, then we fall back to a sibling `src/`.
+  const candidateDirs = [
+    dirname(managedDir),                  // <x>/<name>.compact (zkloan)
+    join(dirname(managedDir), 'src'),     // <x>/src/<name>.compact (rare)
+    dirname(dirname(managedDir)),         // <dapp>/<name>.compact
+    join(dirname(dirname(managedDir)), 'src'), // <dapp>/src/<name>.compact (create-mn-app)
+  ];
 
-  let entries: string[];
-  try {
-    entries = readdirSync(srcDir);
-  } catch {
-    return undefined;
+  for (const dir of candidateDirs) {
+    if (!existsSync(dir)) continue;
+    if (contractName) {
+      const conventional = join(dir, `${contractName}.compact`);
+      if (existsSync(conventional)) return conventional;
+    }
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    const compact = entries.find((e) => e.endsWith('.compact'));
+    if (compact) return join(dir, compact);
   }
-  const compact = entries.find((e) => e.endsWith('.compact'));
-  return compact ? join(srcDir, compact) : undefined;
+  return undefined;
 }

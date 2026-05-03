@@ -121,6 +121,14 @@ export interface ScaffoldOutput {
   /** Markdown instructions for Claude when strategy === 'browser'; null for cli. */
   prompt: string | null;
   suiteName: string;
+  /**
+   * Circuits the scaffold deliberately did NOT include because they're not
+   * runnable from a CLI test (they call witnesses that read private state
+   * the dApp UI populates). Caller surfaces this list to the user so the
+   * "missing" circuits aren't silent. Empty / undefined for the deterministic
+   * scaffolder, which doesn't currently do witness analysis.
+   */
+  excludedCircuits?: { name: string; reason: string }[];
 }
 
 const DEFAULT_NETWORK: NetworkName = 'undeployed';

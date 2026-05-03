@@ -8,7 +8,7 @@ import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { header, keyValue, divider } from '../ui/format.ts';
-import { bold, dim, green, red, teal } from '../ui/colors.ts';
+import { bold, dim, green, red, teal, yellow } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
 
 import { discoverDappConfig, discoverTestSuites, loadAssertions, loadActions, loadPrompt } from '../lib/test/discovery.ts';
@@ -195,6 +195,7 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
       strategy,
       aiAssisted: aiOptIn && scaffold.suiteName !== `cli-default` && scaffold.suiteName !== `ui-default`,
       written: result.written,
+      excludedCircuits: scaffold.excludedCircuits,
     });
     return;
   }
@@ -212,6 +213,19 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
         file: 'actions.json',
         hint: 'review args — placeholder values like 0 may violate contract assertions (e.g. "amount > 0").',
       };
+  // Surface circuits that were intentionally NOT covered so the user
+  // doesn't think they got a complete suite. These call witnesses that
+  // need private state populated by the dApp UI — running them from a CLI
+  // suite crashes with "Cannot read properties of undefined".
+  if (scaffold.excludedCircuits && scaffold.excludedCircuits.length > 0) {
+    process.stderr.write('\n' + dim('  Skipped (not CLI-testable):') + '\n');
+    for (const ex of scaffold.excludedCircuits) {
+      process.stderr.write(`    ${yellow('!')} ${ex.name} ${dim('— ' + ex.reason)}\n`);
+    }
+    process.stderr.write(dim('    These need the dApp UI to populate private state first.\n'));
+    process.stderr.write(dim('    Cover them with a browser-strategy suite (mn test create --strategy ui).\n'));
+  }
+
   process.stderr.write('\n' + dim('  Next:') + '\n');
   process.stderr.write(dim('    Edit  ') + teal(`tests/suites/${scaffold.suiteName}/${editTarget.file}`) + '\n');
   process.stderr.write(dim('          ') + dim(editTarget.hint) + '\n');
@@ -298,6 +312,29 @@ async function aiCliScaffold(deps: AiScaffoldDeps, goal: string | undefined): Pr
   if (!targetCircuit && !goal) return null;
 
   const sourcePath = deps.ai.findContractSourcePath(deps.info.managedDir);
+
+  // Pre-warn the user if they picked a circuit that won't run from a CLI
+  // test. Source-dependent — if we can't read the .compact source we just
+  // proceed and let runtime catch it (same behavior as before).
+  if (targetCircuit && sourcePath && deps.interactive) {
+    const { readFileSync } = await import('node:fs');
+    const { analyzeWitnessDependencies } = await import('../lib/test/circuit-witness-deps.ts');
+    const source = readFileSync(sourcePath, 'utf-8');
+    const witnessNames = deps.info.witnesses.map((w) => w.name);
+    const deps2 = analyzeWitnessDependencies(source, witnessNames).byCircuit;
+    const usedWitnesses = deps2.get(targetCircuit.name);
+    if (usedWitnesses && usedWitnesses.length > 0) {
+      process.stderr.write(
+        '\n  ' + yellow('!') +
+        ` ${targetCircuit.name} calls ${usedWitnesses.join(', ')} — a witness that reads private state.\n`,
+      );
+      process.stderr.write(
+        dim('    The CLI suite will deploy + run, but expect a "Cannot read properties of undefined" failure\n') +
+        dim('    unless the dApp UI populates that state first. Consider --strategy ui instead.\n'),
+      );
+    }
+  }
+
   return runWithSpinner(
     'Asking Claude to scaffold the test suite (30–60s)...',
     () => deps.ai.generateCliScaffoldWithAI({

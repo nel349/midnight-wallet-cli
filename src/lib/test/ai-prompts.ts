@@ -45,6 +45,14 @@ export interface CliPromptInputs {
    * targetCircuit), the model has to figure out arg names itself.
    */
   startingArgs?: Record<string, unknown>;
+  /**
+   * Map of circuit name → witnesses it (transitively) calls. Used to warn
+   * the model away from picking circuits whose witnesses aren't testable
+   * from a CLI environment (private state stays empty without the dApp UI
+   * to populate it). Empty / undefined when no witnesses exist or none
+   * are reachable.
+   */
+  witnessDependentCircuits?: Map<string, string[]>;
   /** One-line success criterion from the user, or undefined. */
   goal?: string;
 }
@@ -63,7 +71,29 @@ export interface CliPromptInputs {
  *   initial state") but doesn't want to pick a specific circuit.
  */
 export function buildCliPrompt(inputs: CliPromptInputs): string {
-  const { contractName, contractSummary, contractSource, targetCircuit, goal } = inputs;
+  const { contractName, contractSummary, contractSource, targetCircuit, goal, witnessDependentCircuits } = inputs;
+
+  // Witness-dependent circuits read from PRIVATE STATE that only the dApp
+  // UI populates. From a CLI test, that state is empty — the witness
+  // returns undefined and the SDK crashes with a type error. We tell
+  // Claude up-front so it doesn't pick one of these circuits when the
+  // user gave a goal instead of a specific target.
+  const witnessSection = witnessDependentCircuits && witnessDependentCircuits.size > 0
+    ? `\n## Circuits NOT testable from a CLI suite\n\n` +
+      `These circuits call witnesses that read from private state. In a\n` +
+      `CLI test the private state is empty (no UI to populate it), so\n` +
+      `they crash with "Cannot read properties of undefined". Do NOT\n` +
+      `include them as actions, even as setup steps:\n\n` +
+      [...witnessDependentCircuits.entries()]
+        .map(([circuit, witnesses]) => `  - ${circuit} (uses ${witnesses.join(', ')})`)
+        .join('\n') +
+      `\n${targetCircuit && witnessDependentCircuits.has(targetCircuit.name)
+        ? `\nThe user explicitly asked for "${targetCircuit.name}" — try anyway,\n`
+          + `but expect a runtime witness-undefined error and call that out\n`
+          + `in the description so the user knows the suite needs the UI to\n`
+          + `populate state first.\n`
+        : ''}`
+    : '';
 
   const targetSection = targetCircuit
     ? `\
@@ -113,7 +143,7 @@ deploys the contract, executes the actions in order, and asserts on the
 final ledger state.
 
 ${targetSection}
-
+${witnessSection}
 ${goalSection}
 
 ## Contract context

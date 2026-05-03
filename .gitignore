@@ -13,3 +13,5 @@ private/
 wallet-alice.json
 ~/.midnight/
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
+.midnight-expert/settings.local.json
