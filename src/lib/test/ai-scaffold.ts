@@ -6,7 +6,7 @@
 // we shell out to `claude --print` and reuse the user's existing Claude
 // Code auth — no API key plumbing needed.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -92,34 +92,84 @@ const BROWSER_PREP: PrepStepId[] = [...CLI_PREP, 'build-and-serve'];
 
 // ── Production claude runner ───────────────────────────────────────
 
+/** 5 minutes — model + tool roundtrips can be slow on longer prompts. */
+const CLAUDE_TIMEOUT_MS = 5 * 60 * 1_000;
+/** 4MB — Claude responses with code fences can be substantial. */
+const CLAUDE_MAX_BUFFER = 4 * 1024 * 1024;
+
 /**
- * Spawn `claude --print` and return its stdout. Throws if claude isn't
- * on PATH or if the process exits non-zero. Used as the default runner
- * in production; tests inject a stub instead.
+ * Spawn `claude --print` and return its stdout. Async (uses `spawn`, not
+ * `execFileSync`) so the event loop stays free during the 30–60s wait —
+ * lets a spinner around the call actually tick instead of freezing on
+ * frame 1.
+ *
+ * Throws if claude isn't on PATH, the process exits non-zero, the response
+ * exceeds CLAUDE_MAX_BUFFER, or the timeout fires.
  */
-export const claudeSubprocessRunner: ClaudeRunner = async (prompt) => {
-  try {
-    return execFileSync('claude', ['--print'], {
-      input: prompt,
-      encoding: 'utf-8',
-      // 5 minutes — model + tool roundtrips can be slow on the longer
-      // prompts. Surface a clear timeout instead of hanging the user's
-      // terminal silently.
-      timeout: 5 * 60 * 1_000,
-      maxBuffer: 4 * 1024 * 1024,
+export const claudeSubprocessRunner: ClaudeRunner = (prompt) => {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn('claude', ['--print'], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    let stdout = '';
+    let stderr = '';
+    let bytesRead = 0;
+    let bufferOverflowed = false;
+
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error(`claude --print timed out after ${CLAUDE_TIMEOUT_MS / 1000}s`));
+    }, CLAUDE_TIMEOUT_MS);
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      bytesRead += chunk.length;
+      if (bytesRead > CLAUDE_MAX_BUFFER) {
+        bufferOverflowed = true;
+        child.kill('SIGTERM');
+        return;
+      }
+      stdout += chunk.toString();
     });
-  } catch (err) {
-    // ENOENT from execFileSync is the "claude not on PATH" case; surface
-    // an actionable install hint instead of the raw error. Anything else
-    // re-throws so the caller's catch (in tryAiScaffold) can decide.
-    if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(
-        'claude CLI not found on PATH. Install Claude Code (npm install -g @anthropic-ai/claude-code) ' +
-        'or run mn test create without --goal / --screen for the deterministic scaffolder.',
-      );
-    }
-    throw err;
-  }
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      // ENOENT from spawn is the "claude not on PATH" case; surface an
+      // actionable install hint instead of the raw error.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        reject(new Error(
+          'claude CLI not found on PATH. Install Claude Code (npm install -g @anthropic-ai/claude-code) ' +
+          'or run mn test create without --goal / --screen for the deterministic scaffolder.',
+        ));
+        return;
+      }
+      reject(err);
+    });
+
+    child.on('exit', (code, signal) => {
+      clearTimeout(timer);
+      if (bufferOverflowed) {
+        reject(new Error(`claude --print response exceeded ${CLAUDE_MAX_BUFFER / 1024 / 1024}MB; aborted.`));
+        return;
+      }
+      if (signal === 'SIGTERM') {
+        // Already rejected by the timeout handler.
+        return;
+      }
+      if (code !== 0) {
+        const errText = stderr.trim().slice(0, 300) || `(no stderr; exit ${code})`;
+        reject(new Error(`claude --print exited with code ${code}: ${errText}`));
+        return;
+      }
+      resolve(stdout);
+    });
+
+    // Write the prompt to claude's stdin then close — claude --print reads
+    // until EOF.
+    child.stdin?.write(prompt);
+    child.stdin?.end();
+  });
 };
 
 /** Cheap pre-flight so callers can show a meaningful error before invoking. */
