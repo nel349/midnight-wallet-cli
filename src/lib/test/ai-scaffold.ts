@@ -55,7 +55,9 @@ export interface CliScaffoldInputs {
 
 export interface UiScaffoldInputs {
   contract: ContractInfo;
-  screen: ScreenCandidate;
+  /** Optional — when omitted, AI generates a generic Midnight dApp flow
+   *  grounded in the contract + goal instead of a screen-specific flow. */
+  screen?: ScreenCandidate;
   url: string;
   port: number;
   buildCmd: string;
@@ -266,7 +268,10 @@ export async function generateUiScaffoldWithAI(
   inputs: UiScaffoldInputs,
   runner: ClaudeRunner = claudeSubprocessRunner,
 ): Promise<ScaffoldOutput> {
-  const screenSource = readFileSync(inputs.screen.path, 'utf-8');
+  // When a screen was given, feed its source so the prompt cites real
+  // labels. When omitted, the prompt builder falls back to a
+  // contract-grounded generic flow keyed off the user's goal.
+  const screenSource = inputs.screen ? readFileSync(inputs.screen.path, 'utf-8') : undefined;
 
   const prompt = buildUiPrompt({
     contractName: inputs.contract.name,
@@ -275,7 +280,7 @@ export async function generateUiScaffoldWithAI(
       circuits: inputs.contract.circuits,
       witnesses: inputs.contract.witnesses,
     }),
-    screenComponent: inputs.screen.component,
+    screenComponent: inputs.screen?.component,
     screenSource,
     relatedSources: inputs.relatedSources,
     url: inputs.url,
@@ -286,7 +291,11 @@ export async function generateUiScaffoldWithAI(
   const response = extractJsonFence<AiUiResponse>(raw);
   validateUiResponse(response);
 
-  const suiteName = inputs.suiteName ?? `ui-${inputs.screen.name}`;
+  // Suite name auto-derives from the screen when present, from the goal
+  // when not. `goalSlug` keeps it filesystem-safe; falls back to `ui-ai`
+  // when neither is available (rare — would mean no screen and no goal).
+  const suiteName = inputs.suiteName
+    ?? (inputs.screen ? `ui-${inputs.screen.name}` : `ui-${goalSlug(inputs.goal) ?? 'ai'}`);
   const network = inputs.network ?? DEFAULT_NETWORK;
   const servePort = inputs.servePort ?? DEFAULT_SERVE_PORT;
   const url = inputs.url;
@@ -368,6 +377,22 @@ function ensureBrowserBaseline(assertions: TestAssertions, port: number): TestAs
     ];
   }
   return { ...assertions, post };
+}
+
+/**
+ * Convert a free-form goal string into a kebab-case slug suitable for a
+ * suite directory name. Returns undefined for empty / whitespace-only /
+ * meaningless input ("ok", ".") so the caller can fall back to a generic
+ * default rather than write something silly like `ui-`.
+ */
+function goalSlug(goal: string | undefined): string | undefined {
+  if (!goal) return undefined;
+  const slug = goal
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32);
+  return slug.length >= 2 ? slug : undefined;
 }
 
 /**

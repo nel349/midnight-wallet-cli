@@ -289,7 +289,12 @@ async function aiUiScaffold(deps: AiScaffoldDeps, goal: string | undefined): Pro
   const screen = deps.screenFlag
     ? candidates.find((c) => c.name === deps.screenFlag || c.component === deps.screenFlag)
     : (deps.interactive ? await deps.promptScreen(candidates) : candidates[0]);
-  if (!screen) return null;
+
+  // If the user skipped the screen pick AND didn't provide a goal, there's
+  // nothing for AI to ground in — fall back to deterministic. With a goal
+  // we can still ask Claude to generate a generic Midnight dApp flow keyed
+  // off the contract circuits + the goal text.
+  if (!screen && !goal) return null;
 
   return deps.ai.generateUiScaffoldWithAI({
     contract: deps.info,

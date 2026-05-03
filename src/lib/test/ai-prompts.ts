@@ -109,11 +109,14 @@ export interface UiPromptInputs {
   contractName: string;
   /** Same shape as CLI: name, ledger, circuits, witnesses. */
   contractSummary: string;
-  /** Display name of the screen the user picked (PascalCase component name). */
-  screenComponent: string;
+  /** Display name of the screen the user picked (PascalCase component name).
+   *  Optional — when omitted, the prompt asks Claude to generate a generic
+   *  Midnight dApp flow grounded in the contract + the goal. */
+  screenComponent?: string;
   /** Source of the screen's React component file. Used so the prompt
-   *  references real button labels / element text rather than guesses. */
-  screenSource: string;
+   *  references real button labels / element text rather than guesses.
+   *  Optional — see screenComponent. */
+  screenSource?: string;
   /** Optional sources of imported components from the same UI tree —
    *  helps Claude name nested elements (e.g. nested "Submit" buttons).
    *  Keep this small to control token cost. */
@@ -126,8 +129,17 @@ export interface UiPromptInputs {
 
 /**
  * Build the prompt that asks Claude to scaffold a focused browser test
- * suite for one screen. Output JSON shape: { prompt, assertions, description }.
+ * suite. Output JSON shape: { prompt, assertions, description }.
  * Note: no "actions" key — browser strategy uses prompt.md to drive the UI.
+ *
+ * Two modes depending on whether `screenComponent`/`screenSource` were
+ * given:
+ * - Screen-grounded: Claude reads the actual JSX so generated steps
+ *   reference real on-screen labels.
+ * - Goal-only: Claude generates a generic Midnight dApp flow grounded
+ *   in the contract circuits + the user's goal. Less precise, but
+ *   useful when the user knows what they want to test ("happy path")
+ *   without pointing at a specific component.
  */
 export function buildUiPrompt(inputs: UiPromptInputs): string {
   const { contractName, contractSummary, screenComponent, screenSource, relatedSources, url, goal } = inputs;
@@ -136,28 +148,56 @@ export function buildUiPrompt(inputs: UiPromptInputs): string {
     .map((r) => `\n--- ${r.path} ---\n${r.source}\n--- end ${r.path} ---`)
     .join('\n');
 
-  return `\
-You are scaffolding a browser test for one screen of the Midnight dApp
-\`${contractName}\`. The test runs via \`mn test run\` — Claude (you, in
-the test session) drives Chrome and follows a prompt.md file.
-
+  const screenSection = screenComponent && screenSource
+    ? `\
 ## Target screen
 
 Component: ${screenComponent}
 Served at: ${url}
-
-${goal ? `Success criterion (from the user):\n  > ${goal}\n` : 'No specific success criterion was given. Infer one from the screen source: what is the obvious "happy path" outcome a user would see on success?\n'}
-
-## Contract context (so you know what circuits the screen calls)
-
-${contractSummary}
 
 ## Screen source
 
 \`\`\`tsx
 ${screenSource}
 \`\`\`
-${related ? `\n## Imported components from the same UI\n${related}\n` : ''}
+${related ? `\n## Imported components from the same UI\n${related}\n` : ''}`
+    : `\
+## Target
+
+No specific screen was selected — generate a generic Midnight dApp
+flow grounded in the contract circuits + the user's goal below.
+The dApp is served at ${url}.
+
+Conventional patterns Midnight dApps follow that you can rely on:
+- A "Connect Wallet" button in the header.
+- After connect, a contract-address paste field labelled near
+  "Contract address" with a "Connect →" or "Link" action.
+- Per-circuit forms with a labelled "Submit" / "Send" / "Run" action
+  and progress feedback during ZK proof generation (30–90 s).
+- A history / state panel that updates after a successful tx.
+- Toast or inline error messages on failure.
+
+Use generic-but-specific selectors (\`getByRole('button', { name: /connect wallet/i })\`)
+in the prompt steps, since you don't have the actual JSX.`;
+
+  const goalSection = goal
+    ? `Success criterion (from the user):\n  > ${goal}\n`
+    : screenComponent
+      ? 'No specific success criterion was given. Infer one from the screen source: what is the obvious "happy path" outcome a user would see on success?\n'
+      : 'No specific success criterion was given. Infer one from the contract circuits: what is the obvious "happy path" outcome the dApp exists to support?\n';
+
+  return `\
+You are scaffolding a browser test for the Midnight dApp \`${contractName}\`.
+The test runs via \`mn test run\` — Claude (you, in the test session)
+drives Chrome and follows a prompt.md file.
+
+${screenSection}
+
+${goalSection}
+
+## Contract context (so you know what circuits the dApp calls)
+
+${contractSummary}
 
 ## What to produce
 
@@ -165,24 +205,28 @@ A JSON object with three keys:
 
   - prompt: the markdown body of prompt.md the test runner will hand to
             Claude in the actual test session. Numbered steps, terse.
-            CRITICAL: reference the EXACT button labels and field labels
-            that appear in the source above ("Save PIN", "Request loan →",
-            etc.). Don't invent labels.
+            ${screenSource
+              ? 'CRITICAL: reference the EXACT button labels and field labels that appear in the source above ("Save PIN", "Request loan →", etc.). Don\'t invent labels.'
+              : 'Use the conventional Midnight dApp patterns above. The test session\'s Claude will adapt to the dApp\'s actual labels.'}
             Steps should:
               1. open ${url} in Chrome
-              2. wait for any wallet/connection state the screen needs
-              3. perform the on-screen actions for THIS screen specifically
+              2. wait for any wallet/connection state the dApp needs
+              3. perform the on-screen actions for the goal
               4. verify the success criterion on screen
               5. report pass/fail per step + final on-screen text
             Keep it under 25 lines.
   - assertions: { "post": [ ... ] } — at minimum
                 { "id": "claude-exit-ok", "type": "process-exit-code",
-                  "params": { "code": 0 }, "expect": "pass" }
-                and
+                  "params": { "code": 0 }, "expect": "pass" },
                 { "id": "serve-port-listening", "type": "port-listening",
-                  "params": { "port": 9932 }, "expect": "pass" }.
-                Add others if the screen's success state can be checked
-                from the chain (e.g. ledger-field on a contract-state read).
+                  "params": { "port": 9932 }, "expect": "pass" },
+                and
+                { "id": "agent-no-failure", "type": "agent-report-no-failure",
+                  "params": {}, "expect": "pass" }
+                (this last one parses your final report — without it, you
+                writing "FAILED" still counts as a pass).
+                Add others if the success state can be checked from the
+                chain (e.g. ledger-field on a contract-state read).
   - description: one short sentence summarising what this suite verifies.
 
 ${COMMON_RULES}

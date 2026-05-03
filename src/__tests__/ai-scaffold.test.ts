@@ -271,4 +271,45 @@ describe('generateUiScaffoldWithAI', () => {
       ),
     ).rejects.toThrow(/non-empty `prompt`/);
   });
+
+  it('works without a screen — generic Midnight dApp flow keyed off goal', async () => {
+    let receivedPrompt = '';
+    const runner = async (p: string) => {
+      receivedPrompt = p;
+      return fenced({
+        description: 'happy path: connect, deploy, increment, verify',
+        prompt: '1. open URL\n2. click Connect Wallet\n3. ...',
+        assertions: { post: [] },
+      });
+    };
+
+    const out = await generateUiScaffoldWithAI(
+      {
+        contract: counterContract,
+        url: 'http://localhost:4173/',
+        port: 4173,
+        buildCmd: 'npm run dev',
+        goal: 'happy path',
+      },
+      runner,
+    );
+
+    // Suite name derives from the goal slug when no screen is given.
+    expect(out.suiteName).toBe('ui-happy-path');
+    // Prompt sent to Claude should mention the no-screen mode hints.
+    expect(receivedPrompt).toContain('No specific screen was selected');
+    expect(receivedPrompt).toContain('Conventional patterns Midnight dApps follow');
+    expect(receivedPrompt).toContain('happy path');
+  });
+
+  it('falls back to ui-ai when neither screen nor goal slug is usable', async () => {
+    const runner = async () => fenced({
+      description: 'd', prompt: 'open ' + 'http://l/', assertions: { post: [] },
+    });
+    const out = await generateUiScaffoldWithAI(
+      { contract: counterContract, url: 'http://l/', port: 4173, buildCmd: 'x' },
+      runner,
+    );
+    expect(out.suiteName).toBe('ui-ai');
+  });
 });
