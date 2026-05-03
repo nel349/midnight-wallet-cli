@@ -164,12 +164,13 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   const aiAvailable = !noAi && ai.isClaudeAvailable();
   const aiOptIn = !noAi && (goalFlag !== undefined || screenFlag !== undefined || (interactive && aiAvailable));
 
+  // tryAiScaffold runs interactive prompts (goal, circuit/screen) inline —
+  // spinner can't wrap the whole thing or it'd clobber the readline prompts.
+  // The spinner lives one level down, around just the claude subprocess
+  // call inside aiCliScaffold / aiUiScaffold.
   const scaffold = aiOptIn
-    ? await runWithSpinner(
-        'Asking Claude to scaffold the test suite (30–60s)...',
-        () => tryAiScaffold({ strategy, info, dappDir, browser, network, suiteName, goalFlag, screenFlag, interactive, ai, promptCircuit, promptScreen, promptGoal, promptSuiteName, discoverScreens }),
-        !jsonMode,
-      ) ?? buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network })
+    ? await tryAiScaffold({ strategy, info, dappDir, browser, network, suiteName, goalFlag, screenFlag, interactive, jsonMode, ai, promptCircuit, promptScreen, promptGoal, promptSuiteName, discoverScreens })
+      ?? buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network })
     : buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network });
 
   // Confirm/override the suite name AFTER the scaffold is built — by now we
@@ -233,6 +234,7 @@ type AiScaffoldDeps = {
   goalFlag: string | undefined;
   screenFlag: string | undefined;
   interactive: boolean;
+  jsonMode: boolean;
   ai: typeof import('../lib/test/ai-scaffold.ts');
   promptCircuit: typeof import('../lib/test/create-prompt.ts').promptCircuit;
   promptScreen: typeof import('../lib/test/create-prompt.ts').promptScreen;
@@ -285,23 +287,29 @@ async function runWithSpinner<T>(
 }
 
 async function aiCliScaffold(deps: AiScaffoldDeps, goal: string | undefined): Promise<import('../lib/test/create.ts').ScaffoldOutput | null> {
+  // Interactive: ask which circuit (with "skip" option). Non-interactive:
+  // pick the first impure circuit. Either way, undefined is allowed when a
+  // goal is given — Claude can still scaffold a goal-driven suite without
+  // the user pinning down a specific circuit.
   const targetCircuit = deps.interactive
     ? await deps.promptCircuit(deps.info.circuits)
     : deps.info.circuits.find((c) => !c.pure);
-  if (!targetCircuit) return null;
 
-  // Suite name is confirmed by handleCreate after the scaffold is built —
-  // this path passes through deps.suiteName when set (--suite flag) or lets
-  // the AI scaffolder auto-derive `cli-<circuit>`.
+  if (!targetCircuit && !goal) return null;
+
   const sourcePath = deps.ai.findContractSourcePath(deps.info.managedDir);
-  return deps.ai.generateCliScaffoldWithAI({
-    contract: deps.info,
-    contractSourcePath: sourcePath,
-    targetCircuit,
-    goal,
-    network: deps.network,
-    suiteName: deps.suiteName,
-  });
+  return runWithSpinner(
+    'Asking Claude to scaffold the test suite (30–60s)...',
+    () => deps.ai.generateCliScaffoldWithAI({
+      contract: deps.info,
+      contractSourcePath: sourcePath,
+      targetCircuit,
+      goal,
+      network: deps.network,
+      suiteName: deps.suiteName,
+    }),
+    deps.interactive && !deps.jsonMode,
+  );
 }
 
 async function aiUiScaffold(deps: AiScaffoldDeps, goal: string | undefined): Promise<import('../lib/test/create.ts').ScaffoldOutput | null> {
@@ -324,18 +332,22 @@ async function aiUiScaffold(deps: AiScaffoldDeps, goal: string | undefined): Pro
   // off the contract circuits + the goal text.
   if (!screen && !goal) return null;
 
-  return deps.ai.generateUiScaffoldWithAI({
-    contract: deps.info,
-    screen,
-    url: deps.browser.url ?? `http://localhost:${deps.browser.port}/`,
-    port: deps.browser.port,
-    buildCmd: deps.browser.buildCmd,
-    buildDir: deps.browser.buildDir,
-    browserMode: deps.browser.browserMode,
-    goal,
-    network: deps.network,
-    suiteName: deps.suiteName,
-  });
+  return runWithSpinner(
+    'Asking Claude to scaffold the test suite (30–60s)...',
+    () => deps.ai.generateUiScaffoldWithAI({
+      contract: deps.info,
+      screen,
+      url: deps.browser!.url ?? `http://localhost:${deps.browser!.port}/`,
+      port: deps.browser!.port,
+      buildCmd: deps.browser!.buildCmd,
+      buildDir: deps.browser!.buildDir,
+      browserMode: deps.browser!.browserMode,
+      goal,
+      network: deps.network,
+      suiteName: deps.suiteName,
+    }),
+    deps.interactive && !deps.jsonMode,
+  );
 }
 
 // ── run ──

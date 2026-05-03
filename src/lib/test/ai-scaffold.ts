@@ -46,7 +46,9 @@ export type ClaudeRunner = (prompt: string) => Promise<string>;
 export interface CliScaffoldInputs {
   contract: ContractInfo;
   contractSourcePath?: string;
-  targetCircuit: CircuitInfo;
+  /** Optional — when omitted, AI picks a representative circuit from the
+   *  contract that best matches the goal. */
+  targetCircuit?: CircuitInfo;
   goal?: string;
   network?: NetworkName;
   servePort?: number;
@@ -228,7 +230,13 @@ export async function generateCliScaffoldWithAI(
   const response = extractJsonFence<AiCliResponse>(raw);
   validateCliResponse(response, inputs.contract);
 
-  const suiteName = inputs.suiteName ?? `cli-${inputs.targetCircuit.name.toLowerCase().replace(/_/g, '-')}`;
+  // Suite name auto-derives from the circuit when present, from the goal
+  // when not. `goalSlug` keeps it filesystem-safe; falls back to `cli-ai`
+  // when neither is available.
+  const suiteName = inputs.suiteName
+    ?? (inputs.targetCircuit
+      ? `cli-${inputs.targetCircuit.name.toLowerCase().replace(/_/g, '-')}`
+      : `cli-${goalSlug(inputs.goal) ?? 'ai'}`);
   const network = inputs.network ?? DEFAULT_NETWORK;
   const servePort = inputs.servePort ?? DEFAULT_SERVE_PORT;
 

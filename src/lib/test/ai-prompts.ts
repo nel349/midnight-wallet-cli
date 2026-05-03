@@ -34,23 +34,56 @@ export interface CliPromptInputs {
   contractSummary: string;
   /** Full .compact source if available. May be omitted (e.g. precompiled deps); the model still uses contractSummary. */
   contractSource?: string;
-  /** The specific circuit the user wants to focus this suite on. */
-  targetCircuit: CircuitInfo;
+  /** The specific circuit to focus on. Optional — when omitted, Claude
+   *  picks a representative impure circuit from the contract that best
+   *  matches the goal. */
+  targetCircuit?: CircuitInfo;
   /** One-line success criterion from the user, or undefined. */
   goal?: string;
 }
 
 /**
- * Build the prompt that asks Claude to scaffold a focused CLI test suite
- * for one circuit. Output JSON shape matches our TestActions / TestAssertions
- * types: { actions: [...], assertions: { post: [...] } }.
+ * Build the prompt that asks Claude to scaffold a focused CLI test suite.
+ * Output JSON shape matches our TestActions / TestAssertions types:
+ * { actions: [...], assertions: { post: [...] } }.
+ *
+ * Two modes depending on whether `targetCircuit` was given:
+ * - Circuit-grounded: the suite focuses on the user's chosen circuit
+ *   plus whatever setup circuits it requires.
+ * - Goal-only: Claude picks a representative impure circuit (or chains
+ *   several) based on the goal text and the contract surface. Useful
+ *   when the user knows the intent ("happy path", "deploy and verify
+ *   initial state") but doesn't want to pick a specific circuit.
  */
 export function buildCliPrompt(inputs: CliPromptInputs): string {
   const { contractName, contractSummary, contractSource, targetCircuit, goal } = inputs;
-  const circuitName = targetCircuit.name;
-  const argSummary = targetCircuit.arguments.length === 0
-    ? '(takes no arguments)'
-    : targetCircuit.arguments.map((a) => `  - ${a.name}: ${a.type['type-name']}`).join('\n');
+
+  const targetSection = targetCircuit
+    ? `\
+## Target
+
+Focus this suite on ONE circuit:
+
+  Circuit: ${targetCircuit.name} (${targetCircuit.pure ? 'pure' : 'impure'})
+  Args:
+${targetCircuit.arguments.length === 0
+        ? '  (takes no arguments)'
+        : targetCircuit.arguments.map((a) => `  - ${a.name}: ${a.type['type-name']}`).join('\n')}
+
+For circuits that need prior state (e.g. registerProvider before
+requestLoan), include the setup actions explicitly.`
+    : `\
+## Target
+
+No specific circuit was selected — pick the impure circuit (or short
+chain of circuits) from the contract that best matches the goal below.
+Prefer the most representative "main path" circuit. If the goal
+implies setup (e.g. registerProvider before requestLoan), include the
+setup actions explicitly.`;
+
+  const goalSection = goal
+    ? `Success criterion (from the user):\n  > ${goal}\n`
+    : 'No specific success criterion was given. Pick a reasonable one and reflect it in the suite description.\n';
 
   return `\
 You are scaffolding a CLI test suite for the Midnight contract \`${contractName}\`.
@@ -58,15 +91,9 @@ Strategy is "cli" — no browser. The test will run via \`mn test run\`, which
 deploys the contract, executes the actions in order, and asserts on the
 final ledger state.
 
-## Target
+${targetSection}
 
-Focus this suite on ONE circuit:
-
-  Circuit: ${circuitName} (${targetCircuit.pure ? 'pure' : 'impure'})
-  Args:
-${argSummary}
-
-${goal ? `Success criterion (from the user):\n  > ${goal}\n` : 'No specific success criterion was given. Pick a reasonable one and reflect it in the suite description.\n'}
+${goalSection}
 
 ## Contract context
 
@@ -79,9 +106,8 @@ ${contractSource ? `\n--- contract source ---\n${contractSource}\n--- end source
 A JSON object with three keys:
 
   - actions: ordered list. Always start with { "id": "deploy", "type": "contract-deploy" }.
-             For circuits that need prior state (e.g. registerProvider before
-             requestLoan), include the setup actions explicitly. End with
-             a contract-state read so the assertion can run on the result.
+             End with a contract-state read so the assertion can run on
+             the result.
   - assertions: { "post": [ { id, type, params, expect } ] }. Use type
                 "port-listening" with params { "port": 9932 } as a baseline
                 and add others if they make sense.
