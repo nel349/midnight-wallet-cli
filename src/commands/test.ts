@@ -188,10 +188,17 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
     process.stderr.write(`  ${green('✓')} ${path}\n`);
   }
   const editTarget = strategy === 'browser'
-    ? { file: 'prompt.md', hint: `review the generated user flow` }
-    : { file: 'actions.json', hint: 'review the generated actions and args' };
+    ? {
+        file: 'prompt.md',
+        hint: 'verify the UI steps match your dApp — exact button labels, expected screens, success criteria. Claude follows these literally.',
+      }
+    : {
+        file: 'actions.json',
+        hint: 'review args — placeholder values like 0 may violate contract assertions (e.g. "amount > 0").',
+      };
   process.stderr.write('\n' + dim('  Next:') + '\n');
-  process.stderr.write(dim('    Edit  ') + teal(`tests/suites/${scaffold.suiteName}/${editTarget.file}`) + dim(` — ${editTarget.hint}`) + '\n');
+  process.stderr.write(dim('    Edit  ') + teal(`tests/suites/${scaffold.suiteName}/${editTarget.file}`) + '\n');
+  process.stderr.write(dim('          ') + dim(editTarget.hint) + '\n');
   process.stderr.write(dim('    Run   ') + teal(`mn test run --suite ${scaffold.suiteName}`) + '\n');
   process.stderr.write(dim('    List  ') + teal('mn test list') + dim('   (see every suite in this project)') + '\n\n');
 }
