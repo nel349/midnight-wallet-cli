@@ -26,7 +26,12 @@ import type { ScreenCandidate } from './discover-screens.ts';
  */
 export interface AiCliResponse {
   description: string;
-  actions: TestActions;
+  /**
+   * Accept both the canonical wrapped shape `{ actions: [...] }` and the
+   * flatter top-level array Claude tends to emit naturally. Normalized to
+   * the wrapped form before being placed in ScaffoldOutput.
+   */
+  actions: TestActions | import('./types.ts').TestAction[];
   assertions: TestAssertions;
 }
 
@@ -159,22 +164,34 @@ function extractJsonFence<T>(raw: string): T {
  * Hallucinated circuit names are the main failure mode; catching them here
  * means we can fall back to deterministic instead of writing a broken suite.
  */
-function validateCliResponse(response: AiCliResponse, contract: ContractInfo): void {
+/**
+ * Normalize the model's actions to the canonical wrapped shape and
+ * validate against the contract surface. The model often emits
+ * `actions: [...]` directly even when the prompt asks for the wrapped
+ * form — we accept both rather than reject a perfectly valid action
+ * list because of a JSON-shape preference.
+ */
+function normalizeAndValidateCliResponse(response: AiCliResponse, contract: ContractInfo): TestActions {
   if (!response || typeof response !== 'object') {
     throw new Error('AI response must be an object');
   }
   if (typeof response.description !== 'string' || !response.description) {
     throw new Error('AI response missing string `description`');
   }
-  if (!response.actions || !Array.isArray(response.actions.actions)) {
-    throw new Error('AI response missing `actions.actions` array');
-  }
   if (!response.assertions || !Array.isArray(response.assertions.post)) {
     throw new Error('AI response missing `assertions.post` array');
   }
 
+  const actions = extractActionsArray(response);
+  if (!actions) {
+    throw new Error(
+      'AI response missing actions — expected either `actions: [...]` (top-level array) ' +
+      'or `actions: { actions: [...] }` (wrapped). Got: ' + JSON.stringify(response.actions ?? null).slice(0, 200),
+    );
+  }
+
   const validCircuits = new Set(contract.circuits.map((c) => c.name));
-  for (const action of response.actions.actions) {
+  for (const action of actions) {
     if (action.type === 'contract-call' && action.circuit && !validCircuits.has(action.circuit)) {
       throw new Error(
         `AI response references unknown circuit "${action.circuit}". ` +
@@ -182,6 +199,16 @@ function validateCliResponse(response: AiCliResponse, contract: ContractInfo): v
       );
     }
   }
+
+  return { actions };
+}
+
+function extractActionsArray(response: AiCliResponse): import('./types.ts').TestAction[] | null {
+  if (Array.isArray(response.actions)) return response.actions;
+  if (response.actions && Array.isArray((response.actions as TestActions).actions)) {
+    return (response.actions as TestActions).actions;
+  }
+  return null;
 }
 
 function validateUiResponse(response: AiUiResponse): void {
@@ -228,7 +255,7 @@ export async function generateCliScaffoldWithAI(
 
   const raw = await runner(prompt);
   const response = extractJsonFence<AiCliResponse>(raw);
-  validateCliResponse(response, inputs.contract);
+  const normalizedActions = normalizeAndValidateCliResponse(response, inputs.contract);
 
   // Suite name auto-derives from the circuit when present, from the goal
   // when not. `goalSlug` keeps it filesystem-safe; falls back to `cli-ai`
@@ -260,7 +287,7 @@ export async function generateCliScaffoldWithAI(
   return {
     dappConfig,
     suite,
-    actions: response.actions,
+    actions: normalizedActions,
     assertions,
     prompt: null,
     suiteName,

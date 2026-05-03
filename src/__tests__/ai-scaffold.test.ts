@@ -199,6 +199,36 @@ describe('generateCliScaffoldWithAI', () => {
       expect.objectContaining({ type: 'port-listening', params: { port: 9932 } }),
     );
   });
+
+  it('accepts top-level `actions: [...]` (the shape Claude tends to emit naturally)', async () => {
+    // Same content as the wrapped form, but flatter — what Claude returns
+    // by default before reading the schema-locked prompt block.
+    const runner = async () => fenced({
+      description: 'flat shape',
+      actions: [
+        { id: 'deploy', type: 'contract-deploy' },
+        { id: 'check', type: 'contract-state', assert: { round: { '==': 0 } } },
+      ],
+      assertions: { post: [] },
+    });
+    const out = await generateCliScaffoldWithAI(
+      { contract: counterContract, targetCircuit: incrementCircuit },
+      runner,
+    );
+    expect(out.actions).not.toBeNull();
+    expect(out.actions?.actions).toHaveLength(2);
+    expect(out.actions?.actions[0]).toMatchObject({ id: 'deploy' });
+  });
+
+  it('still rejects when actions is missing entirely', async () => {
+    const runner = async () => fenced({
+      description: 'd',
+      assertions: { post: [] },
+    });
+    await expect(
+      generateCliScaffoldWithAI({ contract: counterContract, targetCircuit: incrementCircuit }, runner),
+    ).rejects.toThrow(/missing actions/);
+  });
 });
 
 describe('generateUiScaffoldWithAI', () => {

@@ -103,15 +103,30 @@ ${contractSource ? `\n--- contract source ---\n${contractSource}\n--- end source
 
 ## What to produce
 
-A JSON object with three keys:
+A JSON object with EXACTLY this shape (top-level keys: actions, assertions, description):
 
-  - actions: ordered list. Always start with { "id": "deploy", "type": "contract-deploy" }.
-             End with a contract-state read so the assertion can run on
-             the result.
-  - assertions: { "post": [ { id, type, params, expect } ] }. Use type
-                "port-listening" with params { "port": 9932 } as a baseline
-                and add others if they make sense.
-  - description: one short sentence summarising what this suite verifies.
+\`\`\`json
+{
+  "description": "one short sentence",
+  "actions": [
+    { "id": "deploy", "type": "contract-deploy" },
+    { "id": "<short-slug>", "type": "contract-call", "circuit": "<name>", "args": { ... } },
+    { "id": "<short-slug>", "type": "contract-state", "assert": { "<fieldOrMap>": { "<op>": <value> } } }
+  ],
+  "assertions": {
+    "post": [
+      { "id": "serve-port-listening", "type": "port-listening", "params": { "port": 9932 }, "expect": "pass" }
+    ]
+  }
+}
+\`\`\`
+
+Notes:
+- \`actions\` is a top-level ARRAY of action objects (not nested under another \`actions\` key).
+- Always start with \`{ "id": "deploy", "type": "contract-deploy" }\`.
+- End with a contract-state read so the final assertion runs on the result.
+- For circuits that need prior state (e.g. registerProvider before requestLoan),
+  include the setup actions explicitly between deploy and the target call.
 
 Action shape:
   { "id": "<short-slug>", "type": "contract-deploy" }
