@@ -188,11 +188,12 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
     process.stderr.write(`  ${green('✓')} ${path}\n`);
   }
   const editTarget = strategy === 'browser'
-    ? { file: 'prompt.md', hint: `review the AI-generated user flow` }
-    : { file: 'actions.json', hint: 'review the AI-generated actions and args' };
+    ? { file: 'prompt.md', hint: `review the generated user flow` }
+    : { file: 'actions.json', hint: 'review the generated actions and args' };
   process.stderr.write('\n' + dim('  Next:') + '\n');
-  process.stderr.write(dim('    Edit ') + teal(`tests/suites/${scaffold.suiteName}/${editTarget.file}`) + dim(` — ${editTarget.hint}`) + '\n');
-  process.stderr.write(dim('    Run  ') + teal('mn test run') + '\n\n');
+  process.stderr.write(dim('    Edit  ') + teal(`tests/suites/${scaffold.suiteName}/${editTarget.file}`) + dim(` — ${editTarget.hint}`) + '\n');
+  process.stderr.write(dim('    Run   ') + teal(`mn test run --suite ${scaffold.suiteName}`) + '\n');
+  process.stderr.write(dim('    List  ') + teal('mn test list') + dim('   (see every suite in this project)') + '\n\n');
 }
 
 /**
