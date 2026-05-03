@@ -2,11 +2,12 @@
 // project constraint — no inquirer). Skipped when stdin is not a TTY so
 // piped/JSON callers never hang waiting for input.
 
+import { existsSync, statSync } from 'node:fs';
 import * as readline from 'node:readline';
 import { teal, dim } from '../../ui/colors.ts';
 import type { CreateStrategy, BrowserOptions } from './create.ts';
 import type { CircuitInfo } from '../contract/inspect.ts';
-import type { ScreenCandidate } from './discover-screens.ts';
+import { discoverScreens, discoverScreensInDir, type ScreenCandidate } from './discover-screens.ts';
 
 export function isInteractive(): boolean {
   return process.stdin.isTTY === true;
@@ -113,17 +114,16 @@ export async function promptCircuit(circuits: CircuitInfo[]): Promise<CircuitInf
 
 /**
  * Pick a screen for a UI suite. If discovery found candidates, present a
- * numbered list; otherwise fall back to free-form path entry.
+ * numbered list. If empty, ask for a path — accepts either a single .tsx
+ * file OR a directory (in which case we re-run discovery against that
+ * directory and offer those candidates).
  *
  * Returns undefined when the user types "skip" — caller falls back to the
  * deterministic skeleton prompt.md.
  */
 export async function promptScreen(candidates: ScreenCandidate[]): Promise<ScreenCandidate | undefined> {
   if (candidates.length === 0) {
-    process.stderr.write(dim('\n  Could not auto-discover screens (no src/components, src/pages, or src/screens).\n'));
-    const path = await ask('Path to a screen .tsx file (or "skip")');
-    if (path.toLowerCase() === 'skip' || !path) return undefined;
-    return manualScreenFromPath(path);
+    return promptScreenByPath();
   }
 
   process.stderr.write('\n  ' + teal('Pick the screen this suite will test:') + '\n');
@@ -142,6 +142,54 @@ export async function promptScreen(candidates: ScreenCandidate[]): Promise<Scree
     const byName = candidates.find((s) => s.name === raw || s.component === raw);
     if (byName) return byName;
     process.stderr.write(dim(`  Pick a number 1–${candidates.length}, the screen name, or "skip".\n`));
+  }
+}
+
+/**
+ * Free-form path fallback when auto-discovery finds nothing. Accepts either
+ * a single .tsx file (returned as a single candidate) or a directory (in
+ * which case we re-discover inside it and re-prompt).
+ */
+async function promptScreenByPath(): Promise<ScreenCandidate | undefined> {
+  process.stderr.write(
+    dim('\n  Could not auto-discover screens (no src/components, src/pages, or src/screens under the build dir).\n'),
+  );
+
+  for (;;) {
+    const path = (await ask('Path to a .tsx file or a UI directory (or "skip")')).trim();
+    if (path.toLowerCase() === 'skip' || path === '') return undefined;
+
+    if (!existsSync(path)) {
+      process.stderr.write(dim(`  No such path: ${path}\n`));
+      continue;
+    }
+
+    let stat;
+    try {
+      stat = statSync(path);
+    } catch {
+      process.stderr.write(dim(`  Cannot stat: ${path}\n`));
+      continue;
+    }
+
+    if (stat.isDirectory()) {
+      // Walk the dir directly for .tsx candidates — caller pointed us at
+      // a UI directory (often `<workspace>/<name>-ui/src/components`), so
+      // we don't need to assume a project-root shape above it.
+      const found = discoverScreensInDir(path);
+      if (found.length === 0) {
+        process.stderr.write(dim(`  No PascalCase .tsx components in ${path}\n`));
+        continue;
+      }
+      return promptScreen(found);
+    }
+
+    if (!path.endsWith('.tsx')) {
+      process.stderr.write(dim(`  Not a .tsx file: ${path}\n`));
+      continue;
+    }
+
+    return manualScreenFromPath(path);
   }
 }
 

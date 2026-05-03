@@ -49,6 +49,22 @@ export function discoverScreens(uiRoot: string): ScreenCandidate[] {
   return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Walk a given directory directly (no `src/components` requirement) and
+ * return screen candidates. Used when the user hands us a path that is
+ * itself the components directory — common in monorepos where the UI
+ * lives in a workspace child like `<dappDir>/<name>-ui/src/components/`.
+ *
+ * `displayRoot` controls how the relative path on each candidate is
+ * rendered for display. Defaults to `dir` itself.
+ */
+export function discoverScreensInDir(dir: string, displayRoot: string = dir): ScreenCandidate[] {
+  if (!existsSync(dir)) return [];
+  const out = new Map<string, ScreenCandidate>();
+  walkForScreens(dir, displayRoot, out);
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function walkForScreens(dir: string, uiRoot: string, out: Map<string, ScreenCandidate>): void {
   let entries: string[];
   try {

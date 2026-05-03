@@ -288,19 +288,55 @@ describe('writeScaffold', () => {
     expect(existsSync(join(dir, 'tests', 'suites', 'smoke', 'suite.json'))).toBe(true);
   });
 
-  it('refuses to overwrite an existing file without --force', () => {
-    const dir = freshDir('existing');
-    writeFileSync(join(dir, 'dapp.test.json'), '{"existing":true}');
-    expect(() => writeScaffold(basicScaffold(), { dappDir: dir })).toThrow(/Refusing to overwrite/);
-    // The existing file is left untouched
-    expect(JSON.parse(readFileSync(join(dir, 'dapp.test.json'), 'utf-8'))).toEqual({ existing: true });
-    // No partial scaffold leaked into the suite dir
-    expect(existsSync(join(dir, 'tests', 'suites', 'cli-default'))).toBe(false);
+  it('preserves an existing dapp.test.json with the same contract name (additive — adding a new suite)', () => {
+    const dir = freshDir('additive');
+    const userConfig = { name: 'demo', network: 'preprod', prep: ['cache-clear', 'localnet-up'], buildCmd: 'custom' };
+    writeFileSync(join(dir, 'dapp.test.json'), JSON.stringify(userConfig));
+
+    const result = writeScaffold(basicScaffold(), { dappDir: dir });
+
+    // dapp.test.json untouched — user's customization preserved
+    expect(JSON.parse(readFileSync(join(dir, 'dapp.test.json'), 'utf-8'))).toEqual(userConfig);
+    expect(result.preserved).toContain(join(dir, 'dapp.test.json'));
+    expect(result.written).not.toContain(join(dir, 'dapp.test.json'));
+
+    // Suite files still written
+    expect(existsSync(join(dir, 'tests', 'suites', 'cli-default', 'suite.json'))).toBe(true);
   });
 
-  it('overwrites existing files when --force is set', () => {
-    const dir = freshDir('forced');
-    writeFileSync(join(dir, 'dapp.test.json'), '{"existing":true}');
+  it('rejects an existing dapp.test.json for a different contract', () => {
+    const dir = freshDir('different');
+    writeFileSync(join(dir, 'dapp.test.json'), JSON.stringify({ name: 'someotherproject', network: 'undeployed', prep: [] }));
+    expect(() => writeScaffold(basicScaffold(), { dappDir: dir }))
+      .toThrow(/exists with name "someotherproject" but this scaffold targets "demo"/);
+  });
+
+  it('rejects an existing dapp.test.json that is not valid JSON', () => {
+    const dir = freshDir('corrupt');
+    writeFileSync(join(dir, 'dapp.test.json'), 'this is not json');
+    expect(() => writeScaffold(basicScaffold(), { dappDir: dir }))
+      .toThrow(/not valid JSON/);
+  });
+
+  it('refuses to overwrite an existing suite dir without --force, suggests --suite', () => {
+    const dir = freshDir('suite-clash');
+    // First write succeeds and creates the suite dir
+    writeScaffold(basicScaffold(), { dappDir: dir });
+    // Second write to the same suite name fails with a pointed message.
+    // The `s` flag lets `.` match the newline between the two phrases.
+    expect(() => writeScaffold(basicScaffold(), { dappDir: dir }))
+      .toThrow(/already exists.*Pick a different suite name \(--suite/s);
+  });
+
+  it('overwrites suite dir when --force is set', () => {
+    const dir = freshDir('forced-suite');
+    writeScaffold(basicScaffold(), { dappDir: dir });
+    expect(() => writeScaffold(basicScaffold(), { dappDir: dir, force: true })).not.toThrow();
+  });
+
+  it('overwrites a different-named dapp.test.json when --force is set', () => {
+    const dir = freshDir('forced-dapp');
+    writeFileSync(join(dir, 'dapp.test.json'), JSON.stringify({ name: 'someotherproject' }));
     writeScaffold(basicScaffold(), { dappDir: dir, force: true });
     expect(JSON.parse(readFileSync(join(dir, 'dapp.test.json'), 'utf-8')).name).toBe('demo');
   });

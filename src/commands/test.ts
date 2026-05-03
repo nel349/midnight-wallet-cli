@@ -247,7 +247,14 @@ async function aiCliScaffold(deps: AiScaffoldDeps, goal: string | undefined): Pr
 
 async function aiUiScaffold(deps: AiScaffoldDeps, goal: string | undefined): Promise<import('../lib/test/create.ts').ScaffoldOutput | null> {
   if (!deps.browser) return null; // browser opts couldn't be collected
-  const candidates = deps.discoverScreens(deps.dappDir);
+  // The UI lives under buildDir (workspace pattern: `<dappDir>/<name>-ui/`).
+  // If buildDir is empty/relative, resolve against dappDir; otherwise use it
+  // directly. Falls back to dappDir for projects where buildDir is absent.
+  const { join } = await import('node:path');
+  const uiRoot = deps.browser.buildDir
+    ? join(deps.dappDir, deps.browser.buildDir)
+    : deps.dappDir;
+  const candidates = deps.discoverScreens(uiRoot);
   const screen = deps.screenFlag
     ? candidates.find((c) => c.name === deps.screenFlag || c.component === deps.screenFlag)
     : (deps.interactive ? await deps.promptScreen(candidates) : candidates[0]);
