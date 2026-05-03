@@ -242,6 +242,26 @@ export async function promptGoal(): Promise<string | undefined> {
   return raw === '' ? undefined : raw;
 }
 
+/**
+ * Prompt for the suite directory name. Auto-derived from the selected
+ * circuit/screen by the caller; this prompt lets the user override before
+ * anything is written. Re-prompts on invalid input rather than silently
+ * sanitizing — a typo in the suite name should surface immediately so the
+ * user catches it (e.g. spaces, slashes, capital letters).
+ */
+export async function promptSuiteName(defaultName: string): Promise<string> {
+  for (;;) {
+    const raw = (await ask('Suite name', defaultName)).trim();
+    if (isValidSuiteName(raw)) return raw;
+    process.stderr.write(yellow(`  Suite names must be kebab-case (a–z, 0–9, dashes, underscores). Try again.\n`));
+  }
+}
+
+/** Kebab-case enforcement — same charset the test discovery uses for filesystem names. */
+function isValidSuiteName(name: string): boolean {
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(name);
+}
+
 function manualScreenFromPath(path: string): ScreenCandidate {
   const fileName = path.split('/').pop() ?? path;
   const component = fileName.replace(/\.tsx$/, '');

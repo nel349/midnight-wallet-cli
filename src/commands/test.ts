@@ -128,7 +128,7 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   const { writeScaffold } = await import('../lib/test/create-writer.ts');
   const promptHelpers = await import('../lib/test/create-prompt.ts');
   const { writeJsonResult } = await import('../lib/json-output.ts');
-  const { isInteractive, promptStrategy, promptBrowserOptions, promptCircuit, promptScreen, promptGoal } = promptHelpers;
+  const { isInteractive, promptStrategy, promptBrowserOptions, promptCircuit, promptScreen, promptGoal, promptSuiteName } = promptHelpers;
   const ai = await import('../lib/test/ai-scaffold.ts');
   const { discoverScreens } = await import('../lib/test/discover-screens.ts');
 
@@ -164,10 +164,19 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   const aiAvailable = !noAi && ai.isClaudeAvailable();
   const aiOptIn = !noAi && (goalFlag !== undefined || screenFlag !== undefined || (interactive && aiAvailable));
 
+  // Suite name resolution. AI mode prompts later (after circuit/screen is
+  // picked, so the default reflects the user's choice). Deterministic mode
+  // has no such later moment — prompt now with the generic default.
+  // --suite flag short-circuits both paths.
+  let resolvedSuiteName = suiteName;
+  if (!resolvedSuiteName && interactive && !aiOptIn) {
+    resolvedSuiteName = await promptSuiteName(strategy === 'browser' ? 'ui-default' : 'cli-default');
+  }
+
   const scaffold = aiOptIn
-    ? await tryAiScaffold({ strategy, info, dappDir, browser, network, suiteName, goalFlag, screenFlag, interactive, ai, promptCircuit, promptScreen, promptGoal, discoverScreens })
-      ?? buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network })
-    : buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network });
+    ? await tryAiScaffold({ strategy, info, dappDir, browser, network, suiteName: resolvedSuiteName, goalFlag, screenFlag, interactive, ai, promptCircuit, promptScreen, promptGoal, promptSuiteName, discoverScreens })
+      ?? buildScaffold(info.circuits, { contractName: info.name, suiteName: resolvedSuiteName, strategy, browser, network })
+    : buildScaffold(info.circuits, { contractName: info.name, suiteName: resolvedSuiteName, strategy, browser, network });
 
   const result = writeScaffold(scaffold, { dappDir, force });
 
@@ -222,6 +231,7 @@ type AiScaffoldDeps = {
   promptCircuit: typeof import('../lib/test/create-prompt.ts').promptCircuit;
   promptScreen: typeof import('../lib/test/create-prompt.ts').promptScreen;
   promptGoal: typeof import('../lib/test/create-prompt.ts').promptGoal;
+  promptSuiteName: typeof import('../lib/test/create-prompt.ts').promptSuiteName;
   discoverScreens: typeof import('../lib/test/discover-screens.ts').discoverScreens;
 };
 
@@ -249,6 +259,11 @@ async function aiCliScaffold(deps: AiScaffoldDeps, goal: string | undefined): Pr
     : deps.info.circuits.find((c) => !c.pure);
   if (!targetCircuit) return null;
 
+  // Auto-derive name first, then let the user override interactively.
+  // --suite flag short-circuits the prompt entirely.
+  const defaultName = `cli-${targetCircuit.name.toLowerCase().replace(/_/g, '-')}`;
+  const suiteName = await resolveSuiteName(deps, defaultName);
+
   const sourcePath = deps.ai.findContractSourcePath(deps.info.managedDir);
   return deps.ai.generateCliScaffoldWithAI({
     contract: deps.info,
@@ -256,7 +271,7 @@ async function aiCliScaffold(deps: AiScaffoldDeps, goal: string | undefined): Pr
     targetCircuit,
     goal,
     network: deps.network,
-    suiteName: deps.suiteName,
+    suiteName,
   });
 }
 
@@ -275,6 +290,9 @@ async function aiUiScaffold(deps: AiScaffoldDeps, goal: string | undefined): Pro
     : (deps.interactive ? await deps.promptScreen(candidates) : candidates[0]);
   if (!screen) return null;
 
+  const defaultName = `ui-${screen.name}`;
+  const suiteName = await resolveSuiteName(deps, defaultName);
+
   return deps.ai.generateUiScaffoldWithAI({
     contract: deps.info,
     screen,
@@ -285,8 +303,19 @@ async function aiUiScaffold(deps: AiScaffoldDeps, goal: string | undefined): Pro
     browserMode: deps.browser.browserMode,
     goal,
     network: deps.network,
-    suiteName: deps.suiteName,
+    suiteName,
   });
+}
+
+/**
+ * Pick the suite name. Priority: --suite flag > interactive prompt > auto.
+ * Keeps non-interactive callers fully deterministic, lets interactive
+ * users see and override the auto-derived default before anything writes.
+ */
+async function resolveSuiteName(deps: AiScaffoldDeps, defaultName: string): Promise<string> {
+  if (deps.suiteName) return deps.suiteName;
+  if (deps.interactive) return deps.promptSuiteName(defaultName);
+  return defaultName;
 }
 
 // ── run ──
