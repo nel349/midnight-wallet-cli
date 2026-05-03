@@ -165,8 +165,11 @@ async function handleCreate(args: ParsedArgs, jsonMode: boolean): Promise<void> 
   const aiOptIn = !noAi && (goalFlag !== undefined || screenFlag !== undefined || (interactive && aiAvailable));
 
   const scaffold = aiOptIn
-    ? await tryAiScaffold({ strategy, info, dappDir, browser, network, suiteName, goalFlag, screenFlag, interactive, ai, promptCircuit, promptScreen, promptGoal, promptSuiteName, discoverScreens })
-      ?? buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network })
+    ? await runWithSpinner(
+        'Asking Claude to scaffold the test suite (30–60s)...',
+        () => tryAiScaffold({ strategy, info, dappDir, browser, network, suiteName, goalFlag, screenFlag, interactive, ai, promptCircuit, promptScreen, promptGoal, promptSuiteName, discoverScreens }),
+        !jsonMode,
+      ) ?? buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network })
     : buildScaffold(info.circuits, { contractName: info.name, suiteName, strategy, browser, network });
 
   // Confirm/override the suite name AFTER the scaffold is built — by now we
@@ -253,6 +256,31 @@ async function tryAiScaffold(deps: AiScaffoldDeps): Promise<import('../lib/test/
   } catch (err) {
     process.stderr.write(`\n  ${dim('AI scaffold failed, falling back to deterministic:')} ${(err as Error).message}\n`);
     return null;
+  }
+}
+
+/**
+ * Run an async task while showing a spinner with a status line. Useful for
+ * the AI scaffolder call which can take 30–60s of silence otherwise. Spinner
+ * suppressed in non-interactive mode so JSON / piped callers stay clean.
+ *
+ * The spinner is always stopped — on resolve, reject, or null result — so a
+ * thrown error won't leave a stale ⠋ glyph in the terminal.
+ */
+async function runWithSpinner<T>(
+  message: string,
+  task: () => Promise<T>,
+  show: boolean,
+): Promise<T> {
+  if (!show) return task();
+  const spinner = startSpinner(message);
+  try {
+    const result = await task();
+    spinner.stop();
+    return result;
+  } catch (err) {
+    spinner.fail('AI scaffold failed');
+    throw err;
   }
 }
 
