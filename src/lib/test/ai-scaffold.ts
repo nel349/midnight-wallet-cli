@@ -11,10 +11,11 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import type { CircuitInfo, ContractInfo } from '../contract/inspect.ts';
-import type { BrowserMode, DappTestConfig, NetworkName, TestActions, TestAssertions, TestSuite, PrepStepId } from './types.ts';
+import type { BrowserMode, DappTestConfig, NetworkName, TestAction, TestActions, TestAssertions, TestSuite, PrepStepId } from './types.ts';
 import type { ScaffoldOutput } from './create.ts';
 import { buildCliPrompt, buildUiPrompt, RESPONSE_FENCE, renderContractSummary } from './ai-prompts.ts';
 import type { ScreenCandidate } from './discover-screens.ts';
+import { placeholderArgsFor } from './create.ts';
 
 // ── Public types ───────────────────────────────────────────────────
 
@@ -193,17 +194,65 @@ function normalizeAndValidateCliResponse(response: AiCliResponse, contract: Cont
     );
   }
 
-  const validCircuits = new Set(contract.circuits.map((c) => c.name));
+  const circuitsByName = new Map(contract.circuits.map((c) => [c.name, c]));
   for (const action of actions) {
-    if (action.type === 'contract-call' && action.circuit && !validCircuits.has(action.circuit)) {
+    if (action.type !== 'contract-call' || !action.circuit) continue;
+
+    const circuit = circuitsByName.get(action.circuit);
+    if (!circuit) {
       throw new Error(
         `AI response references unknown circuit "${action.circuit}". ` +
-        `Valid circuits: ${[...validCircuits].join(', ') || '(none)'}`,
+        `Valid circuits: ${[...circuitsByName.keys()].join(', ') || '(none)'}`,
       );
     }
+
+    validateActionArgs(action, circuit);
   }
 
   return { actions };
+}
+
+/**
+ * Verify a contract-call action's `args` object structurally matches the
+ * circuit's declared arguments. Catches the most common AI failure mode:
+ * the model emits an args object that's missing required keys or has
+ * undefined / null values where the SDK expects something usable —
+ * leading to deep WASM crashes like `Cannot read properties of undefined`
+ * 30 seconds into the test instead of a clear scaffold-time error.
+ *
+ * Coverage:
+ *  - Every declared arg name must appear in args.
+ *  - The value at each name must not be undefined or null (Option types
+ *    permit null but we don't have Option markers in contract-info today;
+ *    accept null and let the runtime reject if wrong).
+ *  - For Struct/Alias args, the value must be a plain object (not a
+ *    primitive). We can't validate inner Struct fields without parsing
+ *    .compact source, but catching "providerPk: 1" or "providerPk: null"
+ *    covers most failures.
+ */
+function validateActionArgs(action: TestAction, circuit: CircuitInfo): void {
+  if (circuit.arguments.length === 0) return; // no args to validate
+  const args = (action.args ?? {}) as Record<string, unknown>;
+
+  for (const declared of circuit.arguments) {
+    const value = args[declared.name];
+
+    if (value === undefined) {
+      throw new Error(
+        `Action "${action.id}" (circuit ${circuit.name}) is missing required arg "${declared.name}" ` +
+        `of type ${declared.type['type-name']}. Declared args: ${circuit.arguments.map((a) => `${a.name}: ${a.type['type-name']}`).join(', ')}`,
+      );
+    }
+
+    const typeName = declared.type['type-name'];
+    if ((typeName === 'Struct' || typeName === 'Alias') && (value === null || typeof value !== 'object' || Array.isArray(value))) {
+      throw new Error(
+        `Action "${action.id}" (circuit ${circuit.name}) arg "${declared.name}" must be an object ` +
+        `for ${typeName} type; got ${value === null ? 'null' : typeof value}. ` +
+        `Read the contract source to find the inner field names.`,
+      );
+    }
+  }
 }
 
 function extractActionsArray(response: AiCliResponse): import('./types.ts').TestAction[] | null {
@@ -249,6 +298,15 @@ export async function generateCliScaffoldWithAI(
     ? readFileSync(inputs.contractSourcePath, 'utf-8')
     : undefined;
 
+  // Pre-compute a placeholder args object for the target circuit. Passing
+  // it to the model as a "starting shape" prevents Claude from dropping
+  // required fields — the most common AI quality failure (resulted in
+  // `Cannot read properties of undefined` deep in WASM during the
+  // zkloan registerProvider run).
+  const startingArgs = inputs.targetCircuit
+    ? placeholderArgsFor(inputs.targetCircuit)
+    : undefined;
+
   const prompt = buildCliPrompt({
     contractName: inputs.contract.name,
     contractSummary: renderContractSummary({
@@ -258,6 +316,7 @@ export async function generateCliScaffoldWithAI(
     }),
     contractSource,
     targetCircuit: inputs.targetCircuit,
+    startingArgs,
     goal: inputs.goal,
   });
 

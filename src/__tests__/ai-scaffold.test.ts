@@ -229,6 +229,143 @@ describe('generateCliScaffoldWithAI', () => {
       generateCliScaffoldWithAI({ contract: counterContract, targetCircuit: incrementCircuit }, runner),
     ).rejects.toThrow(/missing actions/);
   });
+
+  // ── arg-shape validation ──
+
+  describe('arg-shape validation against contract-info', () => {
+    const zkloanLikeContract: ContractInfo = {
+      name: 'zkloan',
+      managedDir: '/tmp/m',
+      compilerVersion: '0.30.0',
+      languageVersion: '0.22.0',
+      runtimeVersion: '0.15.0',
+      siblings: [],
+      circuits: [
+        {
+          name: 'registerProvider',
+          pure: false,
+          proof: true,
+          arguments: [
+            { name: 'providerId', type: { 'type-name': 'Uint', maxval: 65535 } },
+            { name: 'providerPk', type: { 'type-name': 'Struct' } },
+          ],
+          'result-type': { 'type-name': 'Tuple', types: [] },
+        },
+      ],
+      witnesses: [],
+    };
+
+    const validCall = {
+      id: 'register',
+      type: 'contract-call',
+      circuit: 'registerProvider',
+      args: { providerId: 1, providerPk: { x: '1n', y: '2n' } },
+    };
+
+    it('passes when every required arg is present and well-typed', async () => {
+      const runner = async () => fenced({
+        description: 'ok',
+        actions: [{ id: 'deploy', type: 'contract-deploy' }, validCall],
+        assertions: { post: [] },
+      });
+      const out = await generateCliScaffoldWithAI(
+        { contract: zkloanLikeContract, targetCircuit: zkloanLikeContract.circuits[0] },
+        runner,
+      );
+      expect(out.actions?.actions).toHaveLength(2);
+    });
+
+    it('rejects when a required arg key is missing', async () => {
+      const runner = async () => fenced({
+        description: 'bad',
+        actions: [
+          { id: 'deploy', type: 'contract-deploy' },
+          { id: 'reg', type: 'contract-call', circuit: 'registerProvider', args: { providerId: 1 } }, // missing providerPk
+        ],
+        assertions: { post: [] },
+      });
+      await expect(
+        generateCliScaffoldWithAI(
+          { contract: zkloanLikeContract, targetCircuit: zkloanLikeContract.circuits[0] },
+          runner,
+        ),
+      ).rejects.toThrow(/missing required arg "providerPk"/);
+    });
+
+    it('rejects when a Struct-typed arg is a primitive', async () => {
+      const runner = async () => fenced({
+        description: 'bad',
+        actions: [
+          { id: 'deploy', type: 'contract-deploy' },
+          { id: 'reg', type: 'contract-call', circuit: 'registerProvider', args: { providerId: 1, providerPk: 42 } },
+        ],
+        assertions: { post: [] },
+      });
+      await expect(
+        generateCliScaffoldWithAI(
+          { contract: zkloanLikeContract, targetCircuit: zkloanLikeContract.circuits[0] },
+          runner,
+        ),
+      ).rejects.toThrow(/arg "providerPk" must be an object for Struct/);
+    });
+
+    it('rejects when a Struct-typed arg is null (the actual zkloan failure shape)', async () => {
+      const runner = async () => fenced({
+        description: 'bad',
+        actions: [
+          { id: 'deploy', type: 'contract-deploy' },
+          { id: 'reg', type: 'contract-call', circuit: 'registerProvider', args: { providerId: 1, providerPk: null } },
+        ],
+        assertions: { post: [] },
+      });
+      await expect(
+        generateCliScaffoldWithAI(
+          { contract: zkloanLikeContract, targetCircuit: zkloanLikeContract.circuits[0] },
+          runner,
+        ),
+      ).rejects.toThrow(/arg "providerPk" must be an object for Struct/);
+    });
+
+    it('rejects when a Struct-typed arg is an array', async () => {
+      const runner = async () => fenced({
+        description: 'bad',
+        actions: [
+          { id: 'deploy', type: 'contract-deploy' },
+          { id: 'reg', type: 'contract-call', circuit: 'registerProvider', args: { providerId: 1, providerPk: ['x', 'y'] } },
+        ],
+        assertions: { post: [] },
+      });
+      await expect(
+        generateCliScaffoldWithAI(
+          { contract: zkloanLikeContract, targetCircuit: zkloanLikeContract.circuits[0] },
+          runner,
+        ),
+      ).rejects.toThrow(/arg "providerPk" must be an object for Struct/);
+    });
+
+    it('passes a no-arg circuit through without args', async () => {
+      const noArgContract: ContractInfo = {
+        ...zkloanLikeContract,
+        circuits: [{
+          name: 'reset', pure: false, proof: true, arguments: [],
+          'result-type': { 'type-name': 'Tuple', types: [] },
+        }],
+      };
+      const runner = async () => fenced({
+        description: 'ok',
+        actions: [
+          { id: 'deploy', type: 'contract-deploy' },
+          { id: 'reset', type: 'contract-call', circuit: 'reset' }, // no args
+        ],
+        assertions: { post: [] },
+      });
+      const out = await generateCliScaffoldWithAI(
+        { contract: noArgContract, targetCircuit: noArgContract.circuits[0] },
+        runner,
+      );
+      expect(out.actions?.actions).toHaveLength(2);
+    });
+  });
 });
 
 describe('generateUiScaffoldWithAI', () => {

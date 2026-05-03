@@ -38,6 +38,13 @@ export interface CliPromptInputs {
    *  picks a representative impure circuit from the contract that best
    *  matches the goal. */
   targetCircuit?: CircuitInfo;
+  /**
+   * Pre-computed placeholder args object for the target circuit, keyed by
+   * the circuit's arg names. Passed to the model as a starting shape so
+   * it can't drop required fields. Optional — when omitted (e.g. no
+   * targetCircuit), the model has to figure out arg names itself.
+   */
+  startingArgs?: Record<string, unknown>;
   /** One-line success criterion from the user, or undefined. */
   goal?: string;
 }
@@ -69,9 +76,23 @@ Focus this suite on ONE circuit:
 ${targetCircuit.arguments.length === 0
         ? '  (takes no arguments)'
         : targetCircuit.arguments.map((a) => `  - ${a.name}: ${a.type['type-name']}`).join('\n')}
+${inputs.startingArgs && Object.keys(inputs.startingArgs).length > 0
+  ? `\nStarting args (REQUIRED — keep these exact field names; replace
+placeholder values with values that satisfy the goal):
 
+\`\`\`json
+${JSON.stringify(inputs.startingArgs, null, 2)}
+\`\`\`
+
+If the contract source declares Struct or Alias arg types, find the
+inner field names by reading the source below — do NOT invent them.
+For Struct args, the JSON object MUST have the inner fields (e.g.
+\`providerPk: { x: ..., y: ... }\`); leaving inner fields out crashes
+the runtime with "Cannot read properties of undefined".\n`
+  : ''}
 For circuits that need prior state (e.g. registerProvider before
-requestLoan), include the setup actions explicitly.`
+requestLoan), include the setup actions explicitly. Each setup action
+must follow the same arg-shape rules.`
     : `\
 ## Target
 
