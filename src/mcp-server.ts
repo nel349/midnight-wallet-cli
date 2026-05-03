@@ -732,6 +732,7 @@ const TOOLS: ToolDef[] = [
         'build-cmd': { type: 'string', description: 'Browser strategy only — shell command that builds + serves the UI (e.g. "npm run dev").' },
         'build-dir': { type: 'string', description: 'Browser strategy only — subdir the build runs in (monorepo case).' },
         url: { type: 'string', description: 'Browser strategy only — full URL Claude opens (default http://localhost:<port>/).' },
+        'browser-mode': { type: 'string', enum: ['dom', 'vision', 'script'], description: 'Browser strategy only — how Claude perceives the page. dom (HTML/React UIs, fast, needs chrome-devtools-mcp), vision (canvas games, slow), script (advanced, needs hooks). Default: dom for AI scaffolds.' },
         force: { type: 'boolean', description: 'Overwrite existing files instead of aborting on collision' },
       },
     },

@@ -74,7 +74,7 @@ function parseNetworkFlag(flag: string | undefined): NetworkOpt | undefined {
   return flag === 'preprod' || flag === 'preview' || flag === 'undeployed' ? flag : undefined;
 }
 
-/** Collect browser-specific flags into a partial; throws on bad port. */
+/** Collect browser-specific flags into a partial; throws on bad port or browser-mode. */
 function collectBrowserFlags(args: ParsedArgs): Partial<BrowserOptions> {
   const out: Partial<BrowserOptions> = {};
   const portFlag = getFlag(args, 'port');
@@ -91,6 +91,13 @@ function collectBrowserFlags(args: ParsedArgs): Partial<BrowserOptions> {
   if (buildDir !== undefined) out.buildDir = buildDir;
   const url = getFlag(args, 'url');
   if (url !== undefined) out.url = url;
+  const mode = getFlag(args, 'browser-mode');
+  if (mode !== undefined) {
+    if (mode !== 'dom' && mode !== 'vision' && mode !== 'script' && mode !== 'auto') {
+      throw new UsageError(`Invalid --browser-mode "${mode}" — must be dom, vision, or script.`);
+    }
+    out.browserMode = mode;
+  }
   return out;
 }
 
@@ -267,6 +274,7 @@ async function aiUiScaffold(deps: AiScaffoldDeps, goal: string | undefined): Pro
     port: deps.browser.port,
     buildCmd: deps.browser.buildCmd,
     buildDir: deps.browser.buildDir,
+    browserMode: deps.browser.browserMode,
     goal,
     network: deps.network,
     suiteName: deps.suiteName,

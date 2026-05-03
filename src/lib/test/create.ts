@@ -8,6 +8,7 @@
 
 import type { CircuitInfo, CompactType } from '../contract/inspect.ts';
 import type {
+  BrowserMode,
   DappTestConfig,
   TestSuite,
   TestActions,
@@ -82,6 +83,16 @@ export interface BrowserOptions {
   buildDir?: string;
   /** Full URL Claude opens in Chrome. Defaults to http://localhost:<port>/. */
   url?: string;
+  /**
+   * How Claude perceives the page during the test:
+   * - "dom" — accessibility tree (text). Fast. Right for HTML/React UIs.
+   *           Requires chrome-devtools-mcp.
+   * - "vision" — screenshots. Slow. Right for canvas games (no DOM).
+   * - "script" — direct JS evaluation. Fastest. Requires chrome-devtools-mcp
+   *              and dApp-side hooks.
+   * Defaults to undefined → runner picks "vision" for back-compat.
+   */
+  browserMode?: BrowserMode;
 }
 
 export interface CreateOptions {
@@ -189,9 +200,10 @@ function buildBrowserScaffold(opts: CreateOptions, browser: BrowserOptions): Sca
       description: `Auto-generated browser test suite for ${opts.contractName}. Edit prompt.md to describe the dApp-specific user flow.`,
       strategy: 'browser',
       timeout: opts.timeoutSeconds ?? DEFAULT_TIMEOUT_BROWSER,
-      // browserMode left undefined — runner picks 'auto' which works for most
-      // dApps. Override to 'script' for deterministic, faster runs once the
-      // flow is stable.
+      // browserMode is the user's choice (or undefined → runner defaults to
+      // "vision"). For HTML/React UIs the right pick is "dom"; for canvas
+      // games it's "vision". The interactive flow surfaces this trade-off.
+      ...(browser.browserMode ? { browserMode: browser.browserMode } : {}),
     },
     actions: null,
     assertions: {

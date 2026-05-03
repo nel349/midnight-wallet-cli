@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import type { CircuitInfo, ContractInfo } from '../contract/inspect.ts';
-import type { DappTestConfig, NetworkName, TestActions, TestAssertions, TestSuite, PrepStepId } from './types.ts';
+import type { BrowserMode, DappTestConfig, NetworkName, TestActions, TestAssertions, TestSuite, PrepStepId } from './types.ts';
 import type { ScaffoldOutput } from './create.ts';
 import { buildCliPrompt, buildUiPrompt, RESPONSE_FENCE, renderContractSummary } from './ai-prompts.ts';
 import type { ScreenCandidate } from './discover-screens.ts';
@@ -64,6 +64,8 @@ export interface UiScaffoldInputs {
   network?: NetworkName;
   servePort?: number;
   suiteName?: string;
+  /** Mode for Chrome interaction (dom / vision / script). Sets suite.browserMode. */
+  browserMode?: BrowserMode;
   /** Extra component sources to feed Claude — small files imported by the screen. */
   relatedSources?: { path: string; source: string }[];
 }
@@ -304,6 +306,7 @@ export async function generateUiScaffoldWithAI(
     description: response.description,
     strategy: 'browser',
     timeout: DEFAULT_TIMEOUT_BROWSER,
+    ...(inputs.browserMode ? { browserMode: inputs.browserMode } : {}),
   };
 
   const assertions = ensureBrowserBaseline(response.assertions, servePort);

@@ -4,9 +4,10 @@
 
 import { existsSync, statSync } from 'node:fs';
 import * as readline from 'node:readline';
-import { teal, dim } from '../../ui/colors.ts';
+import { teal, dim, yellow } from '../../ui/colors.ts';
 import type { CreateStrategy, BrowserOptions } from './create.ts';
 import type { CircuitInfo } from '../contract/inspect.ts';
+import type { BrowserMode } from './types.ts';
 import { discoverScreens, discoverScreensInDir, type ScreenCandidate } from './discover-screens.ts';
 
 export function isInteractive(): boolean {
@@ -46,8 +47,9 @@ export async function promptStrategy(): Promise<CreateStrategy> {
 }
 
 /**
- * Collect the four browser-specific fields. Each defaults visibly so the
- * user can hit enter through them all for a vanilla Vite-on-4173 setup.
+ * Collect the five browser-specific fields. Each defaults visibly so the
+ * user can hit enter through them all for a vanilla Vite-on-4173 setup
+ * with dom mode.
  */
 export async function promptBrowserOptions(prefilled: Partial<BrowserOptions> = {}): Promise<BrowserOptions> {
   process.stderr.write('\n  ' + dim('Browser test scaffold needs your dApp UI details:') + '\n');
@@ -72,7 +74,45 @@ export async function promptBrowserOptions(prefilled: Partial<BrowserOptions> = 
 
   const url = prefilled.url ?? await ask('URL', `http://localhost:${port}/`);
 
-  return { port, buildCmd, buildDir, url };
+  const browserMode = prefilled.browserMode ?? await promptBrowserMode();
+
+  return { port, buildCmd, buildDir, url, browserMode };
+}
+
+/**
+ * Pick how Claude perceives the page during the test. The right answer
+ * depends entirely on what the dApp renders:
+ *
+ * - dom — accessibility tree (text). Fast (~3× speed of vision). Right
+ *         for HTML/React/Vue UIs because Claude can target elements by
+ *         their actual labels ("Save PIN", "Request loan →"). Requires
+ *         chrome-devtools-mcp.
+ *
+ * - vision — screenshots. Slow. Right for canvas games (a Phaser/three.js
+ *            app) or anything where the meaningful state is rendered as
+ *            pixels with no DOM equivalent. Default for back-compat.
+ *
+ * - script — direct JS evaluation. Fastest. Right when you control the
+ *            dApp enough to expose deterministic test hooks. Requires
+ *            chrome-devtools-mcp + bridge code in the dApp.
+ *
+ * Default is dom because that's the right answer for the vast majority
+ * of Midnight dApps shipping today.
+ */
+export async function promptBrowserMode(): Promise<BrowserMode> {
+  process.stderr.write('\n  ' + teal('Browser mode — how should Claude perceive the page?') + '\n');
+  process.stderr.write(`    ${dim('1.')} dom      ${dim('— accessibility tree (text). Fast. HTML / React / Vue UIs.')}\n`);
+  process.stderr.write(`    ${dim('2.')} vision   ${dim('— screenshots. Slow. Canvas games (no DOM).')}\n`);
+  process.stderr.write(`    ${dim('3.')} script   ${dim('— direct JS. Fastest. Needs dApp-side hooks (advanced).')}\n`);
+  process.stderr.write(dim('    dom and script need chrome-devtools-mcp installed.\n'));
+
+  for (;;) {
+    const raw = (await ask('Mode', 'dom')).toLowerCase().trim();
+    if (raw === '1' || raw === 'dom') return 'dom';
+    if (raw === '2' || raw === 'vision') return 'vision';
+    if (raw === '3' || raw === 'script') return 'script';
+    process.stderr.write(yellow(`  Pick 1 (dom), 2 (vision), or 3 (script).\n`));
+  }
 }
 
 // ── AI scaffolder prompts ──────────────────────────────────────────

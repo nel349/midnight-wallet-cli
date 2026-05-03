@@ -344,6 +344,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--build-cmd <cmd>             Browser strategy: build/serve command',
       '--build-dir <subdir>          Browser strategy: subdirectory the build runs in (monorepo case)',
       '--url <url>                   Browser strategy: full URL Claude opens (default http://localhost:<port>/)',
+      '--browser-mode <m>            Browser strategy: dom (HTML UIs, fast — default), vision (canvas games), script (advanced)',
       '--force                       Overwrite existing scaffold files (create)',
       '--json                        Output structured JSON',
     ],
