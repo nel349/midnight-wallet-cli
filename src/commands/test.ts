@@ -498,6 +498,7 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
     // ── Assertions ──
     const assertionContext: AssertionContext = {
       processExitCode: testExitCode,
+      agentLogPath: testLogFile, // browser-strategy runs only; CLI leaves it undefined
     };
 
     let assertionResults: { id: string; status: 'pass' | 'fail'; message?: string }[] = [];

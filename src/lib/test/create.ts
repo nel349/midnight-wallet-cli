@@ -218,6 +218,15 @@ function buildBrowserScaffold(opts: CreateOptions, browser: BrowserOptions): Sca
           expect: 'pass',
         },
         portListeningAssertion(servePort),
+        // Closes the false-PASS loophole where Claude writes "FAILED" in
+        // its report and exits 0 — without this check, exit-code +
+        // port-listening would still count the run as a pass.
+        {
+          id: 'agent-no-failure',
+          type: 'agent-report-no-failure',
+          params: {},
+          expect: 'pass',
+        },
       ],
     },
     prompt: buildPromptMarkdown(opts.contractName, url),

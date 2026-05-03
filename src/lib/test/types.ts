@@ -79,7 +79,8 @@ export type AssertionType =
   | 'ledger-field'
   | 'contract-deployed'
   | 'dust-available'
-  | 'mn-serve-log-contains';
+  | 'mn-serve-log-contains'
+  | 'agent-report-no-failure';
 
 // ── Results ──
 

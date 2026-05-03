@@ -338,7 +338,7 @@ function ensurePortListening(assertions: TestAssertions, port: number): TestAsse
   };
 }
 
-/** Browser strategy needs both claude-exit-ok and port-listening; add either if missing. */
+/** Browser strategy needs claude-exit-ok, port-listening, AND agent-report-no-failure. Add any missing. */
 function ensureBrowserBaseline(assertions: TestAssertions, port: number): TestAssertions {
   let post = assertions.post;
   const hasClaudeExit = post.some((a) => a.type === 'process-exit-code');
@@ -355,6 +355,16 @@ function ensureBrowserBaseline(assertions: TestAssertions, port: number): TestAs
     post = [
       ...post,
       { id: 'serve-port-listening', type: 'port-listening', params: { port }, expect: 'pass' },
+    ];
+  }
+  // Without this, Claude can write "## Result: FAILED" and exit 0 — we'd
+  // count the run as PASS because exit-code + port checks both held. Add
+  // by default so any new browser scaffold gets the false-PASS guard.
+  const hasAgentReport = post.some((a) => a.type === 'agent-report-no-failure');
+  if (!hasAgentReport) {
+    post = [
+      ...post,
+      { id: 'agent-no-failure', type: 'agent-report-no-failure', params: {}, expect: 'pass' },
     ];
   }
   return { ...assertions, post };
