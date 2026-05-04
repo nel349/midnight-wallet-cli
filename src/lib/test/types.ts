@@ -107,7 +107,8 @@ export interface TestRunResult {
 export interface ActionRunResult {
   id: string;
   type: string;
-  status: 'pass' | 'fail';
+  /** pass, fail, or skip (e.g. UI-only witness in a CLI suite). */
+  status: 'pass' | 'fail' | 'skip';
   duration: number;
   message?: string;
   contractAddress?: string;

@@ -13,7 +13,15 @@ import { findContractSourcePath } from './ai-scaffold.ts';
 export interface ActionResult {
   id: string;
   type: string;
-  status: 'pass' | 'fail';
+  /**
+   * pass — action ran and succeeded.
+   * fail — action ran and reported a real failure (assertion, SDK error).
+   *        Halts the suite.
+   * skip — action was deliberately not run because the environment can't
+   *        support it (e.g. CLI suite + UI-dependent witness). Subsequent
+   *        actions still run; suite is not marked failed.
+   */
+  status: 'pass' | 'fail' | 'skip';
   duration: number;
   message?: string;
   contractAddress?: string;
@@ -60,9 +68,30 @@ export async function runActions(options: ActionsRunnerOptions): Promise<ActionR
   // findable we skip the analysis and let the SDK error speak for itself.
   const witnessDeps = computeWitnessDeps(info);
 
+  // Cascade flag: once a contract-call gets skipped (e.g. UI-only witness),
+  // any downstream state assertion or call almost certainly depends on the
+  // missed mutation. Running them would produce misleading failures (e.g.
+  // "loans.size expected 1, got 0") that bury the real signal — the witness
+  // dependency. So we skip the chain too. The flag clears on the next
+  // contract-deploy, which resets ledger state.
+  let cascadeSkipReason: string | undefined;
+
   for (const action of actions) {
     onActionStart?.(action);
     const start = Date.now();
+
+    if (cascadeSkipReason && (action.type === 'contract-call' || action.type === 'contract-state')) {
+      const actionResult: ActionResult = {
+        id: action.id,
+        type: action.type,
+        status: 'skip',
+        duration: 0,
+        message: `cascaded skip — depends on ${cascadeSkipReason}`,
+      };
+      results.push(actionResult);
+      onActionComplete?.(action, actionResult);
+      continue;
+    }
 
     try {
       const result = await executeAction(action, {
@@ -76,16 +105,23 @@ export async function runActions(options: ActionsRunnerOptions): Promise<ActionR
         onMessage,
       });
 
-      // Capture deploy address for subsequent actions + cache it
+      // Capture deploy address for subsequent actions + cache it. Also
+      // resets the skip cascade — a fresh deploy gives the chain clean
+      // ledger state, so a previously-skipped chain shouldn't poison it.
       if (result.contractAddress) {
         contractAddress = result.contractAddress;
         saveContractCache(dappDir, suiteName, network, contractAddress);
+        if (action.type === 'contract-deploy') cascadeSkipReason = undefined;
       }
 
       const duration = Date.now() - start;
       const actionResult: ActionResult = { ...result, duration };
       results.push(actionResult);
       onActionComplete?.(action, actionResult);
+
+      if (result.status === 'skip' && action.type === 'contract-call') {
+        cascadeSkipReason = `skipped action "${action.id}"`;
+      }
     } catch (err) {
       const duration = Date.now() - start;
       const actionResult: ActionResult = {
@@ -175,16 +211,22 @@ async function executeCall(action: TestAction, ctx: ExecutionContext): Promise<A
     throw new Error(`Action "${action.id}": missing circuit name.`);
   }
 
-  // Pre-flight: bail before calling the SDK if the target circuit reads
-  // private state (witness call). The CLI can't populate that state, so
-  // the SDK would crash with a cryptic "Cannot read properties of
-  // undefined" trace. Throw a clear, named message instead.
+  // Pre-flight: skip circuits whose witnesses read private state. The CLI
+  // can't populate that state — only the dApp UI can — so attempting the
+  // call would crash ~30s in with a deep WASM "Cannot read properties of
+  // undefined" trace. Skip (not fail): the rest of the suite still runs,
+  // and the overall result reflects what was actually testable.
   const usedWitnesses = ctx.witnessDeps.get(action.circuit);
   if (usedWitnesses && usedWitnesses.length > 0) {
-    throw new Error(
-      `Circuit "${action.circuit}" reads private state via witness ${usedWitnesses.join(', ')}. ` +
-      `That state is populated by the dApp UI; CLI tests can't provide it.`,
-    );
+    return {
+      id: action.id,
+      type: action.type,
+      status: 'skip',
+      duration: 0,
+      message:
+        `not CLI-testable — circuit reads private state via witness ` +
+        `${usedWitnesses.join(', ')}. Cover with mn test create --strategy ui.`,
+    };
   }
 
   // Snapshot state before call (for diff)

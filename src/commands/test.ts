@@ -552,6 +552,8 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
               if (spinner) {
                 if (result.status === 'pass') {
                   spinner.stop(`${green('✓')} ${action.id}: ${result.message ?? 'pass'}`);
+                } else if (result.status === 'skip') {
+                  spinner.stop(`${yellow('⊘')} ${action.id}: ${result.message ?? 'skipped'}`);
                 } else {
                   spinner.stop(`${red('✗')} ${action.id}: ${result.message ?? 'fail'}`);
                 }
@@ -580,8 +582,12 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
         if (!jsonMode) {
           process.stderr.write('\n');
           const passed = actionResults.filter(r => r.status === 'pass').length;
+          const skipped = actionResults.filter(r => r.status === 'skip').length;
           const failed = actionResults.filter(r => r.status === 'fail').length;
-          process.stderr.write(`  Actions: ${green(String(passed) + ' passed')}${failed > 0 ? `, ${red(String(failed) + ' failed')}` : ''}\n`);
+          let summary = green(String(passed) + ' passed');
+          if (skipped > 0) summary += `, ${yellow(String(skipped) + ' skipped')}`;
+          if (failed > 0) summary += `, ${red(String(failed) + ' failed')}`;
+          process.stderr.write(`  Actions: ${summary}\n`);
         }
 
         // Store action results for the final result JSON
