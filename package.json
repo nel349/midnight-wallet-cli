@@ -4,6 +4,25 @@
   "type": "module",
   "description": "Git-style CLI wallet for the Midnight blockchain",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/nel349/midnight-wallet-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nel349/midnight-wallet-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nel349/midnight-wallet-cli/issues"
+  },
+  "keywords": [
+    "midnight",
+    "blockchain",
+    "wallet",
+    "cli",
+    "zk",
+    "zero-knowledge",
+    "compact",
+    "mcp",
+    "ai-agent"
+  ],
   "workspaces": [
     "packages/*"
   ],

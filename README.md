@@ -1,6 +1,6 @@
 # midnight-wallet-cli
 
-![midnight-wallet-cli demo](https://raw.githubusercontent.com/nel349/midnight-wallet-cli-hub/main/docs/midnight-cli-gif.gif)
+![midnight-wallet-cli demo](https://raw.githubusercontent.com/nel349/midnight-wallet-cli/main/docs/midnight-cli-gif.gif)
 
 [![npm version](https://badge.fury.io/js/midnight-wallet-cli.svg)](https://www.npmjs.com/package/midnight-wallet-cli)
 [![npm downloads](https://img.shields.io/npm/dm/midnight-wallet-cli)](https://npm-stat.com/charts.html?package=midnight-wallet-cli)
@@ -43,11 +43,13 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 | `midnight contract deploy` | Deploy a contract to the network |
 | `midnight contract call` | Call a circuit on a deployed contract |
 | `midnight contract state` | Read ledger state of a deployed contract |
-| `midnight test run/list/results` | Run E2E tests for Midnight dApps |
-| `midnight config get/set` | Manage persistent config (network, wallet, endpoints) |
+| `midnight dev` | Contract dev loop — watcher auto-compiles on save; `[t]` runs tests, `[d]` deploys |
+| `midnight test create/run/list/results` | Generate and run E2E tests for Midnight dApps |
+| `midnight config get/set/unset` | Manage persistent config (network, wallet, endpoints) |
 | `midnight cache clear` | Clear wallet state cache |
-| `midnight localnet up/stop/down/status` | Manage a local Midnight network via Docker |
+| `midnight localnet up/stop/down/status/logs/clean` | Manage a local Midnight network via Docker |
 | `midnight help [command]` | Show usage for all or a specific command |
+| `midnight manual` | Full reference manual (every command, every flag) |
 
 ## Quick Start
 
@@ -292,12 +294,46 @@ Every tool error returns `{ error: true, code: <CODE>, message: <human prose> }`
 
 ## Issues & Feedback
 
-Found a bug or have a feature request? [Open an issue](https://github.com/nel349/midnight-wallet-cli-hub/issues) on the public hub repo.
-
-For documentation, guides, and more: [midnight-wallet-cli-hub](https://github.com/nel349/midnight-wallet-cli-hub)
+Found a bug or have a feature request? [Open an issue](https://github.com/nel349/midnight-wallet-cli/issues).
 
 ## Requirements
 
 - Node.js >= 20
 - Docker (for `midnight localnet` commands)
 - A running proof server on `localhost:6300` (for transactions — required on all networks)
+
+## Development
+
+Working on the CLI itself? Clone, install, build, test:
+
+```bash
+git clone https://github.com/nel349/midnight-wallet-cli.git
+cd midnight-wallet-cli
+npm install
+npm run build       # bun build → dist/wallet.js + dist/mcp-server.js
+npm test            # vitest run
+npm run typecheck   # tsc --noEmit
+```
+
+Run the CLI directly from source without rebuilding:
+
+```bash
+npx tsx src/wallet.ts <command>     # or: npm run wallet -- <command>
+npx tsx src/mcp-server.ts           # or: npm run mcp
+```
+
+## Contributing
+
+Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow,
+coding standards, and testing requirements.
+
+Quick checklist before opening a PR:
+
+- `npm run typecheck` clean
+- `npm test` green
+- New behavior covered by a test in `src/__tests__/`
+- Commit messages follow the repo style (`feat(scope): …`, `fix(scope): …`, etc.)
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
