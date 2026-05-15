@@ -1,9 +1,15 @@
 // airdrop command — fund wallet from genesis wallet (seed 0x01)
 // Only works on undeployed network (local devnet)
 // --shielded: sends shielded NIGHT from genesis shielded balance
+//
+// `--wallet` accepts three forms:
+//   1. a wallet name (resolved from ~/.midnight/wallets/<name>.json)
+//   2. a path to a wallet JSON
+//   3. a raw bech32m address (mn_addr_… or mn_shield-addr_…) — no wallet
+//      file required, useful for funding externally-generated addresses
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
-import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
+import { MidnightBech32m, ShieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
@@ -26,14 +32,14 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
   if (!amountStr) {
     throw new Error(
       'Missing amount.\n' +
-      'Usage: midnight airdrop <amount>\n' +
-      'Example: midnight airdrop 1000'
+      'Usage: midnight airdrop <amount> [--wallet <name|file|address>]\n' +
+      'Example: midnight airdrop 1000\n' +
+      'Example: midnight airdrop 1000 --wallet alice\n' +
+      'Example: midnight airdrop 1000 --wallet mn_addr_undeployed1...'
     );
   }
 
   const amountNight = parseAmount(amountStr);
-
-  const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
 
   applyEndpointOverrides(networkConfig, {
@@ -50,25 +56,121 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
     );
   }
 
-  if (hasFlag(args, 'shielded')) {
-    return shieldedAirdrop(args, config, amountNight, networkName, networkConfig, signal);
+  const isShielded = hasFlag(args, 'shielded');
+  const destination = resolveDestination(args, networkName, networkConfig, isShielded);
+
+  if (isShielded) {
+    return shieldedAirdrop(args, destination as ShieldedDestination, amountNight, networkName, networkConfig, signal);
   }
 
-  return unshieldedAirdrop(args, config, amountNight, networkName, networkConfig, signal);
+  return unshieldedAirdrop(args, destination as UnshieldedDestination, amountNight, networkName, networkConfig, signal);
+}
+
+// ── Destination resolution ──
+//
+// `--wallet` accepts a name, a file path, or a raw bech32m address.
+// Resolution is uniform for the entry point; the helpers receive a
+// pre-resolved destination so they don't reach back into wallet files
+// when funding an external address.
+
+type UnshieldedDestination = { kind: 'address'; address: string };
+
+type ShieldedDestination =
+  | { kind: 'address'; raw: ShieldedAddress; bech32m: string }
+  | { kind: 'wallet'; raw: ShieldedAddress; bech32m: string; walletPath: string };
+
+function looksLikeBech32mAddress(value: string): boolean {
+  return value.startsWith('mn_addr_') || value.startsWith('mn_shield-addr_');
+}
+
+function resolveDestination(
+  args: ParsedArgs,
+  networkName: NetworkName,
+  networkConfig: NetworkConfig,
+  isShielded: boolean,
+): UnshieldedDestination | ShieldedDestination {
+  const walletFlag = getFlag(args, 'wallet');
+
+  if (walletFlag !== undefined && looksLikeBech32mAddress(walletFlag)) {
+    return resolveAddressDestination(walletFlag, networkName, networkConfig, isShielded);
+  }
+
+  // Fall back to wallet file (name, path, or active wallet)
+  const walletPath = resolveWalletPath(walletFlag);
+  const config = loadWalletConfig(walletPath);
+
+  if (isShielded) {
+    const networkId = getNetworkId(networkConfig.networkId);
+    const seedBuffer = Buffer.from(config.seed, 'hex');
+    const raw = deriveShieldedAddress(seedBuffer);
+    const bech32m = MidnightBech32m.encode(networkId, raw).asString();
+    return { kind: 'wallet', raw, bech32m, walletPath };
+  }
+
+  return { kind: 'address', address: config.addresses[networkName] };
+}
+
+function resolveAddressDestination(
+  address: string,
+  networkName: NetworkName,
+  networkConfig: NetworkConfig,
+  isShielded: boolean,
+): UnshieldedDestination | ShieldedDestination {
+  const looksShielded = address.startsWith('mn_shield-addr_');
+
+  if (isShielded && !looksShielded) {
+    throw new Error(
+      `--shielded was passed but --wallet is an unshielded address.\n` +
+      `Pass a shielded address (mn_shield-addr_...) or drop --shielded.\n` +
+      `Got: ${address}`
+    );
+  }
+  if (!isShielded && looksShielded) {
+    throw new Error(
+      `--wallet is a shielded address but --shielded was not passed.\n` +
+      `Add --shielded, or pass an unshielded address (mn_addr_...).\n` +
+      `Got: ${address}`
+    );
+  }
+
+  const expectedPrefix = isShielded
+    ? `mn_shield-addr_${networkName}1`
+    : `mn_addr_${networkName}1`;
+
+  if (!address.startsWith(expectedPrefix)) {
+    throw new Error(
+      `Address does not match network "${networkName}".\n` +
+      `Expected prefix: ${expectedPrefix}\n` +
+      `Got: ${address}`
+    );
+  }
+
+  if (isShielded) {
+    const networkId = getNetworkId(networkConfig.networkId);
+    let raw: ShieldedAddress;
+    try {
+      raw = MidnightBech32m.parse(address).decode(ShieldedAddress, networkId);
+    } catch (err: any) {
+      throw new Error(`Invalid shielded address: ${err.message}`);
+    }
+    return { kind: 'address', raw, bech32m: address };
+  }
+
+  return { kind: 'address', address };
 }
 
 // ── Unshielded airdrop (existing flow) ──
 
 async function unshieldedAirdrop(
   args: ParsedArgs,
-  config: ReturnType<typeof loadWalletConfig>,
+  destination: UnshieldedDestination,
   amountNight: number,
   networkName: string,
   networkConfig: NetworkConfig,
   signal?: AbortSignal,
 ): Promise<void> {
   if (isVerbose(args)) enableVerbose();
-  const recipientAddress = config.addresses[networkName as NetworkName];
+  const recipientAddress = destination.address;
   const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
 
   process.stderr.write('\n' + header('Airdrop') + '\n\n');
@@ -153,7 +255,7 @@ async function unshieldedAirdrop(
 
 async function shieldedAirdrop(
   args: ParsedArgs,
-  config: ReturnType<typeof loadWalletConfig>,
+  destination: ShieldedDestination,
   amountNight: number,
   networkName: string,
   networkConfig: NetworkConfig,
@@ -162,16 +264,17 @@ async function shieldedAirdrop(
   const amount = nightToMicro(amountNight);
   if (isVerbose(args)) enableVerbose();
 
-  const userSeedBuffer = Buffer.from(config.seed, 'hex');
   const genesisSeedBuffer = Buffer.from(GENESIS_SEED, 'hex');
-  const networkId = getNetworkId(networkConfig.networkId);
   const nightToken = ledger.unshieldedToken().raw;
 
-  // Recipient shielded address — pure key derivation, no facade needed.
-  const userShieldedAddress = deriveShieldedAddress(userSeedBuffer);
-  const userShieldedAddrStr = MidnightBech32m.encode(networkId, userShieldedAddress).asString();
-  // Cache it in the wallet file so subsequent reads can short-circuit.
-  saveShieldedAddress(resolveWalletPath(getFlag(args, 'wallet')), networkName as NetworkName, userShieldedAddrStr);
+  const userShieldedAddress = destination.raw;
+  const userShieldedAddrStr = destination.bech32m;
+  // Cache the shielded address into the wallet file so subsequent reads
+  // can short-circuit. Only meaningful when the destination came from a
+  // managed wallet — for a raw address there's nothing to cache.
+  if (destination.kind === 'wallet') {
+    saveShieldedAddress(destination.walletPath, networkName as NetworkName, userShieldedAddrStr);
+  }
 
   process.stderr.write('\n' + header('Shielded Airdrop') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');

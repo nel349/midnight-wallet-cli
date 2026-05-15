@@ -4,6 +4,10 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **`mn airdrop --wallet <address>` — fund any bech32m address directly.** The `--wallet` flag now accepts three forms: a wallet name, a path to a wallet JSON, **or** a raw bech32m address (`mn_addr_…` for unshielded, `mn_shield-addr_…` with `--shielded`). Previously you had to first import the recipient's seed via `mn wallet generate --seed <hex>` to airdrop to it — a friction point for funding externally-generated wallets (dApps, browser wallets) on localnet. No new flag added; the existing `--wallet` argument is overloaded with prefix-based detection. Address prefix must match the resolved network (otherwise the operation aborts with both names surfaced); shielded↔unshielded mismatch with `--shielded` is rejected. Existing forms (active wallet, `--wallet alice`, `--wallet ./path.json`) are unchanged. MCP `midnight_airdrop` schema updated to describe the new accepted shape.
+
 ## [0.4.0] - 2026-05-04
 
 ### Added

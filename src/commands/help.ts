@@ -181,16 +181,21 @@ const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'airdrop',
-    description: 'Fund your wallet from the genesis wallet (undeployed network only)',
-    usage: 'midnight airdrop <amount> [--shielded] [--wallet <name|file>]',
+    description: 'Fund a wallet from the genesis wallet (undeployed network only)',
+    usage: 'midnight airdrop <amount> [--shielded] [--wallet <name|file|address>]',
     flags: [
-      '<amount>            Amount in NIGHT to airdrop',
-      '--shielded          Airdrop shielded NIGHT (from genesis shielded balance)',
-      '--wallet <name|file> Wallet name or path',
+      '<amount>             Amount in NIGHT to airdrop',
+      '--shielded           Airdrop shielded NIGHT (from genesis shielded balance)',
+      '--wallet <…>         Destination — a wallet name, a wallet JSON path, or',
+      '                     a raw bech32m address (mn_addr_… / mn_shield-addr_…).',
+      '                     Defaults to the active wallet when omitted.',
     ],
     examples: [
       'midnight airdrop 1000',
+      'midnight airdrop 1000 --wallet alice',
+      'midnight airdrop 10000 --wallet mn_addr_undeployed1...',
       'midnight airdrop 100 --shielded',
+      'midnight airdrop 100 --shielded --wallet mn_shield-addr_undeployed1...',
     ],
     jsonFields: {
       txHash: 'Transaction hash',

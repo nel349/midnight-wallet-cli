@@ -31,6 +31,7 @@ Manage wallets, check balances, transfer NIGHT tokens, register dust (fee token)
 | "Send 100 NIGHT to alice" | `midnight_transfer({ to: "alice", amount: "100" })` — ask consent first |
 | "Send shielded" | add `--shielded` (the CLI command) or use shielded address directly |
 | "Fund my wallet" (localnet only) | `midnight_airdrop({ amount: "1000" })` |
+| "Fund this address …" (localnet only) | `midnight_airdrop({ amount: "1000", wallet: "mn_addr_undeployed1…" })` — `wallet` accepts a name, path, or raw bech32m address |
 | "Register dust" / "I need fees" | `midnight_dust_register()` |
 | "Am I registered for dust?" | `midnight_dust_status()` |
 | "Start localnet" / "start a local network" | `midnight_localnet_up()` |

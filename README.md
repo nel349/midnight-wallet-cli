@@ -32,7 +32,7 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 | `midnight info` | Display wallet address, network, creation date |
 | `midnight balance [address]` | Check unshielded + shielded NIGHT balance |
 | `midnight transfer <to> <amount>` | Send NIGHT tokens (`--shielded` for shielded) |
-| `midnight airdrop <amount>` | Fund wallet from genesis (`--shielded` for shielded, undeployed only) |
+| `midnight airdrop <amount>` | Fund a wallet or raw address from genesis (`--shielded` for shielded, undeployed only) |
 | `midnight dust register` | Register NIGHT UTXOs for dust (fee token) generation |
 | `midnight dust status` | Check dust registration status and balance |
 | `midnight address --seed <hex>` | Derive an address from a seed |

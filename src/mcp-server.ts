@@ -341,13 +341,14 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_airdrop',
-    description: 'Fund from genesis (undeployed).',
+    description: 'Fund from genesis (undeployed). `wallet` accepts a wallet name, a wallet JSON path, or a raw bech32m address (mn_addr_… or mn_shield-addr_…). Add `shielded: "true"` to fund a shielded balance.',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
         amount: { type: 'string', description: 'NIGHT' },
-        wallet: { type: 'string' },
+        wallet: { type: 'string', description: 'Destination: wallet name, JSON path, or bech32m address' },
+        shielded: { type: 'string', description: 'Set to "true" for shielded airdrop' },
       },
       required: ['amount'],
     },

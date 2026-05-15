@@ -128,6 +128,53 @@ describe('airdrop command — network restriction', () => {
   });
 });
 
+describe('airdrop command — address as destination', () => {
+  it('rejects a shielded address when --shielded is not passed', async () => {
+    const args = parseArgs([
+      'airdrop',
+      '100',
+      '--wallet',
+      'mn_shield-addr_undeployed1abcdef',
+    ]);
+    await expect(airdropCommand(args)).rejects.toThrow(/shielded address but --shielded was not passed/);
+  });
+
+  it('rejects an unshielded address when --shielded is passed', async () => {
+    const args = parseArgs([
+      'airdrop',
+      '100',
+      '--shielded',
+      '--wallet',
+      'mn_addr_undeployed1abcdef',
+    ]);
+    await expect(airdropCommand(args)).rejects.toThrow(/--shielded was passed but --wallet is an unshielded address/);
+  });
+
+  it('rejects an address whose prefix does not match the resolved network', async () => {
+    // Default network is "undeployed"; a preprod-prefixed address should fail
+    const args = parseArgs([
+      'airdrop',
+      '100',
+      '--wallet',
+      'mn_addr_preprod1abcdef',
+    ]);
+    await expect(airdropCommand(args)).rejects.toThrow(/does not match network "undeployed"/);
+  });
+
+  it('rejects an unshielded address when running against preprod', async () => {
+    // The "only on undeployed" rule fires before address validation
+    const args = parseArgs([
+      'airdrop',
+      '100',
+      '--wallet',
+      'mn_addr_preprod1abcdef',
+      '--network',
+      'preprod',
+    ]);
+    await expect(airdropCommand(args)).rejects.toThrow('only available on the "undeployed" network');
+  });
+});
+
 describe('airdrop command — shielded flag', () => {
   it('rejects shielded airdrop on preprod', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
