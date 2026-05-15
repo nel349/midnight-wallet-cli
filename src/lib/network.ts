@@ -1,5 +1,6 @@
 import { execSync } from 'child_process';
 import { loadCliConfig } from './cli-config.ts';
+import { INDEXER_GRAPHQL_PATH, INDEXER_GRAPHQL_WS_PATH } from './constants.ts';
 
 export type NetworkName = 'preprod' | 'preview' | 'undeployed';
 
@@ -13,22 +14,22 @@ export interface NetworkConfig {
 
 const NETWORK_CONFIGS: Record<NetworkName, NetworkConfig> = {
   preprod: {
-    indexer: 'https://indexer.preprod.midnight.network/api/v3/graphql',
-    indexerWS: 'wss://indexer.preprod.midnight.network/api/v3/graphql/ws',
+    indexer: `https://indexer.preprod.midnight.network${INDEXER_GRAPHQL_PATH}`,
+    indexerWS: `wss://indexer.preprod.midnight.network${INDEXER_GRAPHQL_WS_PATH}`,
     node: 'wss://rpc.preprod.midnight.network',
     proofServer: 'http://localhost:6300',
     networkId: 'PreProd',
   },
   preview: {
-    indexer: 'https://indexer.preview.midnight.network/api/v3/graphql',
-    indexerWS: 'wss://indexer.preview.midnight.network/api/v3/graphql/ws',
+    indexer: `https://indexer.preview.midnight.network${INDEXER_GRAPHQL_PATH}`,
+    indexerWS: `wss://indexer.preview.midnight.network${INDEXER_GRAPHQL_WS_PATH}`,
     node: 'wss://rpc.preview.midnight.network',
     proofServer: 'http://localhost:6300',
     networkId: 'Preview',
   },
   undeployed: {
-    indexer: 'http://localhost:8088/api/v3/graphql',
-    indexerWS: 'ws://localhost:8088/api/v3/graphql/ws',
+    indexer: `http://localhost:8088${INDEXER_GRAPHQL_PATH}`,
+    indexerWS: `ws://localhost:8088${INDEXER_GRAPHQL_WS_PATH}`,
     node: 'ws://localhost:9944',
     proofServer: 'http://localhost:6300',
     networkId: 'Undeployed',
@@ -119,8 +120,8 @@ export function resolveNetworkConfig(name: NetworkName): NetworkConfig {
     const detected = detectTestcontainerPorts();
 
     if (detected.indexerPort) {
-      config.indexer = `http://localhost:${detected.indexerPort}/api/v3/graphql`;
-      config.indexerWS = `ws://localhost:${detected.indexerPort}/api/v3/graphql/ws`;
+      config.indexer = `http://localhost:${detected.indexerPort}${INDEXER_GRAPHQL_PATH}`;
+      config.indexerWS = `ws://localhost:${detected.indexerPort}${INDEXER_GRAPHQL_WS_PATH}`;
     }
     if (detected.nodePort) {
       config.node = `ws://localhost:${detected.nodePort}`;

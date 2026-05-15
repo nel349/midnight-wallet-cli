@@ -38,8 +38,8 @@ const ctx = (connectionId = 'conn_test'): RpcHandlerContext => ({ notify: vi.fn(
 // ── Helpers ──────────────────────────────────────────────────────────
 
 const TEST_NETWORK_CONFIG: NetworkConfig = {
-  indexer: 'http://localhost:8088/api/v3/graphql',
-  indexerWS: 'ws://localhost:8088/api/v3/graphql/ws',
+  indexer: 'http://localhost:8088/api/v4/graphql',
+  indexerWS: 'ws://localhost:8088/api/v4/graphql/ws',
   node: 'ws://localhost:9944',
   proofServer: 'http://localhost:6300',
   networkId: 'Undeployed',
@@ -296,8 +296,8 @@ describe('dapp-connector', () => {
       connector = createConnector();
       const result = await connector.handlers.getConfiguration({}, ctx()) as any;
       expect(result).toEqual({
-        indexerUri: 'http://localhost:8088/api/v3/graphql',
-        indexerWsUri: 'ws://localhost:8088/api/v3/graphql/ws',
+        indexerUri: 'http://localhost:8088/api/v4/graphql',
+        indexerWsUri: 'ws://localhost:8088/api/v4/graphql/ws',
         proverServerUri: 'http://localhost:6300',
         substrateNodeUri: 'ws://localhost:9944',
         networkId: 'Undeployed',

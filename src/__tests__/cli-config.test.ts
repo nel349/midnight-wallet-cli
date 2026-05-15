@@ -165,8 +165,8 @@ describe('endpoint config keys', () => {
   });
 
   it('setConfigValue persists indexer-ws URL', () => {
-    setConfigValue('indexer-ws', 'wss://indexer.preprod.midnight.network/api/v3/graphql/ws', TEST_DIR);
-    expect(getConfigValue('indexer-ws', TEST_DIR)).toBe('wss://indexer.preprod.midnight.network/api/v3/graphql/ws');
+    setConfigValue('indexer-ws', 'wss://indexer.preprod.midnight.network/api/v4/graphql/ws', TEST_DIR);
+    expect(getConfigValue('indexer-ws', TEST_DIR)).toBe('wss://indexer.preprod.midnight.network/api/v4/graphql/ws');
   });
 
   it('rejects invalid URL for endpoint keys', () => {

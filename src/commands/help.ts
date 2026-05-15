@@ -274,7 +274,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight config set wallet alice',
       'midnight config set proof-server http://localhost:6300',
       'midnight config set node wss://rpc.preprod.midnight.network',
-      'midnight config set indexer-ws wss://indexer.preprod.midnight.network/api/v3/graphql/ws',
+      'midnight config set indexer-ws wss://indexer.preprod.midnight.network/api/v4/graphql/ws',
       'midnight config unset proof-server',
     ],
     jsonFields: {

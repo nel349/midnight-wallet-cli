@@ -12,7 +12,7 @@ import { checkDockerAvailable, ensureComposeFile, dockerCompose, getServiceStatu
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
 import { loadWalletCache, saveWalletCache } from '../wallet-cache.ts';
 import { executeTransfer, ensureDust, suppressRpcNoise } from '../transfer.ts';
-import { GENESIS_SEED } from '../constants.ts';
+import { GENESIS_SEED, INDEXER_GRAPHQL_PATH } from '../constants.ts';
 import { deriveUnshieldedAddress } from '../derive-address.ts';
 
 import type { DappTestConfig, PrepStepId, PrepStepResult, PrepContext, PrepCallbacks } from './types.ts';
@@ -107,7 +107,7 @@ const INDEXER_PROBE_TIMEOUT_MS = 30_000; // 30s for indexer to start responding 
 function probeIndexer(): boolean {
   try {
     execSync(
-      'curl -s -o /dev/null http://localhost:8088/api/v3/graphql --max-time 3',
+      `curl -s -o /dev/null http://localhost:8088${INDEXER_GRAPHQL_PATH} --max-time 3`,
       { timeout: 5_000, stdio: ['pipe', 'pipe', 'pipe'] },
     );
     return true;

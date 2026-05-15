@@ -4,6 +4,14 @@ export const GENESIS_SEED = '000000000000000000000000000000000000000000000000000
 // Native NIGHT token type (all zeros, 32 bytes hex)
 export const NATIVE_TOKEN_TYPE = '0000000000000000000000000000000000000000000000000000000000000000';
 
+// Midnight indexer GraphQL API version. Single source of truth — anything
+// that builds an indexer URL (per-network defaults, testcontainer overrides,
+// help examples, healthchecks) reads from these. Bumping the version here
+// flows everywhere.
+export const INDEXER_API_VERSION = 'v4';
+export const INDEXER_GRAPHQL_PATH = `/api/${INDEXER_API_VERSION}/graphql`;
+export const INDEXER_GRAPHQL_WS_PATH = `/api/${INDEXER_API_VERSION}/graphql/ws`;
+
 // NIGHT has 6 decimal places (1 NIGHT = 1_000_000 micro-NIGHT)
 export const TOKEN_DECIMALS = 6;
 export const TOKEN_MULTIPLIER = 1_000_000;

@@ -67,8 +67,8 @@ describe('isValidNetworkName', () => {
 describe('getNetworkConfig', () => {
   it('returns exact URLs for preprod', () => {
     const config = getNetworkConfig('preprod');
-    expect(config.indexer).toBe('https://indexer.preprod.midnight.network/api/v3/graphql');
-    expect(config.indexerWS).toBe('wss://indexer.preprod.midnight.network/api/v3/graphql/ws');
+    expect(config.indexer).toBe('https://indexer.preprod.midnight.network/api/v4/graphql');
+    expect(config.indexerWS).toBe('wss://indexer.preprod.midnight.network/api/v4/graphql/ws');
     expect(config.node).toBe('wss://rpc.preprod.midnight.network');
     expect(config.proofServer).toBe('http://localhost:6300');
     expect(config.networkId).toBe('PreProd');
@@ -76,8 +76,8 @@ describe('getNetworkConfig', () => {
 
   it('returns exact URLs for preview', () => {
     const config = getNetworkConfig('preview');
-    expect(config.indexer).toBe('https://indexer.preview.midnight.network/api/v3/graphql');
-    expect(config.indexerWS).toBe('wss://indexer.preview.midnight.network/api/v3/graphql/ws');
+    expect(config.indexer).toBe('https://indexer.preview.midnight.network/api/v4/graphql');
+    expect(config.indexerWS).toBe('wss://indexer.preview.midnight.network/api/v4/graphql/ws');
     expect(config.node).toBe('wss://rpc.preview.midnight.network');
     expect(config.proofServer).toBe('http://localhost:6300');
     expect(config.networkId).toBe('Preview');
@@ -85,8 +85,8 @@ describe('getNetworkConfig', () => {
 
   it('returns localhost URLs for undeployed', () => {
     const config = getNetworkConfig('undeployed');
-    expect(config.indexer).toBe('http://localhost:8088/api/v3/graphql');
-    expect(config.indexerWS).toBe('ws://localhost:8088/api/v3/graphql/ws');
+    expect(config.indexer).toBe('http://localhost:8088/api/v4/graphql');
+    expect(config.indexerWS).toBe('ws://localhost:8088/api/v4/graphql/ws');
     expect(config.node).toBe('ws://localhost:9944');
     expect(config.proofServer).toBe('http://localhost:6300');
     expect(config.networkId).toBe('Undeployed');
@@ -98,7 +98,7 @@ describe('getNetworkConfig', () => {
     a.proofServer = 'http://mutated';
     a.indexer = 'http://mutated';
     expect(b.proofServer).toBe('http://localhost:6300');
-    expect(b.indexer).toBe('https://indexer.preprod.midnight.network/api/v3/graphql');
+    expect(b.indexer).toBe('https://indexer.preprod.midnight.network/api/v4/graphql');
   });
 });
 
@@ -174,9 +174,9 @@ describe('applyEndpointOverrides', () => {
 
   it('applies flag overrides for indexerWS and derives indexer HTTP', () => {
     const config = getNetworkConfig('preprod');
-    applyEndpointOverrides(config, { indexerWS: 'wss://custom-indexer/api/v3/graphql/ws' }, TEST_DIR);
-    expect(config.indexerWS).toBe('wss://custom-indexer/api/v3/graphql/ws');
-    expect(config.indexer).toBe('https://custom-indexer/api/v3/graphql');
+    applyEndpointOverrides(config, { indexerWS: 'wss://custom-indexer/api/v4/graphql/ws' }, TEST_DIR);
+    expect(config.indexerWS).toBe('wss://custom-indexer/api/v4/graphql/ws');
+    expect(config.indexer).toBe('https://custom-indexer/api/v4/graphql');
   });
 
   it('falls back to persistent config when no flag provided', () => {
@@ -217,7 +217,7 @@ describe('applyEndpointOverrides', () => {
 
   it('derives http indexer from ws:// protocol', () => {
     const config = getNetworkConfig('undeployed');
-    applyEndpointOverrides(config, { indexerWS: 'ws://localhost:9999/api/v3/graphql/ws' }, TEST_DIR);
-    expect(config.indexer).toBe('http://localhost:9999/api/v3/graphql');
+    applyEndpointOverrides(config, { indexerWS: 'ws://localhost:9999/api/v4/graphql/ws' }, TEST_DIR);
+    expect(config.indexer).toBe('http://localhost:9999/api/v4/graphql');
   });
 });
