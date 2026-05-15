@@ -82,7 +82,11 @@ describe('airdrop command — argument validation', () => {
   });
 
   it('throws when no wallet file exists', async () => {
-    const args = parseArgs(['airdrop', '100', '--wallet', path.join(TEST_DIR, 'nonexistent.json')]);
+    // --network undeployed pinned so the test passes regardless of the
+    // developer's ~/.midnight/config.json (resolveNetwork reads the real
+    // config dir; the airdrop entry-point bails out on non-undeployed
+    // networks BEFORE attempting to load the wallet file).
+    const args = parseArgs(['airdrop', '100', '--wallet', path.join(TEST_DIR, 'nonexistent.json'), '--network', 'undeployed']);
     await expect(airdropCommand(args)).rejects.toThrow('Wallet file not found');
   });
 });
@@ -129,12 +133,18 @@ describe('airdrop command — network restriction', () => {
 });
 
 describe('airdrop command — address as destination', () => {
+  // --network undeployed pinned on each test so they pass regardless of the
+  // developer's ~/.midnight/config.json (resolveNetwork reads the real config
+  // dir; without the pin, a preprod-default config short-circuits these tests
+  // at the network-restriction check before address validation runs).
+
   it('rejects a shielded address when --shielded is not passed', async () => {
     const args = parseArgs([
       'airdrop',
       '100',
       '--wallet',
       'mn_shield-addr_undeployed1abcdef',
+      '--network', 'undeployed',
     ]);
     await expect(airdropCommand(args)).rejects.toThrow(/shielded address but --shielded was not passed/);
   });
@@ -146,17 +156,18 @@ describe('airdrop command — address as destination', () => {
       '--shielded',
       '--wallet',
       'mn_addr_undeployed1abcdef',
+      '--network', 'undeployed',
     ]);
     await expect(airdropCommand(args)).rejects.toThrow(/--shielded was passed but --wallet is an unshielded address/);
   });
 
   it('rejects an address whose prefix does not match the resolved network', async () => {
-    // Default network is "undeployed"; a preprod-prefixed address should fail
     const args = parseArgs([
       'airdrop',
       '100',
       '--wallet',
       'mn_addr_preprod1abcdef',
+      '--network', 'undeployed',
     ]);
     await expect(airdropCommand(args)).rejects.toThrow(/does not match network "undeployed"/);
   });
