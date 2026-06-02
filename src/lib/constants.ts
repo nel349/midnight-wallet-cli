@@ -39,6 +39,21 @@ export const DUST_TIMEOUT_MS = 120_000;        // 2 minutes — wait for dust ge
 export const PROOF_TIMEOUT_MS = 300_000;       // 5 minutes — ZK proof generation
 export const BALANCE_CHECK_TIMEOUT_MS = 60_000; // 1 minute — GraphQL balance subscription
 
+// Cold-sync heap headroom.
+// The first (cold) shielded/dust sync against a hosted network streams the whole
+// chain history through the wallet SDK. The live working set stays small (~300 MB),
+// but the scan churns through a firehose of short-lived JS objects; under Node's
+// default old-space cap (~4 GB) GC can't keep pace with the allocation rate and the
+// process dies with "JavaScript heap out of memory" before it can finish — and write
+// the cache that makes every later run cheap. Measured cold preprod shielded-sync
+// high-water: ~8.4 GB. lib/heap-guard.ts re-execs sync commands with this headroom.
+// Note: the cap must sit comfortably *above* the high-water, not just at it —
+// crowding the limit makes V8 thrash on full GCs, which starves the sync loop
+// and trips the per-attempt timeout. A 12 GB cap timed out; 16 GB completes.
+export const SYNC_HEAP_TARGET_MB = 16384;   // 16 GB — proven headroom over the ~8.4 GB high-water
+export const SYNC_HEAP_RAM_FRACTION = 0.7;  // never request more than 70% of physical RAM
+export const SYNC_HEAP_MIN_GAIN_MB = 512;   // skip the re-exec if the headroom gain is smaller than this
+
 // Transaction defaults
 export const TX_TTL_MINUTES = 10;
 

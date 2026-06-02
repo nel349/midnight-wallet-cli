@@ -18,6 +18,7 @@ import { trimAgentMessage } from './lib/error-trim.ts';
 import { FULL_FLAG, type ParsedArgs } from './lib/argv.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
 import { createConfirmationStore } from './lib/mcp/confirmation.ts';
+import { ensureHeapForSync } from './lib/heap-guard.ts';
 
 // Skill resources — teach MCP clients how to use this CLI conversationally.
 // Split into:
@@ -945,6 +946,11 @@ function errorResponse(error: Error) {
 
 // Start the server
 async function main() {
+  // The server runs facades on demand (balance/transfer/etc.). A cold shielded
+  // sync would overflow Node's default heap, so re-exec once at startup with
+  // more headroom. No-op when launched via `mn --mcp` (already bumped) or when
+  // the heap is already large enough. See lib/heap-guard.ts.
+  ensureHeapForSync();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

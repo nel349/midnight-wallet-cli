@@ -10,9 +10,20 @@ import { UsageError, isUsageError } from './lib/errors.ts';
 import { writeJsonError } from './lib/json-output.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
 import { migrateOldWallet } from './lib/wallet-config.ts';
+import { ensureHeapForSync } from './lib/heap-guard.ts';
+
+// Commands that start a WalletFacade. They (a) leave WebSocket connections in
+// the event loop that facade.stop() doesn't fully drain — so we must exit
+// explicitly — and (b) may run a cold shielded/dust sync whose transient-garbage
+// stream overflows Node's default heap, so they re-exec with more headroom
+// before any SDK/WASM loads (see lib/heap-guard.ts).
+// `dev` is included because it provisions wallets internally (airdrop + dust
+// register), which start facades whose WS handles aren't reliably reclaimed.
+const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve', 'test', 'contract', 'dev']);
 
 // --mcp: start MCP server instead of CLI (for: npx midnight-wallet-cli --mcp)
 if (process.argv.includes('--mcp')) {
+  ensureHeapForSync(); // MCP server runs facades on demand — give it the same headroom
   await import('./mcp-server.ts');
 } else {
 
@@ -32,6 +43,11 @@ if (hasFlag(args, 'help') || hasFlag(args, 'h')) {
 
 // Default to help when no command given
 const command = args.command ?? 'help';
+
+// Sync commands re-exec with more heap headroom before any SDK/WASM loads.
+// No-op for non-sync commands, for the re-exec'd child, and when the heap is
+// already large enough — so help/version/config etc. pay nothing.
+if (FACADE_COMMANDS.has(command)) ensureHeapForSync();
 
 // Auto-migrate old ~/.midnight/wallet.json → wallets/default.json (silent, one-time)
 migrateOldWallet();
@@ -140,12 +156,6 @@ async function run(): Promise<void> {
       );
   }
 }
-
-// Commands that start a WalletFacade leave WebSocket connections in the event loop.
-// facade.stop() doesn't fully drain them, so we must exit explicitly.
-// `dev` is in here because it provisions wallets internally (airdrop + dust register)
-// which start facades whose WS handles aren't reliably reclaimed.
-const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve', 'test', 'contract', 'dev']);
 
 run().then(() => {
   if (FACADE_COMMANDS.has(command)) {
