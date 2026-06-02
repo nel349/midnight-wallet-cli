@@ -4,10 +4,17 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-01
+
 ### Changed
 
 - **Indexer GraphQL API bumped from `v3` to `v4` everywhere.** The v3 endpoint had started returning network-validation errors against `preprod` / `preview` (claiming it expected `mn_addr_undeployed` HRP), while v4 routes correctly. Endpoint version is now a single source of truth — `INDEXER_API_VERSION` in `src/lib/constants.ts`, with `INDEXER_GRAPHQL_PATH` / `INDEXER_GRAPHQL_WS_PATH` composed from it and consumed by `lib/network.ts`, `lib/test/prep-runner.ts`, help examples, and tests. To bump again, change the constant. Note: if you previously ran `mn config set indexer-ws wss://…/api/v3/graphql/ws`, that override still wins — run `mn config unset indexer-ws` to pick up the new default.
 - **`mn airdrop --wallet <address>` — fund any bech32m address directly.** The `--wallet` flag now accepts three forms: a wallet name, a path to a wallet JSON, **or** a raw bech32m address (`mn_addr_…` for unshielded, `mn_shield-addr_…` with `--shielded`). Previously you had to first import the recipient's seed via `mn wallet generate --seed <hex>` to airdrop to it — a friction point for funding externally-generated wallets (dApps, browser wallets) on localnet. No new flag added; the existing `--wallet` argument is overloaded with prefix-based detection. Address prefix must match the resolved network (otherwise the operation aborts with both names surfaced); shielded↔unshielded mismatch with `--shielded` is rejected. Existing forms (active wallet, `--wallet alice`, `--wallet ./path.json`) are unchanged. MCP `midnight_airdrop` schema updated to describe the new accepted shape.
+- **Dependency bumps.** `@midnight-ntwrk/ledger-v8` `^8.0.3 → ^8.1.0`; added `@midnight-ntwrk/compact-runtime ^0.16.0` — the bundled Compact runtime the contract deploy/call flow resolves against (see the runtime-version-skew note in `docs/SKILL.md`).
+
+### Fixed
+
+- **Cold shielded sync no longer crashes with out-of-memory on hosted networks.** A first-time `mn balance` (or any facade command) against `preprod` / `preview` died mid-`Syncing shielded` with `FATAL ERROR: … JavaScript heap out of memory`. The wallet SDK scans the entire chain history to trial-decrypt shielded coins; the live working set stays small (~300 MB), but the scan churns short-lived JS objects faster than V8 can collect them under Node's default ~4 GB old-space cap, so the heap hit the ceiling before a rescuing GC — and before it could write the cache that makes every later run instant. Sync commands (and the MCP server) now re-exec once with a larger `--max-old-space-size` (`SYNC_HEAP_TARGET_MB`, 16 GB, capped at 70% of physical RAM, overridable via `MN_MAX_OLD_SPACE_MB`) **before any SDK/WASM loads** — so the parent re-execs with no double load, and it's a no-op for non-sync commands, for the re-exec'd child, and when the heap is already large enough (e.g. you set `NODE_OPTIONS`). New `src/lib/heap-guard.ts` (`ensureHeapForSync`, pure `computeHeapTargetMb`). Verified end-to-end: a cold preprod shielded sync that previously OOM'd now completes (~164 s, ~10 GB peak) and caches for fast follow-ups.
 
 ## [0.4.0] - 2026-05-04
 

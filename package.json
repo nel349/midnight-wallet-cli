@@ -1,6 +1,6 @@
 {
   "name": "midnight-wallet-cli",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "Git-style CLI wallet for the Midnight blockchain",
   "license": "Apache-2.0",
@@ -46,8 +46,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "^0.16.0",
     "@midnight-ntwrk/dapp-connector-api": "^4.0.1",
-    "@midnight-ntwrk/ledger-v8": "^8.0.3",
+    "@midnight-ntwrk/ledger-v8": "^8.1.0",
     "@midnight-ntwrk/midnight-js-contracts": "^4.0.4",
     "@midnight-ntwrk/midnight-js-http-client-proof-provider": "^4.0.4",
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "^4.0.4",
