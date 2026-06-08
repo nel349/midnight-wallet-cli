@@ -8,10 +8,10 @@ import { join } from 'path';
 import { MIDNIGHT_DIR, LOCALNET_DIR_NAME, DIR_MODE } from './constants.ts';
 
 // Version tag — bump when compose content changes so stale files get overwritten
-export const COMPOSE_VERSION = '3.0.1';
+export const COMPOSE_VERSION = '3.0.2';
 
 // Docker image versions — update together per Midnight support matrix
-const NODE_IMAGE = 'midnightntwrk/midnight-node:0.22.3';
+const NODE_IMAGE = 'midnightntwrk/midnight-node:0.22.5';
 const INDEXER_IMAGE = 'midnightntwrk/indexer-standalone:4.0.1';
 const PROOF_SERVER_IMAGE = 'midnightntwrk/proof-server:8.0.3';
 
