@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { loadCliConfig } from './cli-config.ts';
+import { loadCliConfig, getEndpointOverridesForNetwork } from './cli-config.ts';
 import { INDEXER_GRAPHQL_PATH, INDEXER_GRAPHQL_WS_PATH } from './constants.ts';
 
 export type NetworkName = 'preprod' | 'preview' | 'undeployed';
@@ -142,23 +142,29 @@ export interface EndpointOverrides {
 
 /**
  * Apply endpoint overrides to a network config.
- * Priority: flag overrides > persistent config > network defaults.
+ * Priority: flag overrides > persistent config (scoped to `networkName`) >
+ * network defaults. Config overrides are network-scoped because endpoints
+ * are inherently network-specific — a preprod node URL must never apply to
+ * an `--network undeployed` run. See `getEndpointOverridesForNetwork` for
+ * the scoping rules, including legacy flat-key compatibility.
  * Mutates and returns the config for convenience.
  */
 export function applyEndpointOverrides(
   config: NetworkConfig,
   flagOverrides: EndpointOverrides,
+  networkName: NetworkName,
   configDir?: string,
 ): NetworkConfig {
   const cliConfig = loadCliConfig(configDir);
+  const scoped = getEndpointOverridesForNetwork(cliConfig, networkName);
 
-  config.proofServer = flagOverrides.proofServer ?? cliConfig['proof-server'] ?? config.proofServer;
-  config.node = flagOverrides.node ?? cliConfig.node ?? config.node;
-  config.indexerWS = flagOverrides.indexerWS ?? cliConfig['indexer-ws'] ?? config.indexerWS;
+  config.proofServer = flagOverrides.proofServer ?? scoped['proof-server'] ?? config.proofServer;
+  config.node = flagOverrides.node ?? scoped.node ?? config.node;
+  config.indexerWS = flagOverrides.indexerWS ?? scoped['indexer-ws'] ?? config.indexerWS;
 
   // Keep indexer HTTP in sync if indexer WS was overridden
   // (derive HTTP URL from WS URL by stripping /ws suffix and adjusting protocol)
-  if (flagOverrides.indexerWS ?? cliConfig['indexer-ws']) {
+  if (flagOverrides.indexerWS ?? scoped['indexer-ws']) {
     const wsUrl = config.indexerWS;
     config.indexer = wsUrl
       .replace(/^wss:/, 'https:')

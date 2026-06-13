@@ -369,3 +369,94 @@ describe('getValidConfigKeys', () => {
     expect(getValidConfigKeys().length).toBeGreaterThan(0);
   });
 });
+
+describe('per-network endpoint scoping', () => {
+  const configPath = () => path.join(TEST_DIR, 'config.json');
+  const readRaw = () => JSON.parse(fs.readFileSync(configPath(), 'utf-8'));
+
+  it('set writes endpoint scoped under the current network and clears the flat key', () => {
+    fs.writeFileSync(configPath(), JSON.stringify({
+      network: 'preprod',
+      node: 'wss://legacy-flat-node',
+    }));
+    setConfigValue('node', 'wss://new-preprod-node', TEST_DIR);
+    const raw = readRaw();
+    expect(raw.networks.preprod.node).toBe('wss://new-preprod-node');
+    expect(raw.node).toBeUndefined();
+  });
+
+  it('get reads the scoped value for the current network', () => {
+    fs.writeFileSync(configPath(), JSON.stringify({
+      network: 'undeployed',
+      networks: { undeployed: { node: 'ws://scoped:9944' } },
+    }));
+    expect(getConfigValue('node', TEST_DIR)).toBe('ws://scoped:9944');
+  });
+
+  it('get falls back to the flat key for the pinned network', () => {
+    fs.writeFileSync(configPath(), JSON.stringify({
+      network: 'preprod',
+      node: 'wss://flat-node',
+    }));
+    expect(getConfigValue('node', TEST_DIR)).toBe('wss://flat-node');
+  });
+
+  it('switching network migrates flat endpoint keys into the OLD network scope', () => {
+    fs.writeFileSync(configPath(), JSON.stringify({
+      network: 'preprod',
+      node: 'wss://rpc.preprod.midnight.network',
+      'indexer-ws': 'wss://indexer.preprod.midnight.network/api/v4/graphql/ws',
+    }));
+    setConfigValue('network', 'undeployed', TEST_DIR);
+    const raw = readRaw();
+    expect(raw.network).toBe('undeployed');
+    // Flat keys moved under preprod — the network they were set under.
+    expect(raw.node).toBeUndefined();
+    expect(raw['indexer-ws']).toBeUndefined();
+    expect(raw.networks.preprod.node).toBe('wss://rpc.preprod.midnight.network');
+    expect(raw.networks.preprod['indexer-ws']).toBe('wss://indexer.preprod.midnight.network/api/v4/graphql/ws');
+    // And the new network sees defaults, not the old URLs.
+    expect(getConfigValue('node', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('unset clears both the scoped entry and the flat key', () => {
+    fs.writeFileSync(configPath(), JSON.stringify({
+      network: 'preprod',
+      node: 'wss://flat-node',
+      networks: { preprod: { node: 'wss://scoped-node' } },
+    }));
+    unsetConfigValue('node', TEST_DIR);
+    const raw = readRaw();
+    expect(raw.node).toBeUndefined();
+    expect(raw.networks).toBeUndefined(); // empty scopes are pruned
+    expect(getConfigValue('node', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('unset for one network leaves other networks scoped entries alone', () => {
+    fs.writeFileSync(configPath(), JSON.stringify({
+      network: 'preprod',
+      networks: {
+        preprod: { node: 'wss://preprod-node' },
+        undeployed: { node: 'ws://localnet-node' },
+      },
+    }));
+    unsetConfigValue('node', TEST_DIR);
+    const raw = readRaw();
+    expect(raw.networks.preprod).toBeUndefined();
+    expect(raw.networks.undeployed.node).toBe('ws://localnet-node');
+  });
+
+  it('loadCliConfig drops invalid network names and non-string endpoint values', () => {
+    fs.writeFileSync(configPath(), JSON.stringify({
+      network: 'preprod',
+      networks: {
+        bogusnet: { node: 'ws://x' },
+        preprod: { node: 12345, 'indexer-ws': 'wss://ok/ws' },
+      },
+    }));
+    const config = loadCliConfig(TEST_DIR);
+    expect(config.networks?.preprod?.['indexer-ws']).toBe('wss://ok/ws');
+    expect(config.networks?.preprod?.node).toBeUndefined();
+    expect((config.networks as Record<string, unknown> | undefined)?.bogusnet).toBeUndefined();
+  });
+});

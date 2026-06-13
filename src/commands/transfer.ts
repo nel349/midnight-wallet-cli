@@ -100,7 +100,7 @@ async function unshieldedTransfer(
     proofServer: getFlag(args, 'proof-server'),
     node: getFlag(args, 'node'),
     indexerWS: getFlag(args, 'indexer-ws'),
-  });
+  }, networkName);
 
   process.stderr.write('\n' + header('Transfer') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');
@@ -198,7 +198,7 @@ async function shieldedTransfer(
     proofServer: getFlag(args, 'proof-server'),
     node: getFlag(args, 'node'),
     indexerWS: getFlag(args, 'indexer-ws'),
-  });
+  }, networkName);
 
   // Validate recipient as ShieldedAddress
   let decodedRecipient: ShieldedAddress;

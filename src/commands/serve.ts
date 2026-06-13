@@ -48,7 +48,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     proofServer: getFlag(args, 'proof-server'),
     node: getFlag(args, 'node'),
     indexerWS: getFlag(args, 'indexer-ws'),
-  });
+  }, networkName);
 
   // ── Header ──
 

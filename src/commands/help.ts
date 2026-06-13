@@ -267,6 +267,10 @@ const COMMAND_SPECS: CommandSpec[] = [
       'unset <key>         Reset a config value to its default',
       '',
       'Keys: network, wallet, proof-server, node, indexer-ws',
+      '',
+      'Endpoint keys (proof-server, node, indexer-ws) are scoped to the',
+      'network configured at set time — a preprod node URL never applies',
+      "to --network undeployed runs. get/unset use the current network's value.",
     ],
     examples: [
       'midnight config get network',

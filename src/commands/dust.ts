@@ -46,7 +46,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     proofServer: getFlag(args, 'proof-server'),
     node: getFlag(args, 'node'),
     indexerWS: getFlag(args, 'indexer-ws'),
-  });
+  }, networkName);
 
   if (isVerbose(args)) enableVerbose();
   const isJson = hasFlag(args, 'json');

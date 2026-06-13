@@ -4,6 +4,10 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Endpoint config overrides no longer leak across networks.** `mn config set node/indexer-ws/proof-server` used to write a global value that applied to *every* network — so a preprod node URL set while on preprod silently hijacked `--network undeployed` runs. The visible symptoms: airdrop's genesis sync warning `expected HRP mn_addr_preprod, but was mn_addr_undeployed`, a dust pre-prime reading ~1M preprod events on "undeployed", a cross-contaminated dust cache, and ultimately a ledger WASM `memory access out of bounds` crash. Endpoint overrides are now **scoped per network** in `~/.midnight/config.json` (`networks.<name>.{node, indexer-ws, proof-server}`): `config set` writes under the network configured at set time, `config get`/`unset` operate on the current network's value, and switching networks migrates legacy flat keys into the scope of the network they were set under. Old config files keep working — flat keys are still honored, but only for the network that was pinned when they applied (regression-tested).
+
 ## [0.4.1] - 2026-06-08
 
 ### Changed

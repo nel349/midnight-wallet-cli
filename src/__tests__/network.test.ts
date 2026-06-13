@@ -162,19 +162,19 @@ describe('applyEndpointOverrides', () => {
 
   it('applies flag overrides for proofServer', () => {
     const config = getNetworkConfig('preprod');
-    applyEndpointOverrides(config, { proofServer: 'http://custom:6300' }, TEST_DIR);
+    applyEndpointOverrides(config, { proofServer: 'http://custom:6300' }, 'preprod', TEST_DIR);
     expect(config.proofServer).toBe('http://custom:6300');
   });
 
   it('applies flag overrides for node', () => {
     const config = getNetworkConfig('preprod');
-    applyEndpointOverrides(config, { node: 'wss://custom-node' }, TEST_DIR);
+    applyEndpointOverrides(config, { node: 'wss://custom-node' }, 'preprod', TEST_DIR);
     expect(config.node).toBe('wss://custom-node');
   });
 
   it('applies flag overrides for indexerWS and derives indexer HTTP', () => {
     const config = getNetworkConfig('preprod');
-    applyEndpointOverrides(config, { indexerWS: 'wss://custom-indexer/api/v4/graphql/ws' }, TEST_DIR);
+    applyEndpointOverrides(config, { indexerWS: 'wss://custom-indexer/api/v4/graphql/ws' }, 'preprod', TEST_DIR);
     expect(config.indexerWS).toBe('wss://custom-indexer/api/v4/graphql/ws');
     expect(config.indexer).toBe('https://custom-indexer/api/v4/graphql');
   });
@@ -185,7 +185,7 @@ describe('applyEndpointOverrides', () => {
       JSON.stringify({ network: 'preprod', 'proof-server': 'http://config-prover:6300' }),
     );
     const config = getNetworkConfig('preprod');
-    applyEndpointOverrides(config, {}, TEST_DIR);
+    applyEndpointOverrides(config, {}, 'preprod', TEST_DIR);
     expect(config.proofServer).toBe('http://config-prover:6300');
   });
 
@@ -195,14 +195,14 @@ describe('applyEndpointOverrides', () => {
       JSON.stringify({ network: 'preprod', 'proof-server': 'http://config-prover:6300' }),
     );
     const config = getNetworkConfig('preprod');
-    applyEndpointOverrides(config, { proofServer: 'http://flag-prover:6300' }, TEST_DIR);
+    applyEndpointOverrides(config, { proofServer: 'http://flag-prover:6300' }, 'preprod', TEST_DIR);
     expect(config.proofServer).toBe('http://flag-prover:6300');
   });
 
   it('preserves network defaults when no overrides exist', () => {
     const config = getNetworkConfig('preprod');
     const original = { ...config };
-    applyEndpointOverrides(config, {}, TEST_DIR);
+    applyEndpointOverrides(config, {}, 'preprod', TEST_DIR);
     expect(config.proofServer).toBe(original.proofServer);
     expect(config.node).toBe(original.node);
     expect(config.indexerWS).toBe(original.indexerWS);
@@ -211,13 +211,100 @@ describe('applyEndpointOverrides', () => {
 
   it('does not modify networkId', () => {
     const config = getNetworkConfig('preprod');
-    applyEndpointOverrides(config, { proofServer: 'http://custom:6300' }, TEST_DIR);
+    applyEndpointOverrides(config, { proofServer: 'http://custom:6300' }, 'preprod', TEST_DIR);
     expect(config.networkId).toBe('PreProd');
   });
 
   it('derives http indexer from ws:// protocol', () => {
     const config = getNetworkConfig('undeployed');
-    applyEndpointOverrides(config, { indexerWS: 'ws://localhost:9999/api/v4/graphql/ws' }, TEST_DIR);
+    applyEndpointOverrides(config, { indexerWS: 'ws://localhost:9999/api/v4/graphql/ws' }, 'undeployed', TEST_DIR);
     expect(config.indexer).toBe('http://localhost:9999/api/v4/graphql');
+  });
+});
+
+describe('applyEndpointOverrides — network scoping (cross-network leak regression)', () => {
+  const TEST_DIR = path.join(os.tmpdir(), `midnight-network-scope-test-${process.pid}`);
+
+  beforeEach(() => {
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
+  // The original bug: config pinned to preprod with flat preprod endpoint
+  // overrides hijacked `--network undeployed` runs — the genesis wallet
+  // synced against the preprod indexer (HRP mismatch warnings, then a
+  // ledger WASM "memory access out of bounds" from cross-chain state).
+  it('flat overrides set under one network do NOT leak into another network', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({
+        network: 'preprod',
+        node: 'wss://rpc.preprod.midnight.network',
+        'indexer-ws': 'wss://indexer.preprod.midnight.network/api/v4/graphql/ws',
+        'proof-server': 'http://localhost:6300',
+      }),
+    );
+    const config = getNetworkConfig('undeployed');
+    applyEndpointOverrides(config, {}, 'undeployed', TEST_DIR);
+    expect(config.node).toBe('ws://localhost:9944');
+    expect(config.indexerWS).toBe('ws://localhost:8088/api/v4/graphql/ws');
+    expect(config.indexer).toBe('http://localhost:8088/api/v4/graphql');
+  });
+
+  it('flat overrides still apply to the network they were pinned under', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({ network: 'preprod', node: 'wss://my-custom-preprod-node' }),
+    );
+    const config = getNetworkConfig('preprod');
+    applyEndpointOverrides(config, {}, 'preprod', TEST_DIR);
+    expect(config.node).toBe('wss://my-custom-preprod-node');
+  });
+
+  it('scoped overrides apply only to their own network', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({
+        network: 'preprod',
+        networks: { undeployed: { node: 'ws://my-localnet:19944' } },
+      }),
+    );
+    const undeployed = getNetworkConfig('undeployed');
+    applyEndpointOverrides(undeployed, {}, 'undeployed', TEST_DIR);
+    expect(undeployed.node).toBe('ws://my-localnet:19944');
+
+    const preprod = getNetworkConfig('preprod');
+    applyEndpointOverrides(preprod, {}, 'preprod', TEST_DIR);
+    expect(preprod.node).toBe('wss://rpc.preprod.midnight.network');
+  });
+
+  it('scoped override beats the flat key for the pinned network', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({
+        network: 'preprod',
+        node: 'wss://flat-node',
+        networks: { preprod: { node: 'wss://scoped-node' } },
+      }),
+    );
+    const config = getNetworkConfig('preprod');
+    applyEndpointOverrides(config, {}, 'preprod', TEST_DIR);
+    expect(config.node).toBe('wss://scoped-node');
+  });
+
+  it('scoped indexer-ws derives the HTTP indexer URL', () => {
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'config.json'),
+      JSON.stringify({
+        network: 'undeployed',
+        networks: { undeployed: { 'indexer-ws': 'ws://localhost:19088/api/v4/graphql/ws' } },
+      }),
+    );
+    const config = getNetworkConfig('undeployed');
+    applyEndpointOverrides(config, {}, 'undeployed', TEST_DIR);
+    expect(config.indexer).toBe('http://localhost:19088/api/v4/graphql');
   });
 });

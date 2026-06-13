@@ -74,7 +74,7 @@ async function addressBalance(args: ParsedArgs): Promise<void> {
     proofServer: getFlag(args, 'proof-server'),
     node: getFlag(args, 'node'),
     indexerWS: getFlag(args, 'indexer-ws'),
-  });
+  }, networkName);
 
   const spinner = startSpinner(`Checking balance on ${networkName}...`);
 
@@ -164,7 +164,7 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
     proofServer: getFlag(args, 'proof-server'),
     node: getFlag(args, 'node'),
     indexerWS: getFlag(args, 'indexer-ws'),
-  });
+  }, networkName);
 
   const unsuppress = suppressSdkTransientErrors();
   const restoreRpc = suppressRpcNoise();

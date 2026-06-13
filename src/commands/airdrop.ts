@@ -46,7 +46,7 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
     proofServer: getFlag(args, 'proof-server'),
     node: getFlag(args, 'node'),
     indexerWS: getFlag(args, 'indexer-ws'),
-  });
+  }, networkName);
 
   if (networkName !== 'undeployed') {
     throw new Error(
