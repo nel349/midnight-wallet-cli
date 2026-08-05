@@ -11,6 +11,22 @@
 
 import WebSocket from 'ws';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
+import { collapseForeignGenerations } from './dust-collapse.ts';
+
+// Set to '1' to disable dust generation-tree collapse (debugging / safety valve).
+const DUST_COLLAPSE_DISABLE_ENV = 'MN_DISABLE_DUST_COLLAPSE';
+
+/**
+ * Data the collapse needs to keep working correctly across restarts: which
+ * generation-tree leaves are ours (must never be collapsed) and how far the
+ * tree has grown. Persisted alongside the dust state and fed back on resume.
+ */
+export interface DustRetention {
+  /** Generation-tree indices owned by this wallet. */
+  ownedGenerationIndices: number[];
+  /** Next-free generation index reached (exclusive upper bound). */
+  generationFrontier: number;
+}
 
 // Well-known initial dust parameters. `ParamChange` events in the replay stream
 // will update these to the chain's current values before any UTXO events are
@@ -46,6 +62,8 @@ export interface DustDirectResult {
   syncTime: Date;
   /** Final DustLocalState — callers can serialize this for caching. */
   state: ledger.DustLocalState;
+  /** Retention data to persist with the state (for correct resume + collapse). */
+  retention: DustRetention;
   /** Id of the last event applied in this run. -1 if none arrived. */
   lastAppliedEventId: number;
   /**
@@ -68,7 +86,7 @@ export interface DustDirectOptions {
    * Note: invoked synchronously after `replayEvents`; keep the callback
    * cheap (file write is fine, network is not).
    */
-  onCheckpoint?: (state: ledger.DustLocalState, lastAppliedEventId: number) => void;
+  onCheckpoint?: (state: ledger.DustLocalState, lastAppliedEventId: number, retention: DustRetention) => void;
   /**
    * Soft ceiling for the whole subscription. On expiry the call resolves
    * with `partial: true` and whatever state has been applied so far —
@@ -90,6 +108,10 @@ export interface DustDirectOptions {
   initialState?: ledger.DustLocalState;
   /** Subscribe starting at this event id (inclusive). Default: 0. */
   startFromId?: number;
+  /** Retention data from a cached checkpoint, so resume keeps collapsing correctly. */
+  initialRetention?: DustRetention;
+  /** Collapse foreign generation ranges before checkpoint/return. Default: true. */
+  collapse?: boolean;
 }
 
 function createInitialDustState(): ledger.DustLocalState {
@@ -122,7 +144,11 @@ export function readDustBalanceDirect(
     signal,
     initialState,
     startFromId = 0,
+    initialRetention,
+    collapse,
   } = options;
+
+  const collapseEnabled = collapse !== false && process.env[DUST_COLLAPSE_DISABLE_ENV] !== '1';
 
   // Apply events in chunks as they arrive so the final step is cheap and
   // progress updates stay responsive. Replaying 100k events in a single
@@ -133,6 +159,25 @@ export function readDustBalanceDirect(
     const ws = new WebSocket(indexerWS, ['graphql-transport-ws']);
     let state = initialState ?? createInitialDustState();
     const pending: ledger.Event[] = [];
+
+    // Retention tracking (owner-match): a generation leaf is ours iff its owner
+    // is our dust public key. We accumulate the owned index set + frontier as
+    // events arrive so we can collapse only foreign ranges. Seeded from the
+    // cached checkpoint on resume.
+    const myPubkey = dustSecretKey.publicKey;
+    const ownedGenIndices = new Set<bigint>((initialRetention?.ownedGenerationIndices ?? []).map(BigInt));
+    let frontier = BigInt(initialRetention?.generationFrontier ?? 0);
+    const trackRetention = (event: ledger.Event) => {
+      const content = event.content as { tag?: string; generationIndex?: bigint; generation?: { owner?: bigint } };
+      if (content?.tag !== 'dustInitialUtxo' || content.generationIndex === undefined) return;
+      const idx = content.generationIndex;
+      if (idx + 1n > frontier) frontier = idx + 1n;
+      if (content.generation?.owner === myPubkey) ownedGenIndices.add(idx);
+    };
+    const currentRetention = (): DustRetention => ({
+      ownedGenerationIndices: [...ownedGenIndices].map(Number),
+      generationFrontier: Number(frontier),
+    });
     let eventsAppliedCount = 0;
     let lastEventId = startFromId - 1;
     let maxIdSeen = -1;
@@ -155,10 +200,18 @@ export function readDustBalanceDirect(
       state = state.replayEvents(dustSecretKey, pending);
       eventsAppliedCount += pending.length;
       pending.length = 0;
+      // Collapse foreign generation ranges now so both the checkpoint we write
+      // and the state we keep replaying onto stay small. Continuing to replay
+      // over a collapsed state is safe (foreign leaves are never indexed; dtime
+      // updates carry their own collapse-tolerant path). The guard inside the
+      // helper falls back to the uncollapsed state if anything looks wrong.
+      if (collapseEnabled) {
+        state = collapseForeignGenerations(state, ownedGenIndices, frontier).state;
+      }
       // Checkpoint after each chunk so a timeout / abort / crash doesn't
       // lose the work. Caller decides cost (typically a small JSON write).
       if (onCheckpoint && lastEventId >= 0) {
-        try { onCheckpoint(state, lastEventId); } catch { /* best-effort */ }
+        try { onCheckpoint(state, lastEventId, currentRetention()); } catch { /* best-effort */ }
       }
     };
 
@@ -187,6 +240,7 @@ export function readDustBalanceDirect(
           ownedUtxoCount: state.utxos.length,
           syncTime: state.syncTime,
           state,
+          retention: currentRetention(),
           lastAppliedEventId: lastEventId,
           partial,
         });
@@ -260,7 +314,9 @@ export function readDustBalanceDirect(
 
       try {
         const bytes = Buffer.from(evt.raw, 'hex');
-        pending.push(ledger.Event.deserialize(bytes));
+        const event = ledger.Event.deserialize(bytes);
+        trackRetention(event); // read owner/index before replayEvents consumes it
+        pending.push(event);
       } catch (err) {
         finishErr(new Error(`Failed to deserialize dust event ${evt.id}: ${(err as Error).message}`));
         return;

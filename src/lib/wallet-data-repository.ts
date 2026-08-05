@@ -46,7 +46,7 @@ import {
   validateWalletCacheChainId,
 } from './wallet-cache.ts';
 import { checkBalance, type BalanceSummary } from './balance-subscription.ts';
-import { readDustBalanceDirect, type DustDirectResult } from './dust-direct.ts';
+import { readDustBalanceDirect, type DustDirectResult, type DustRetention } from './dust-direct.ts';
 import { callNodeRpc } from './node-rpc.ts';
 import { deriveDustSeed } from './derivation.ts';
 import { deriveUnshieldedAddress } from './derive-address.ts';
@@ -151,10 +151,11 @@ export interface RepoDeps {
     opts: {
       startFromId: number;
       initialState?: ledger.DustLocalState;
+      initialRetention?: DustRetention;
       signal?: AbortSignal;
       onProgress?: (applied: number, max: number) => void;
       /** Repo passes a callback to persist incremental progress during long syncs. */
-      onCheckpoint?: (state: ledger.DustLocalState, lastAppliedEventId: number) => void;
+      onCheckpoint?: (state: ledger.DustLocalState, lastAppliedEventId: number, retention: DustRetention) => void;
     },
   ) => Promise<DustDirectResult>;
   /** Override cache directory (tests use a tmp dir). */
@@ -249,6 +250,7 @@ export class WalletDataRepository {
       result = await this.fetchDust(seed, network, {
         startFromId,
         initialState: cached?.state,
+        initialRetention: cached?.retention,
         signal: opts.signal,
         onProgress: (applied, max) => {
           const target = Math.max(1, max + 1 - startFromId);
@@ -256,8 +258,8 @@ export class WalletDataRepository {
         },
         // Persist after each chunk so a Ctrl+C / process kill / SIGTERM
         // doesn't lose 100k events of work.
-        onCheckpoint: (state, lastAppliedEventId) => {
-          try { saveDustCache(networkName, pubkeyHex, state, lastAppliedEventId, this.cacheDir); } catch { /* best-effort */ }
+        onCheckpoint: (state, lastAppliedEventId, retention) => {
+          try { saveDustCache(networkName, pubkeyHex, state, lastAppliedEventId, this.cacheDir, undefined, retention); } catch { /* best-effort */ }
         },
       });
 
@@ -266,7 +268,7 @@ export class WalletDataRepository {
         const savedId = result.lastAppliedEventId >= 0
           ? result.lastAppliedEventId
           : (cached?.lastAppliedEventId ?? -1);
-        try { saveDustCache(networkName, pubkeyHex, result.state, savedId, this.cacheDir); } catch { /* best-effort */ }
+        try { saveDustCache(networkName, pubkeyHex, result.state, savedId, this.cacheDir, undefined, result.retention); } catch { /* best-effort */ }
       }
 
       totalEventsApplied += result.eventCount;
@@ -564,7 +566,14 @@ function defaultUnshieldedFetcher(
 function defaultDustFetcher(
   seed: Buffer,
   network: NetworkConfig,
-  opts: { startFromId: number; initialState?: ledger.DustLocalState; signal?: AbortSignal; onProgress?: (applied: number, max: number) => void },
+  opts: {
+    startFromId: number;
+    initialState?: ledger.DustLocalState;
+    initialRetention?: DustRetention;
+    signal?: AbortSignal;
+    onProgress?: (applied: number, max: number) => void;
+    onCheckpoint?: (state: ledger.DustLocalState, lastAppliedEventId: number, retention: DustRetention) => void;
+  },
 ): Promise<DustDirectResult> {
   const dustSeed = deriveDustSeed(seed);
   const dustSecretKey = ledger.DustSecretKey.fromSeed(dustSeed);

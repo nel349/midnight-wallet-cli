@@ -17,9 +17,12 @@ import * as ledger from '@midnight-ntwrk/ledger-v8';
 
 import { MIDNIGHT_DIR, CACHE_DIR_NAME, DIR_MODE, FILE_MODE } from './constants.ts';
 import { deriveDustSeed } from './derivation.ts';
-import { readDustBalanceDirect, type DustDirectOptions } from './dust-direct.ts';
+import { readDustBalanceDirect, type DustDirectOptions, type DustRetention } from './dust-direct.ts';
 
-const DUST_CACHE_VERSION = 1;
+// v2 added the retention fields (owned generation indices + frontier) that the
+// generation-tree collapse needs. v1 caches lack them and are invalidated, so
+// they re-sync once and come back collapsed.
+const DUST_CACHE_VERSION = 2;
 
 interface DustCacheFile {
   version: number;
@@ -30,12 +33,19 @@ interface DustCacheFile {
   chainId?: string;
   timestamp: string;
   dustState: string; // hex-encoded DustLocalState.serialize()
+  /** Generation-tree indices owned by this wallet (never collapsed). */
+  ownedGenerationIndices: number[];
+  /** Next-free generation index the state has reached. */
+  generationFrontier: number;
 }
 
 export interface DustCacheEntry {
   state: ledger.DustLocalState;
   lastAppliedEventId: number;
+  retention: DustRetention;
 }
+
+const EMPTY_RETENTION: DustRetention = { ownedGenerationIndices: [], generationFrontier: 0 };
 
 /** Normalize a DustPublicKey (bigint) to a fixed-width 64-char hex string. */
 export function dustPublicKeyHex(publicKey: ledger.DustPublicKey): string {
@@ -86,10 +96,19 @@ export function loadDustCache(
     if (parsed.dustPublicKeyHex !== pubkeyHex) return null;
     if (typeof parsed.lastAppliedEventId !== 'number') return null;
     if (typeof parsed.dustState !== 'string') return null;
+    if (!Array.isArray(parsed.ownedGenerationIndices)) return null;
+    if (typeof parsed.generationFrontier !== 'number') return null;
 
     const bytes = Buffer.from(parsed.dustState, 'hex');
     const state = ledger.DustLocalState.deserialize(bytes);
-    return { state, lastAppliedEventId: parsed.lastAppliedEventId };
+    return {
+      state,
+      lastAppliedEventId: parsed.lastAppliedEventId,
+      retention: {
+        ownedGenerationIndices: parsed.ownedGenerationIndices,
+        generationFrontier: parsed.generationFrontier,
+      },
+    };
   } catch {
     return null;
   }
@@ -105,6 +124,7 @@ export function saveDustCache(
   lastAppliedEventId: number,
   cacheDir?: string,
   chainId?: string,
+  retention: DustRetention = EMPTY_RETENTION,
 ): void {
   const data: DustCacheFile = {
     version: DUST_CACHE_VERSION,
@@ -113,6 +133,8 @@ export function saveDustCache(
     lastAppliedEventId,
     timestamp: new Date().toISOString(),
     dustState: Buffer.from(state.serialize()).toString('hex'),
+    ownedGenerationIndices: retention.ownedGenerationIndices,
+    generationFrontier: retention.generationFrontier,
     ...(chainId ? { chainId } : {}),
   };
 
@@ -251,6 +273,7 @@ export async function primeDustCache(
 
   const result = await readDustBalanceDirect(dustSecretKey, indexerWS, {
     initialState: cached?.state,
+    initialRetention: cached?.retention,
     startFromId,
     onProgress: options.onProgress,
     signal: options.signal,
@@ -260,11 +283,11 @@ export async function primeDustCache(
   // zero new events arrived, leave the on-disk file untouched (it's already
   // current as far as the indexer is concerned).
   if (result.lastAppliedEventId >= 0) {
-    saveDustCache(network, pubkeyHex, result.state, result.lastAppliedEventId);
+    saveDustCache(network, pubkeyHex, result.state, result.lastAppliedEventId, undefined, undefined, result.retention);
   } else if (!cached) {
     // No cache AND no events on-chain for this network yet — still persist an
     // empty snapshot so the next call sees `fromCache: true` and short-circuits.
-    saveDustCache(network, pubkeyHex, result.state, -1);
+    saveDustCache(network, pubkeyHex, result.state, -1, undefined, undefined, result.retention);
   }
 
   return {
