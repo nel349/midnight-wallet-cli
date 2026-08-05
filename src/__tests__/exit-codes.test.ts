@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyError, humanizeNetworkError, ERROR_CODES, EXIT_NETWORK_ERROR } from '../lib/exit-codes.ts';
+import { classifyError, humanizeNetworkError, ERROR_CODES, EXIT_NETWORK_ERROR, EXIT_INVALID_ARGS } from '../lib/exit-codes.ts';
 
 describe('humanizeNetworkError', () => {
   it('rewrites the empty-reason node-fetch tail with URL + cause hint', () => {
@@ -28,5 +28,25 @@ describe('classifyError network coverage', () => {
     const { exitCode, errorCode } = classifyError(err);
     expect(exitCode).toBe(EXIT_NETWORK_ERROR);
     expect(errorCode).toBe(ERROR_CODES.NETWORK_ERROR);
+  });
+});
+
+describe('classifyError usage errors (positional-address balance)', () => {
+  it('classifies the "shielded balances are private" error as INVALID_ARGS', () => {
+    const err = new Error(
+      'Shielded balances are private — they can only be read with the wallet\'s secret key, not from an address alone.\n' +
+      'This address isn\'t one of your wallets. Check its shielded balance from the wallet that owns it:\n' +
+      '  midnight balance --wallet <name> --shielded --network undeployed',
+    );
+    const { exitCode, errorCode } = classifyError(err);
+    expect(exitCode).toBe(EXIT_INVALID_ARGS);
+    expect(errorCode).toBe(ERROR_CODES.INVALID_ARGS);
+  });
+
+  it('classifies the address-HRP / --network mismatch as INVALID_ARGS', () => {
+    const err = new Error('Address belongs to undeployed but --network is preprod.\nDrop --network or pass an address for preprod.');
+    const { exitCode, errorCode } = classifyError(err);
+    expect(exitCode).toBe(EXIT_INVALID_ARGS);
+    expect(errorCode).toBe(ERROR_CODES.INVALID_ARGS);
   });
 });
