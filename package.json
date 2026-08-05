@@ -36,6 +36,10 @@
     "dist",
     "docs/SKILL.md"
   ],
+  "engines": {
+    "node": ">=20",
+    "bun": ">=1.3.0"
+  },
   "scripts": {
     "wallet": "tsx src/wallet.ts",
     "build": "bun build src/wallet.ts --outfile dist/wallet.js --target node --format esm --packages external --minify --banner \"#!/usr/bin/env node\" && bun build src/mcp-server.ts --outfile dist/mcp-server.js --target node --format esm --packages external --minify --banner \"#!/usr/bin/env node\"",

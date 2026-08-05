@@ -15,6 +15,9 @@ npm install
 You also need:
 
 - **Node.js >= 20**
+- **Bun >= 1.3** — only for `npm run build`, which bundles `dist/` with
+  `bun build`. Older Bun (1.2.x) still bundles, but the toolchain is developed
+  against 1.3.x; upgrade with `bun upgrade` if `npm run build` misbehaves.
 - **Docker** — for `mn localnet` integration testing
 - **A proof server** at `localhost:6300` if you're testing transactions
   (`mn localnet up` provides one)
