@@ -113,12 +113,14 @@ const COMMAND_SPECS: CommandSpec[] = [
     usage: 'midnight balance [address] [--network <name>] [--indexer-ws <url>]',
     flags: [
       '<address>           Check a specific address (unshielded only, no wallet sync)',
+      '--shielded          Include shielded balance — needs the seed, so the address must be one of your wallets',
       '--network <name>    Override network',
       '--indexer-ws <url>  Custom indexer WebSocket URL',
     ],
     examples: [
       'midnight balance',
       'midnight balance mn_addr_preprod1...',
+      'midnight balance --wallet alice --shielded',
     ],
     jsonFields: {
       address: 'Unshielded address (bech32m)',
@@ -673,6 +675,11 @@ proofs. The CLI provides full shielded support:
   Positional address balance (unshielded only, fast GraphQL):
     midnight balance mn_addr_... --json
     → { address, network, balances, utxoCount, txCount }
+
+  Shielded balance is private — it can't be read from an address alone
+  (no secret key). Pass --shielded with a positional address and, if the
+  address is one of your wallets, it maps to that wallet's full sync;
+  otherwise it errors and points you to --wallet <name> --shielded.
 
 Note: there is no self-shielding. Shielded coins come from receiving
 transfers from wallets that already have shielded tokens.

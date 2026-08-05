@@ -6,7 +6,7 @@ import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { type ParsedArgs, getFlag, hasFlag, isMinimalMode, isVerbose } from '../lib/argv.ts';
 import { enableVerbose, verbose } from '../lib/verbose.ts';
 import { type NetworkName, isValidNetworkName } from '../lib/network.ts';
-import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
+import { loadWalletConfig, resolveWalletPath, saveShieldedAddress, findWalletByAddress } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { getNetworkId } from '../lib/network-id.ts';
@@ -69,6 +69,28 @@ async function addressBalance(args: ParsedArgs): Promise<void> {
   }
 
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
+
+  // Shielded balances are private: reading one needs the wallet's secret key,
+  // which an address alone doesn't carry. If this address belongs to one of our
+  // wallets we have the seed → run the full wallet sync (which shows shielded).
+  // Otherwise there's nothing to decrypt with → fail with a clear, actionable error.
+  if (hasFlag(args, 'shielded')) {
+    const owned = findWalletByAddress(address);
+    if (owned) {
+      verbose('balance', `shielded positional → wallet ${owned.wallet.name} on ${owned.network}`);
+      const delegated: ParsedArgs = {
+        ...args,
+        flags: { ...args.flags, wallet: owned.wallet.file, network: owned.network },
+      };
+      return walletBalance(delegated);
+    }
+    throw new Error(
+      `Shielded balances are private — they can only be read with the wallet's secret key, ` +
+      `not from an address alone.\n` +
+      `This address isn't one of your wallets. Check its shielded balance from the wallet that owns it:\n` +
+      `  midnight balance --wallet <name> --shielded --network ${networkName}`
+    );
+  }
 
   applyEndpointOverrides(networkConfig, {
     proofServer: getFlag(args, 'proof-server'),

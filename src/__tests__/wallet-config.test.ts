@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { loadWalletConfig, saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
+import { loadWalletConfig, saveWalletConfig, matchWalletAddress, type WalletConfig, type WalletInfo } from '../lib/wallet-config.ts';
 import { DIR_MODE, FILE_MODE } from '../lib/constants.ts';
 import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
 
@@ -213,5 +213,47 @@ describe('round-trip', () => {
     saveWalletConfig(VALID_CONFIG, filePath);
     const loaded = loadWalletConfig(filePath);
     expect(loaded).toEqual(expected);
+  });
+});
+
+describe('matchWalletAddress', () => {
+  const shieldedAddresses = deriveAllShieldedAddresses(Buffer.from(VALID_SEED, 'hex'));
+  const SEED_2 = '1111111111111111111111111111111111111111111111111111111111111111';
+
+  const alice: WalletInfo = {
+    name: 'alice',
+    addresses: VALID_ADDRESSES,
+    shieldedAddresses,
+    isActive: true,
+    file: '/wallets/alice.json',
+  };
+  const bob: WalletInfo = {
+    name: 'bob',
+    addresses: deriveAllAddresses(Buffer.from(SEED_2, 'hex')),
+    isActive: false,
+    file: '/wallets/bob.json',
+  };
+
+  it('matches an unshielded address to its wallet and network', () => {
+    const result = matchWalletAddress([alice, bob], VALID_ADDRESSES.undeployed);
+    expect(result?.wallet.name).toBe('alice');
+    expect(result?.network).toBe('undeployed');
+  });
+
+  it('matches a shielded address to its wallet and network', () => {
+    const result = matchWalletAddress([alice, bob], shieldedAddresses.preprod);
+    expect(result?.wallet.name).toBe('alice');
+    expect(result?.network).toBe('preprod');
+  });
+
+  it('returns undefined for an address no wallet owns', () => {
+    const stranger = deriveAllAddresses(Buffer.from(
+      '0000000000000000000000000000000000000000000000000000000000000099', 'hex',
+    )).undeployed;
+    expect(matchWalletAddress([alice, bob], stranger)).toBeUndefined();
+  });
+
+  it('returns undefined against an empty wallet list', () => {
+    expect(matchWalletAddress([], VALID_ADDRESSES.undeployed)).toBeUndefined();
   });
 });
