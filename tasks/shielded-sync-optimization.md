@@ -294,3 +294,64 @@ incrementally.
 spends without change). The right implementation is `zswapLedgerEvents` + replay + cache,
 mirroring `dust-direct`. The committed `shielded-direct.ts` (collapsed) must be rewritten to
 this. This is a solution-strategy change — needs sign-off.
+
+## SPIKE CONCLUSION — definitive (2026-08-17)
+
+Full no-gaps spike run. Approach B = direct `zswapLedgerEvents` + `replayEventsWithChanges`
+(full keys) + state cache, mirroring `dust-direct`. Approach A = collapsed session
+(`connect`/`shieldedTransactions`).
+
+### Correctness matrix (localnet, every case cross-checked vs `mn balance --shielded` facade)
+| scenario | wallet | events-reader | facade | match |
+|----------|--------|---------------|--------|-------|
+| empty | bob | 0 | 0 | ✅ |
+| receive-only | kuiratest | 100M/1 | 100M/1 | ✅ |
+| spend exact (no change) | gen0 | 150M/5 | 150M/5 | ✅ |
+| spend with change | gen0 | 125M/5 | 125M/5 | ✅ |
+| receive 2nd coin | kuiratest | 125M/2 | 125M/2 | ✅ |
+| multi-token (non-NIGHT) | gen0/reprogen | NIGHT filtered correctly | — | ✅ |
+
+### Incremental cache (serialize state + cursor, resume applies only new events)
+resume == full == facade, exactly. gen0 resume applied only 3 new events in **0.03s** (vs 34
+full). `ZswapLocalState.serialize()`/`deserialize()` round-trips coins correctly.
+
+### Speed + memory (hosted, full first sync)
+| net | events | time | peak RSS |
+|-----|--------|------|----------|
+| localnet | 34 | 0.13s | 146MB |
+| preprod | 30,635 | 49.2s | **155MB** |
+| preview | 54,921 | 72.2s | **156MB** |
+Memory is FLAT (~155MB) — batch-flush keeps working set bounded. Eliminates the old cold-sync
+16GB OOM / heap-guard re-exec entirely. First sync hours→~1min; incremental ~instant.
+
+### Schema (introspection, indexer 4.3.3, localnet==preprod)
+- `zswapLedgerEvents(id)`: single cursor, NO range → not parallelizable (fine; caching covers it).
+- `connect(viewingKey: ViewingKey!, options: {startIndex})`: viewingKey is an opaque
+  ENCRYPTION-only scalar. No spend/nullifier-capable key exists → collapsed session is
+  fundamentally receive-only.
+- `shieldedNullifierTransactions(nullifierPrefixes:[..]!, fromBlock,toBlock)`: real, but a
+  prefix FILTER — caller must compute its own nullifier prefixes (chicken-and-egg for a
+  from-scratch collapsed sync).
+- `zswapMerkleTreeCollapsedUpdate(startIndex,endIndex)`: range query, parallelizable — but
+  only merkle deltas, not coins. No balance/snapshot query anywhere.
+
+### Decision: Approach B (events + replay + cache), mirroring dust-direct.
+Why not A (collapsed, ~1.5s first sync): it's receive-only; making it correct needs
+local nullifier-prefix computation + `shieldedNullifierTransactions` + handling the
+cold-index silent-zero — much more complexity for a speed edge that only exists on the
+FIRST sync (after caching, B's incremental is also ~instant). B is correct (proven exact in
+6 scenarios), memory-bounded (kills the OOM), simple, and matches the existing dust-direct
+pattern. The first-sync 49–72s is a one-time cost, cached thereafter.
+
+### Wiring plan (no code yet — concept)
+1. Rewrite `shielded-direct.ts`: drop connect/shieldedTransactions; stream
+   `zswapLedgerEvents(id)` from cursor, decode `ledger.Event`, batch-apply
+   `state.replayEventsWithChanges(fullSecretKeys, batch)`, checkpoint state+cursor per chunk,
+   partial-on-timeout/abort (same shape as dust-direct).
+2. Add `shielded-direct-cache.ts` (mirror dust-direct-cache): persist serialized
+   ZswapLocalState + nextId cursor + chainId guard; resume incrementally; invalidate on
+   chain reset (STALE_CACHE).
+3. Bridge into the balance/shielded path, gated by shielded-policy (enabled on undeployed;
+   preview/preprod behind the existing shielded flag). NIGHT balance = sum coins where
+   `type === unshieldedToken().raw`.
+4. Regression tests: the 6-scenario matrix as unit tests over saved event fixtures.
