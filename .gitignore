@@ -17,3 +17,7 @@ wallet-alice.json
 .midnight-expert/settings.local.json
 midnight-level-db/
 *.ldb
+
+# local spike/scratch dirs
+.shielded-spike/
+.dust-spike/
