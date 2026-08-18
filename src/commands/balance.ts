@@ -9,6 +9,7 @@ import { type NetworkName, isValidNetworkName } from '../lib/network.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress, findWalletByAddress } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
+import { shieldedSyncEnabled, shieldedDisabledReason } from '../lib/shielded-policy.ts';
 import { getNetworkId } from '../lib/network-id.ts';
 import { isNativeToken } from '../lib/balance-subscription.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
@@ -239,61 +240,76 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
     }
 
     // ── Phase 2: shielded via facade sync (slower — needs ZK keys + WASM state) ──
-    if (!isJson) activeSpinner = startSpinner('Syncing shielded...');
+    // Skipped where shielded is unusable (no faucet on preview/preprod) unless
+    // --force-shielded is passed. This is the slow part of `mn balance`; skipping
+    // it makes hosted-network balance checks near-instant.
+    const shieldedEnabled = shieldedSyncEnabled(networkName, hasFlag(args, 'force-shielded'));
+    let liveShieldedAddrStr = shieldedAddrStr;
+    let shieldedBalance = 0n;
+    let shieldedCoins = 0;
+    let pendingCoins = 0;
 
-    const eta = createEtaEstimator();
-    const networkId = getNetworkId(networkConfig.networkId);
-    const { liveShieldedAddrStr, shieldedBalance, shieldedCoins, pendingCoins } =
-      await defaultRepository().withFacade(
-        seedBuffer,
-        networkConfig,
-        async ({ state }) => {
-          const liveShieldedAddrStr = MidnightBech32m.encode(networkId, state.shielded.address).asString();
-          saveShieldedAddress(walletPath, networkName, liveShieldedAddrStr);
-          return {
-            liveShieldedAddrStr,
-            shieldedBalance: state.shielded.balances[nightToken] ?? 0n,
-            shieldedCoins: state.shielded.availableCoins.length,
-            pendingCoins: state.shielded.pendingCoins.length,
-          };
-        },
-        {
-          // Balance reads NIGHT from unshielded + shielded; dust isn't needed and
-          // skipping it avoids the dust isConnected SDK hang on hosted networks.
-          syncMode: 'no-dust',
-          // requireStrictSync: false because this is a read; opt out of write-mode
-          // so the repo skips the dust pre-prime and the cold-start race retry.
-          requireStrictSync: false,
-          readOnly: true,
-          forceFresh: noCache,
-          onSyncProgress: (applied, highest) => {
-            if (!activeSpinner) return;
-            const snap = eta.sample({ applied, highest, t: Date.now() });
-            activeSpinner.update(formatSyncStatus(snap, 'Syncing shielded'));
+    if (shieldedEnabled) {
+      if (!isJson) activeSpinner = startSpinner('Syncing shielded...');
+      const eta = createEtaEstimator();
+      const networkId = getNetworkId(networkConfig.networkId);
+      ({ liveShieldedAddrStr, shieldedBalance, shieldedCoins, pendingCoins } =
+        await defaultRepository().withFacade(
+          seedBuffer,
+          networkConfig,
+          async ({ state }) => {
+            const live = MidnightBech32m.encode(networkId, state.shielded.address).asString();
+            saveShieldedAddress(walletPath, networkName, live);
+            return {
+              liveShieldedAddrStr: live,
+              shieldedBalance: state.shielded.balances[nightToken] ?? 0n,
+              shieldedCoins: state.shielded.availableCoins.length,
+              pendingCoins: state.shielded.pendingCoins.length,
+            };
           },
-          onSyncDetail: (detail) => activeSpinner?.update(`Syncing shielded (waiting on: ${detail})`),
-        },
-      );
+          {
+            // Balance reads NIGHT from unshielded + shielded; dust isn't needed and
+            // skipping it avoids the dust isConnected SDK hang on hosted networks.
+            syncMode: 'no-dust',
+            // requireStrictSync: false because this is a read; opt out of write-mode
+            // so the repo skips the dust pre-prime and the cold-start race retry.
+            requireStrictSync: false,
+            readOnly: true,
+            forceFresh: noCache,
+            onSyncProgress: (applied, highest) => {
+              if (!activeSpinner) return;
+              const snap = eta.sample({ applied, highest, t: Date.now() });
+              activeSpinner.update(formatSyncStatus(snap, 'Syncing shielded'));
+            },
+            onSyncDetail: (detail) => activeSpinner?.update(`Syncing shielded (waiting on: ${detail})`),
+          },
+        ));
 
-    if (activeSpinner) {
-      activeSpinner.stop('Shielded ready');
-      activeSpinner = null;
-      if (shieldedBalance > 0n) {
-        process.stderr.write(keyValue('  NIGHT', bold(formatNight(shieldedBalance))) + '\n');
-        process.stderr.write(keyValue('  Coins', `${shieldedCoins} available, ${pendingCoins} pending`) + '\n');
-      } else {
-        process.stderr.write(`    ${dim('No shielded balance')}\n`);
+      if (activeSpinner) {
+        activeSpinner.stop('Shielded ready');
+        activeSpinner = null;
+        if (shieldedBalance > 0n) {
+          process.stderr.write(keyValue('  NIGHT', bold(formatNight(shieldedBalance))) + '\n');
+          process.stderr.write(keyValue('  Coins', `${shieldedCoins} available, ${pendingCoins} pending`) + '\n');
+        } else {
+          process.stderr.write(`    ${dim('No shielded balance')}\n`);
+        }
       }
+    } else if (!isJson) {
+      process.stderr.write(`    ${dim('Skipped — ' + shieldedDisabledReason(networkName))}\n`);
     }
 
     if (isJson) {
       // Slim drops the unshielded + shielded address strings (~220 chars
       // combined). Agents already know which wallet they queried.
+      // shieldedSynced=false means shielded was skipped (not a confirmed zero) —
+      // consumers shouldn't read shielded.NIGHT as authoritative.
       if (isMinimalMode(args)) {
         writeJsonResult({
           network: networkName,
           unshielded: { NIGHT: toNight(unshieldedBalance), utxoCount: unshieldedUtxos },
           shielded: { NIGHT: toNight(shieldedBalance), availableCoins: shieldedCoins, pendingCoins },
+          shieldedSynced: shieldedEnabled,
         });
         return;
       }
@@ -303,11 +319,14 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
         network: networkName,
         unshielded: { NIGHT: toNight(unshieldedBalance), utxoCount: unshieldedUtxos },
         shielded: { NIGHT: toNight(shieldedBalance), availableCoins: shieldedCoins, pendingCoins },
+        shieldedSynced: shieldedEnabled,
       });
       return;
     }
 
-    process.stdout.write(`SHIELDED_NIGHT=${shieldedBalance}\n`);
+    // When shielded was skipped, say so on stdout too — `=0` would read as a
+    // confirmed zero to a script parsing the pipeable output.
+    process.stdout.write(`SHIELDED_NIGHT=${shieldedEnabled ? shieldedBalance : 'skipped'}\n`);
     process.stderr.write('\n' + divider() + '\n\n');
   } catch (err) {
     activeSpinner?.fail('Failed');

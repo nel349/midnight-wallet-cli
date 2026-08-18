@@ -173,7 +173,22 @@ describe('transfer command — shielded flag', () => {
     };
     saveWalletConfig(config, walletFile);
 
-    const args = parseArgs(['transfer', 'mn_shield-addr_undeployed1someaddr', '100', '--shielded', '--wallet', walletFile]);
+    // --network undeployed: shielded is enabled there, so we reach address validation
+    // (on preview/preprod the shielded-policy guard fires first, tested separately).
+    const args = parseArgs(['transfer', 'mn_shield-addr_undeployed1someaddr', '100', '--shielded', '--wallet', walletFile, '--network', 'undeployed']);
     await expect(transferCommand(args)).rejects.toThrow('Invalid shielded address');
+  });
+
+  it('blocks a shielded transfer on preprod (no faucet) before syncing', async () => {
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    const config: WalletConfig = {
+      seed: TEST_SEED,
+      addresses: deriveAllAddresses(Buffer.from(TEST_SEED, 'hex')),
+      createdAt: new Date().toISOString(),
+    };
+    saveWalletConfig(config, walletFile);
+
+    const args = parseArgs(['transfer', 'mn_shield-addr_preprod1someaddr', '100', '--shielded', '--wallet', walletFile, '--network', 'preprod']);
+    await expect(transferCommand(args)).rejects.toThrow(/Shielded is unavailable on preprod/);
   });
 });

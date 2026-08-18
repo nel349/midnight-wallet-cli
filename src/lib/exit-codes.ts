@@ -71,6 +71,7 @@ export function classifyError(err: Error): ClassifiedError {
     msg.includes('seed must be') ||
     msg.includes('key index must be') ||
     msg.includes('shielded balances are private') ||
+    msg.includes('shielded is unavailable') ||
     msg.includes('belongs to') && msg.includes('--network is') ||
     msg.includes('usage:')
   ) {

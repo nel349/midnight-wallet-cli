@@ -114,6 +114,7 @@ const COMMAND_SPECS: CommandSpec[] = [
     flags: [
       '<address>           Check a specific address (unshielded only, no wallet sync)',
       '--shielded          Include shielded balance — needs the seed, so the address must be one of your wallets',
+      '--force-shielded    Sync shielded even on preview/preprod (skipped by default — no faucet there)',
       '--network <name>    Override network',
       '--indexer-ws <url>  Custom indexer WebSocket URL',
     ],
@@ -215,6 +216,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '<to>                Recipient bech32m address (unshielded or shielded)',
       '<amount>            Amount in NIGHT to send',
       '--shielded          Send from shielded balance to a shielded address',
+      '--force-shielded    Allow --shielded on preview/preprod (blocked by default — no faucet there)',
       '--wallet <name|file> Wallet name or path',
       '--proof-server <url>  Override proof server URL',
       '--node <url>          Override substrate node RPC URL',
