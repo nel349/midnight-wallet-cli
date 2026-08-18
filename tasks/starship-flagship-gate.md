@@ -65,3 +65,16 @@ call → assert state) that runs before a CLI release.
 This is a cross-repo migration that needs a stable Docker/localnet and a clean
 compile→install→build→deploy loop — best run as a focused session, not tail-ended onto a
 long one. Environment was unstable this session (Docker crashed repeatedly).
+
+## Migration progress (executed this session)
+
+Done + verified in `~/Development/tech-moderator/midnight-starship` (uncommitted there):
+- Deps bumped in root `package.json`: compact-runtime 0.15.0→**0.16.0**, ledger-v8 →**8.1.0** (pinned exact to dedupe), midnight-js-* →**4.1.1**.
+- Contract **recompiled** with `compact` (compactc 0.31.1) → emits **runtime 0.16.0**; `contract` workspace **builds clean**.
+- `ledger-v8` **deduped** to a single 8.1.0 copy (the earlier duplicate-`ledger-v8` type-identity conflict from `midnight-js-protocol`'s nested copy).
+- `npm install` clean.
+- **CLI accepts the 0.16 contract**: `mn contract deploy --path contract …` cleared the version check AND found witnesses (`contract/dist/witnesses.js`); it now fails only on the indexer being unreachable (localnet down), not on the contract.
+
+Remaining:
+1. **Deploy-verify** — one healthy-localnet run: `mn contract deploy/call/state` against the 0.16 starship contract on undeployed. Blocked only by Docker/localnet instability this session.
+2. **api/game-ui TS build** — a real but separate dApp-build track: the generated contract type changed `Contract<PS>`→`Contract<PS,W>`, and compact-js 2.5.0's `Contract.PrivateState<C>` no longer extracts the private state from the generated shape, so `deployContract` infers `Contract<undefined,…>`. Likely needs a compact-js version aligned to compactc 0.31.1's output (latest is 2.5.3) and/or updating the `CompiledContract.make` wiring in `contract/src/index.ts`. Not needed for the CLI to deploy the contract (the gate uses `managed/` + witnesses), so it doesn't block the testing-gate goal.
