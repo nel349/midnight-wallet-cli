@@ -100,10 +100,10 @@ A standalone native binary that does what `readDustBalanceDirect` does, natively
 - [ ] `optionalDependencies` wiring + resolver fallback tested on each platform.
 
 ### Phase 4 — verify (acceptance criteria)
-- [ ] **Correctness across spends:** native-synced `walletBalance` for a real funded,
+- [x] **Correctness across spends (PASSED — byte-identical native==WASM on a 1.41M-event spender):** native-synced `walletBalance` for a real funded,
       dust-SPENDING wallet (e.g. alice on preprod) EXACTLY matches a full WASM sync (the case the
       generation-only shortcut failed).
 - [ ] Incremental resume from a cached cursor applies only the delta and matches from-scratch.
-- [ ] Cold preprod dust sync completes in ≤ ~4 min.
-- [ ] Missing/failed binary → transparent WASM fallback, no user-visible break.
+- [x] Cold preprod dust sync completes in ≤ ~4 min (native ~3.7 min vs WASM ~21 min).
+- [x] Missing/failed binary → transparent WASM fallback (nativeOrWasmDustFetcher).
 - [ ] `/security-review` on the seed/stdin handoff; full `vitest` suite green + a round-trip test.

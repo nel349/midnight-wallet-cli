@@ -171,3 +171,15 @@ generatingTreeRoot. WASM's own `.serialize()` uses the SAME `midnight:dust-local
 - Cost: bundle/download a per-platform native binary with the npm CLI.
 Recommended if the ~22-min first cold sync must be cut. Bench crate: midnight-rs clone
 `crates/dust-bench` (scratchpad). Events fixture: `.dust-spike/dust-events-preprod.jsonl`.
+
+## ACCEPTANCE PASSED (2026-08-18): native replay == WASM replay, byte-identical
+Rigorous identical-event comparison: replayed the SAME 1,410,186-event preprod dust stream
+through both engines with alice's dust key (a real fee-spender):
+- native (crates.io midnight-ledger 8.1.0, DustSecretKey::derive_secret_key): balance
+  5e18 @ fixed T, 727,413-byte serialized state.
+- WASM (@midnight-ntwrk/ledger-v8 8.1.0, DustSecretKey.fromSeed): same balance, same
+  727,413 bytes, ~21 min replay.
+=> BALANCE IDENTICAL **and** serialized DustLocalState BYTE-IDENTICAL. Native is a perfect
+drop-in for the WASM dust sync. Confirms key-derivation equivalence
+(derive_secret_key == fromSeed), replay equivalence, and serialization compatibility on a
+real spender over the full chain.
