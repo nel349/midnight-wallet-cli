@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Git-style CLI wallet for the Midnight blockchain",
   "license": "Apache-2.0",
+  "author": "Norman Lopez (https://github.com/nel349)",
   "homepage": "https://github.com/nel349/midnight-wallet-cli#readme",
   "repository": {
     "type": "git",
@@ -34,7 +35,8 @@
   },
   "files": [
     "dist",
-    "docs/SKILL.md"
+    "docs/SKILL.md",
+    "NOTICE"
   ],
   "scripts": {
     "wallet": "tsx src/wallet.ts",
