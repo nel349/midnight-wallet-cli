@@ -75,24 +75,24 @@ A standalone native binary that does what `readDustBalanceDirect` does, natively
 
 ## Implementation checklist
 ### Phase 0 — confirm build (de-risk in an hour)
-- [ ] Minimal crates.io-only crate: `DustLocalState::<InMemoryDB>::new(INITIAL_PARAMETERS.dust)`
+- [x] Minimal crates.io-only crate: `DustLocalState::<InMemoryDB>::new(INITIAL_PARAMETERS.dust)`
       + `replay_events` + `tagged_serialize` — `cargo check`/`build` green (no fork).
-- [ ] Confirm native `tagged_serialize` output still deserializes in WASM (repeat the round-trip
+- [x] Confirm native `tagged_serialize` output still deserializes in WASM (repeat the round-trip
       from the crates.io-only build, not the fork build).
 
 ### Phase 1 — sidecar binary
-- [ ] `dustLedgerEvents` WS subscription client (resume from cursor, chunked replay ~500).
-- [ ] Read current `ledgerParameters` from the latest block; use for balance + `process_ttls`.
-- [ ] Owner-match retention (`ownedGenerationIndices` + `generationFrontier`) during replay.
-- [ ] Periodic checkpoint (state + cursor to the out-file); resume from a passed-in checkpoint.
-- [ ] stdin secret handling (zeroed); JSON status to stdout; progress to stderr; clean exit codes.
-- [ ] Abort on SIGINT with a final checkpoint.
+- [x] `dustLedgerEvents` WS subscription client (resume from cursor, chunked replay ~500).
+- [x] Read current `ledgerParameters` from the latest block; use for balance + `process_ttls`.
+- [x] Owner-match retention (`ownedGenerationIndices` + `generationFrontier`) during replay.
+- [x] Periodic checkpoint (state + cursor to the out-file); resume from a passed-in checkpoint.
+- [x] stdin secret handling (zeroed); JSON status to stdout; progress to stderr; clean exit codes.
+- [x] Abort on SIGINT with a final checkpoint.
 
 ### Phase 2 — CLI integration
-- [ ] `fetchDustNative` in `wallet-data-repository.ts` → spawns sidecar, returns `DustDirectResult`.
-- [ ] Native/WASM selection + config/env flag; transparent fallback on missing/failed binary.
-- [ ] Binary resolver (optional platform package → path); ledger-version assert vs ledger-v8.
-- [ ] Wire progress into the existing spinner; keep partial-retry + cache save/collapse intact.
+- [x] `fetchDustNative` in `wallet-data-repository.ts` → spawns sidecar, returns `DustDirectResult`.
+- [x] Native/WASM selection + config/env flag; transparent fallback on missing/failed binary.
+- [x] Binary resolver (optional platform package → path); ledger-version assert vs ledger-v8.
+- [x] Wire progress into the existing spinner; keep partial-retry + cache save/collapse intact.
 
 ### Phase 3 — packaging & release
 - [ ] Cross-platform build in CI (matrix above); strip/LTO; publish optional platform packages.
@@ -103,7 +103,7 @@ A standalone native binary that does what `readDustBalanceDirect` does, natively
 - [x] **Correctness across spends (PASSED — byte-identical native==WASM on a 1.41M-event spender):** native-synced `walletBalance` for a real funded,
       dust-SPENDING wallet (e.g. alice on preprod) EXACTLY matches a full WASM sync (the case the
       generation-only shortcut failed).
-- [ ] Incremental resume from a cached cursor applies only the delta and matches from-scratch.
+- [x] Incremental resume from a cached cursor applies only the delta and matches from-scratch.
 - [x] Cold preprod dust sync completes in ≤ ~4 min (native ~3.7 min vs WASM ~21 min).
 - [x] Missing/failed binary → transparent WASM fallback (nativeOrWasmDustFetcher).
 - [ ] `/security-review` on the seed/stdin handoff; full `vitest` suite green + a round-trip test.
