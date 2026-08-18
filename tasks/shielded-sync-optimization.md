@@ -260,3 +260,37 @@ answer, not `partial`. `checked==tip` alone cannot distinguish "genuinely empty 
 
 Both must be fixed before wiring `shielded-direct` into `mn balance`. Receive-only path is
 correct; spender + cold-start paths are not.
+
+## Root cause + correct approach (SDK source + measured, 2026-08-17)
+
+**Root cause (from Wallet SDK source):** the `connect`/`shieldedTransactions` session is
+built from the ENCRYPTION secret key only (`mn_shield-esk_...`) — a receive-only view. The
+indexer can trial-decrypt our OUTPUTS but has no coin secret key, so it cannot compute our
+nullifiers and cannot tell the session a coin was SPENT. `shieldedNullifierTransactions`
+does not exist in the SDK at all (I assumed it). The SDK's real shielded sync does NOT use
+`connect`/`shieldedTransactions`; it subscribes to `zswapLedgerEvents(id)` (the FULL zswap
+event stream) and applies `ZswapLocalState.replayEventsWithChanges(fullSecretKeys, events)`,
+which reconciles receivedCoins AND spentCoins locally using the coin secret key.
+(Refs: shielded-wallet `Sync.ts` / `CoreWallet.ts`; `ZswapEvents.ts`; ledger-v8 `Event`,
+`replayEventsWithChanges`.)
+
+**Corrected approach validated (localnet):** a lean `zswapLedgerEvents` + `replayEventsWithChanges`
+reader with the FULL `ZswapSecretKeys` gives EXACT ground truth — gen0 150M/5coins,
+kuiratest 100M/1coin — spends removed correctly, 0.14s / 31 events.
+
+**Measured speed on hosted nets (full event stream):**
+| net | zswap events | direct replay time |
+|-----|-------------|--------------------|
+| localnet | 31 | 0.14s |
+| preprod | 30,635 | **49.7s** |
+| preview | ~113,822 | **~160s** (extrapolated; 42.6k done in 60s) |
+
+So the correct direct reader is **hours → ~1–3 min** vs the SDK facade — a large win — but NOT
+the ~1.5s of the (incorrect) collapsed path. With state caching (cursor = last event id,
+mirroring dust-direct-cache), the first sync is ~1–3 min and subsequent reads resume
+incrementally.
+
+**Conclusion:** the collapsed `shieldedTransactions` path is a correctness dead-end (misses
+spends without change). The right implementation is `zswapLedgerEvents` + replay + cache,
+mirroring `dust-direct`. The committed `shielded-direct.ts` (collapsed) must be rewritten to
+this. This is a solution-strategy change — needs sign-off.
