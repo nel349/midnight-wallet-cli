@@ -128,3 +128,46 @@ tracking): the collapsed COMMITMENT reconstruction (`dustCommitmentMerkleTreeUpd
 `applyCommitmentCollapsedUpdate` + our dust UTXO/spend events), which is a larger spike.
 Meanwhile the checkpoint cache remains the practical fix for repeated syncs; the one-time
 first cold sync (~22 min) is unsolved client-side without that larger reconstruction.
+
+## MEASURED: native (midnight-rs) is ~5x faster — CORRECTS the earlier ~2-3x estimate (2026-08-18)
+Built a real benchmark: midnight-rs uses `midnight-ledger = "=8.1.0"` — the exact Rust crate
+our WASM `@midnight-ntwrk/ledger-v8` 8.1.0 is compiled from. Ran `DustWallet::replay_events`
+(same path midnight-rs uses) over 49,880 real preprod dust events; compared to WASM
+`DustLocalState.replayEvents` over the identical events.
+
+| batch | WASM /s | Native /s |
+|-------|---------|-----------|
+| 1     | (n/a)   | 637       |
+| 500   | ~1,300  | 6,467     |
+| 2000  | ~1,326  | —         |
+| all   | crash*  | 6,564     |
+*WASM crashes on large batches ("array contains a value of the wrong type" / memory); it
+plateaus at ~1,300/s and cannot batch bigger. Native plateaus at ~6,500/s.
+
+=> Native ~5x faster. Cold 1.44M-event dust sync: native **~3.7 min** vs WASM ~18-22 min.
+Native CROSSES the <5-min target; WASM cannot. The earlier "~2-3x, not worth it" was WRONG.
+
+### Integration path (if pursued)
+- Rust **sidecar binary** (simpler for a CLI than napi): streams `dustLedgerEvents`, replays
+  natively, emits `DustLocalState.serialize()` → the Node CLI reads it into its dust cache.
+  Same ledger 8.1.0 => serialization format should be byte-compatible between native and WASM
+  (VERIFY: native serialize -> WASM deserialize round-trip). Cost: a per-platform native binary
+  bundled/downloaded with the npm package.
+- Combine with the checkpoint cache (first sync ~3.7 min native, then incremental/instant).
+- KEY OPEN ITEM before committing: confirm native `DustLocalState.serialize()` deserializes in
+  WASM ledger-v8 8.1.0 (and matches `walletBalance`). That makes the sidecar drop-in.
+
+## Sidecar viability PROVEN (2026-08-18): native serialize <-> WASM deserialize round-trips
+Native `tagged_serialize(DustLocalState)` (49,880 events, 24,810 bytes) deserializes cleanly
+in WASM ledger-v8 8.1.0: `DustLocalState.deserialize()` OK, consistent balance + valid
+generatingTreeRoot. WASM's own `.serialize()` uses the SAME `midnight:dust-local-state` tag
+(tagged_serialize) => byte-compatible, same ledger version. So a Rust sidecar is DROP-IN:
+  native replays dustLedgerEvents @ ~6,500/s -> tagged_serialize state -> Node CLI reads it
+  into the dust cache (DustLocalState.deserialize) -> normal WASM balance/transfer flow.
+
+### FINAL VERDICT on midnight-rs (corrects the earlier dismissal)
+- ~5x faster (6,489/s vs WASM ~1,300/s), cold dust sync ~3.7 min < the 5-min target (WASM can't).
+- Drop-in via serialized-state handoff (proven), no reimplementation, same ledger 8.1.0.
+- Cost: bundle/download a per-platform native binary with the npm CLI.
+Recommended if the ~22-min first cold sync must be cut. Bench crate: midnight-rs clone
+`crates/dust-bench` (scratchpad). Events fixture: `.dust-spike/dust-events-preprod.jsonl`.
