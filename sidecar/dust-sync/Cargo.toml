@@ -12,6 +12,12 @@ midnight-storage = "=1.1.1"
 midnight-base-crypto = "=1.0.0"
 midnight-serialize = "=1.1.0"
 hex = "0.4"
+tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+ureq = { version = "2", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ctrlc = "3"
+zeroize = "1"
 
 [[bin]]
 name = "dust-sync"
