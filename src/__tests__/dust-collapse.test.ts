@@ -69,6 +69,17 @@ describe('collapseForeignGenerations', () => {
     expect(out.state.generatingTreeRoot()).toBe(rootBefore);
   });
 
+  it('is idempotent — re-collapsing a collapsed state is stable and never throws', () => {
+    // Mirrors the per-chunk sync path, which re-collapses already-collapsed ranges.
+    const s = stateWithForeignLeaves(8);
+    const rootBefore = s.generatingTreeRoot();
+    const once = collapseForeignGenerations(s, [3n], 8n);
+    expect(once.collapsed).toBe(true);
+    const twice = collapseForeignGenerations(once.state, [3n], 8n);
+    expect(twice.collapsed).toBe(true);
+    expect(twice.state.generatingTreeRoot()).toBe(rootBefore);
+  });
+
   it('is a no-op when there is nothing foreign to collapse', () => {
     const s = stateWithForeignLeaves(3);
     const out = collapseForeignGenerations(s, [0n, 1n, 2n], 3n);

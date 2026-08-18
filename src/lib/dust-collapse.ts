@@ -85,10 +85,20 @@ export function collapseForeignGenerations(
     return { state, collapsed: false, rangesCollapsed: 0, reason: `collapse-threw: ${(err as Error).message}` };
   }
 
-  // Safety guard — a mismatch (or a throw) means an owned leaf was collapsed.
+  // Safety guard — a mis-collapse of an owned leaf must roll back. `walletBalance`
+  // is the primary check; the tree root is a cheap sanity check (a collapse
+  // preserves the root by construction, so this only catches a deeper bug, not a
+  // mis-collapse). The load-bearing extra check is that every owned UTXO still
+  // resolves its generation info: a pruned owned leaf breaks this even when the
+  // balance happens to be unaffected (e.g. a leaf contributing 0 dust at syncTime).
   try {
     if (collapsed.walletBalance(when) !== refBalance || collapsed.generatingTreeRoot() !== refRoot) {
       return { state, collapsed: false, rangesCollapsed: 0, reason: 'guard-mismatch' };
+    }
+    for (const utxo of collapsed.utxos) {
+      if (collapsed.generationInfo(utxo) === undefined) {
+        return { state, collapsed: false, rangesCollapsed: 0, reason: 'guard-utxo-generation-missing' };
+      }
     }
   } catch (err) {
     return { state, collapsed: false, rangesCollapsed: 0, reason: `guard-threw: ${(err as Error).message}` };
