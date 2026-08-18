@@ -65,16 +65,24 @@ fn http_from_ws(ws: &str) -> String {
     s.strip_suffix("/ws").map(|x| x.to_string()).unwrap_or(s)
 }
 
+/// Parse a hex string into a 32-byte seed. Pure (testable); does not zeroize its
+/// short-lived intermediate — the stdin caller owns zeroization of the buffers.
+fn parse_seed(hex_str: &str) -> Result<[u8; 32], String> {
+    let bytes = hex::decode(hex_str.trim()).map_err(|e| format!("seed must be hex: {e}"))?;
+    if bytes.len() != 32 {
+        return Err(format!("seed must be 32 bytes (64 hex chars), got {}", bytes.len()));
+    }
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&bytes);
+    Ok(seed)
+}
+
 /// Read one hex line (the raw 32-byte dust seed) from stdin, zeroizing buffers.
 fn read_seed_stdin() -> [u8; 32] {
     let mut line = String::new();
     std::io::stdin().read_line(&mut line).unwrap_or_else(|e| die(&format!("read seed from stdin: {e}")));
-    let mut bytes = hex::decode(line.trim()).unwrap_or_else(|e| { line.zeroize(); die(&format!("seed must be hex: {e}")) });
+    let seed = parse_seed(&line).unwrap_or_else(|e| { line.zeroize(); die(&e) });
     line.zeroize();
-    if bytes.len() != 32 { bytes.zeroize(); die("seed must be 32 bytes (64 hex chars)"); }
-    let mut seed = [0u8; 32];
-    seed.copy_from_slice(&bytes);
-    bytes.zeroize();
     seed
 }
 
@@ -255,4 +263,54 @@ fn main() {
     let cp = write_checkpoint(&args.out, &state, last_id, &owned, frontier, events_applied, partial);
     // Final one-line status on stdout for the CLI to parse without re-reading the file.
     println!("{}", serde_json::to_string(&cp).expect("status json"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn http_from_ws_derives_endpoint() {
+        assert_eq!(http_from_ws("wss://host/api/v4/graphql/ws"), "https://host/api/v4/graphql");
+        assert_eq!(http_from_ws("ws://localhost:8088/api/v1/graphql/ws"), "http://localhost:8088/api/v1/graphql");
+        // No /ws suffix: protocol swap only.
+        assert_eq!(http_from_ws("wss://host/graphql"), "https://host/graphql");
+    }
+
+    #[test]
+    fn parse_seed_accepts_valid_32_byte_hex() {
+        let hex = "00".repeat(31) + "01";
+        let seed = parse_seed(&format!("  {hex}\n")).expect("valid seed");
+        assert_eq!(seed[31], 1);
+        assert_eq!(seed[0], 0);
+    }
+
+    #[test]
+    fn parse_seed_rejects_wrong_length_and_bad_hex() {
+        assert!(parse_seed(&"ab".repeat(16)).is_err()); // 16 bytes, too short
+        assert!(parse_seed(&"ab".repeat(33)).is_err()); // 33 bytes, too long
+        assert!(parse_seed("zz".repeat(32).as_str()).is_err()); // not hex
+    }
+
+    #[test]
+    fn checkpoint_json_round_trips() {
+        let cp = Checkpoint {
+            dust_state: "deadbeef".into(),
+            last_applied_event_id: 4242,
+            owned_generation_indices: vec![3, 7, 100],
+            generation_frontier: 373362,
+            balance: "136016950999999999".into(),
+            available_coins: 1,
+            events_applied: 1409471,
+            partial: false,
+        };
+        let json = serde_json::to_string(&cp).unwrap();
+        let back: Checkpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.last_applied_event_id, 4242);
+        assert_eq!(back.owned_generation_indices, vec![3, 7, 100]);
+        assert_eq!(back.generation_frontier, 373362);
+        assert_eq!(back.balance, "136016950999999999"); // u128 kept as string (JSON-safe)
+        assert_eq!(back.available_coins, 1);
+        assert!(!back.partial);
+    }
 }
