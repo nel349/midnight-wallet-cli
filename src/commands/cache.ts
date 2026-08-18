@@ -5,6 +5,7 @@ import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { clearWalletCache } from '../lib/wallet-cache.ts';
 import { clearDustDirectCache, dustPublicKeyHexFromSeed } from '../lib/dust-direct-cache.ts';
+import { clearShieldedDirectCache, shieldedCoinPublicKeyHexFromSeed } from '../lib/shielded-direct-cache.ts';
 import { resolveWalletPath, loadWalletConfig } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { green } from '../ui/colors.ts';
@@ -33,6 +34,9 @@ export default async function cacheCommand(args: ParsedArgs): Promise<void> {
     // Also clear the dust-direct cache for this wallet on this network.
     const dustPubkey = dustPublicKeyHexFromSeed(Buffer.from(config.seed, 'hex'));
     clearDustDirectCache(networkName, dustPubkey);
+    // And the shielded-direct cache (keyed by the wallet's coin public key).
+    const shieldedPubkey = shieldedCoinPublicKeyHexFromSeed(Buffer.from(config.seed, 'hex'));
+    clearShieldedDirectCache(networkName, shieldedPubkey);
     if (jsonMode) {
       writeJsonResult({ action: 'clear', scope: 'wallet', wallet: walletFlag, network: networkName });
       return;
@@ -42,6 +46,7 @@ export default async function cacheCommand(args: ParsedArgs): Promise<void> {
     // Clear cache for a specific network
     clearWalletCache(undefined, networkFlag);
     clearDustDirectCache(networkFlag);
+    clearShieldedDirectCache(networkFlag);
     if (jsonMode) {
       writeJsonResult({ action: 'clear', scope: 'network', network: networkFlag });
       return;
@@ -51,6 +56,7 @@ export default async function cacheCommand(args: ParsedArgs): Promise<void> {
     // Clear all cache
     clearWalletCache();
     clearDustDirectCache();
+    clearShieldedDirectCache();
     if (jsonMode) {
       writeJsonResult({ action: 'clear', scope: 'all' });
       return;

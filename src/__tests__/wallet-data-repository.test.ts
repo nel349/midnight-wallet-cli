@@ -51,6 +51,7 @@ function fakeDustResult(overrides: Partial<DustDirectResult> = {}): DustDirectRe
     ownedUtxoCount: 0,
     syncTime: state.syncTime,
     state,
+    retention: { ownedGenerationIndices: [], generationFrontier: 0 },
     lastAppliedEventId: 5,
     partial: false,
     ...overrides,
@@ -181,7 +182,7 @@ describe('WalletDataRepository — dust reads', () => {
           partial: nextLastEventId < 999, // catch up after id 999
         });
         // Persist via the checkpoint callback the repo wires in.
-        opts.onCheckpoint?.(result.state, result.lastAppliedEventId);
+        opts.onCheckpoint?.(result.state, result.lastAppliedEventId, result.retention);
         nextLastEventId += 250;
         return result;
       },

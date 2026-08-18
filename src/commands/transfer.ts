@@ -8,6 +8,7 @@ import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
+import { shieldedSyncEnabled, shieldedDisabledReason } from '../lib/shielded-policy.ts';
 import { getNetworkId } from '../lib/network-id.ts';
 import { parseAmount, nightToMicro, executeTransfer, ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { suppressSdkTransientErrors } from '../lib/facade.ts';
@@ -190,6 +191,9 @@ async function shieldedTransfer(
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
+  if (!shieldedSyncEnabled(networkName, hasFlag(args, 'force-shielded'))) {
+    throw new Error(shieldedDisabledReason(networkName));
+  }
   const unshieldedAddress = config.addresses[networkName];
   const networkId = getNetworkId(networkConfig.networkId);
   const nightToken = ledger.unshieldedToken().raw;

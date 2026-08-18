@@ -15,6 +15,7 @@ import { createDAppConnector, type DAppConnectorCallbacks } from '../lib/dapp-co
 import type { PhaseTiming } from '../lib/phase-tracker.ts';
 import { createRpcServer, type RpcServer } from '../lib/ws-rpc.ts';
 import { DEFAULT_SERVE_PORT } from '../lib/constants.ts';
+import { shieldedSyncEnabled } from '../lib/shielded-policy.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, dim, teal, green, red } from '../ui/colors.ts';
 import { start as startSpinner, getActiveSpinner } from '../ui/spinner.ts';
@@ -239,7 +240,9 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       throw err;
     }
   }, {
-    syncMode: 'full',
+    // Skip the (slow) shielded sync where shielded is unusable (no faucet on
+    // preview/preprod). dApps there can only do unshielded + dust anyway.
+    syncMode: shieldedSyncEnabled(networkName, hasFlag(args, 'force-shielded')) ? 'full' : 'lite',
     // serve accepts write requests from dApps — must be strictly synced.
     requireStrictSync: true,
     // Save logic is conditional (skip if pending txs) — done manually above.

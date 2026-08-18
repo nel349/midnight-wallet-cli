@@ -38,10 +38,15 @@
     "docs/SKILL.md",
     "NOTICE"
   ],
+  "engines": {
+    "node": ">=20",
+    "bun": ">=1.3.0"
+  },
   "scripts": {
     "wallet": "tsx src/wallet.ts",
     "build": "bun build src/wallet.ts --outfile dist/wallet.js --target node --format esm --packages external --minify --banner \"#!/usr/bin/env node\" && bun build src/mcp-server.ts --outfile dist/mcp-server.js --target node --format esm --packages external --minify --banner \"#!/usr/bin/env node\"",
     "mcp": "tsx src/mcp-server.ts",
+    "link": "bun link",
     "prepublishOnly": "npm run build && npm run test",
     "test": "vitest run",
     "test:watch": "vitest",

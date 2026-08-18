@@ -204,6 +204,38 @@ export function listWallets(): WalletInfo[] {
 }
 
 /**
+ * Find which of the given wallets owns an address, and on which network.
+ * Matches both the unshielded and shielded address maps. Pure — takes the
+ * wallet list so it can be tested without touching the real wallets directory.
+ */
+export function matchWalletAddress(
+  wallets: WalletInfo[],
+  address: string,
+): { wallet: WalletInfo; network: NetworkName } | undefined {
+  for (const wallet of wallets) {
+    for (const [network, addr] of Object.entries(wallet.addresses) as [NetworkName, string][]) {
+      if (addr === address) return { wallet, network };
+    }
+    if (wallet.shieldedAddresses) {
+      for (const [network, addr] of Object.entries(wallet.shieldedAddresses) as [NetworkName, string][]) {
+        if (addr === address) return { wallet, network };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Locate the saved wallet that owns an address (across all networks), if any.
+ * Convenience wrapper over matchWalletAddress + listWallets.
+ */
+export function findWalletByAddress(
+  address: string,
+): { wallet: WalletInfo; network: NetworkName } | undefined {
+  return matchWalletAddress(listWallets(), address);
+}
+
+/**
  * Remove a named wallet.
  * Refuses if it's the active wallet or the last remaining wallet.
  */

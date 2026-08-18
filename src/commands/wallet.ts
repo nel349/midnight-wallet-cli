@@ -264,7 +264,9 @@ async function walletUse(args: ParsedArgs): Promise<void> {
 }
 
 async function walletInfo(args: ParsedArgs): Promise<void> {
-  const name = args.positionals[0] ?? getActiveWalletName();
+  // Accept both `wallet info <name>` (positional) and `wallet info --wallet <name>`
+  // (flag, consistent with balance/dust/transfer); fall back to the active wallet.
+  const name = getFlag(args, 'wallet') ?? args.positionals[0] ?? getActiveWalletName();
   const walletPath = resolveWalletPath(name);
   const config = loadWalletConfig(walletPath);
   const isActive = name === getActiveWalletName();
@@ -350,7 +352,8 @@ async function walletRemove(args: ParsedArgs): Promise<void> {
 }
 
 async function walletSeed(args: ParsedArgs): Promise<void> {
-  const name = args.positionals[0] ?? getActiveWalletName();
+  // Accept both `wallet seed <name>` and `wallet seed --wallet <name>`.
+  const name = getFlag(args, 'wallet') ?? args.positionals[0] ?? getActiveWalletName();
   const walletPath = resolveWalletPath(name);
 
   // Read raw JSON to get seed + mnemonic directly from file

@@ -71,6 +71,24 @@ describe('dust-direct cache: round-trip', () => {
     expect(loaded!.state.utxos).toEqual([]);
   });
 
+  it('round-trips the retention data (owned indices + frontier)', () => {
+    const pubkey = testDustPubkeyHex();
+    const state = freshDustState();
+    const retention = { ownedGenerationIndices: [0, 3, 99], generationFrontier: 120 };
+
+    saveDustCache(NETWORK, pubkey, state, 42, CACHE_DIR, undefined, retention);
+    const loaded = loadDustCache(NETWORK, pubkey, CACHE_DIR);
+
+    expect(loaded!.retention).toEqual(retention);
+  });
+
+  it('defaults to empty retention when none is provided', () => {
+    const pubkey = testDustPubkeyHex();
+    saveDustCache(NETWORK, pubkey, freshDustState(), 1, CACHE_DIR);
+    const loaded = loadDustCache(NETWORK, pubkey, CACHE_DIR);
+    expect(loaded!.retention).toEqual({ ownedGenerationIndices: [], generationFrontier: 0 });
+  });
+
   it('writes file with 0o600 permissions', () => {
     const pubkey = testDustPubkeyHex();
     const state = freshDustState();
@@ -97,6 +115,21 @@ describe('dust-direct cache: invalidation', () => {
     const filePath = getDustCachePath(NETWORK, pubkey, CACHE_DIR);
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
     data.version = 999;
+    fs.writeFileSync(filePath, JSON.stringify(data));
+
+    expect(loadDustCache(NETWORK, pubkey, CACHE_DIR)).toBeNull();
+  });
+
+  it('invalidates a legacy v1 cache (no retention fields) so it re-syncs', () => {
+    const pubkey = testDustPubkeyHex();
+    saveDustCache(NETWORK, pubkey, freshDustState(), 5, CACHE_DIR);
+
+    // Rewrite as a pre-collapse v1 file: version 1, retention fields absent.
+    const filePath = getDustCachePath(NETWORK, pubkey, CACHE_DIR);
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    data.version = 1;
+    delete data.ownedGenerationIndices;
+    delete data.generationFrontier;
     fs.writeFileSync(filePath, JSON.stringify(data));
 
     expect(loadDustCache(NETWORK, pubkey, CACHE_DIR)).toBeNull();

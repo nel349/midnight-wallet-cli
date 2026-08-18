@@ -70,6 +70,9 @@ export function classifyError(err: Error): ClassifiedError {
     msg.includes('invalid bip-39') ||
     msg.includes('seed must be') ||
     msg.includes('key index must be') ||
+    msg.includes('shielded balances are private') ||
+    msg.includes('shielded is unavailable') ||
+    msg.includes('belongs to') && msg.includes('--network is') ||
     msg.includes('usage:')
   ) {
     return { exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.INVALID_ARGS };

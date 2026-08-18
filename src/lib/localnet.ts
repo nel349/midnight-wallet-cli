@@ -8,18 +8,22 @@ import { join } from 'path';
 import { MIDNIGHT_DIR, LOCALNET_DIR_NAME, DIR_MODE } from './constants.ts';
 
 // Version tag — bump when compose content changes so stale files get overwritten
-export const COMPOSE_VERSION = '3.0.2';
+export const COMPOSE_VERSION = '3.0.5';
 
-// Docker image versions — update together per Midnight support matrix
-const NODE_IMAGE = 'midnightntwrk/midnight-node:0.22.5';
-const INDEXER_IMAGE = 'midnightntwrk/indexer-standalone:4.0.1';
-const PROOF_SERVER_IMAGE = 'midnightntwrk/proof-server:8.0.3';
+// Docker image versions — update together per Midnight support matrix.
+// Tracks the Preview/Preprod generation (the row our SDK stack targets:
+// midnight-js 4.1.1, ledger-v8 8.x, compact-runtime 0.16.0), NOT the older
+// Mainnet row (node 0.22.5). See https://docs.midnight.network/relnotes/support-matrix
+const NODE_IMAGE = 'midnightntwrk/midnight-node:1.0.0';
+const INDEXER_IMAGE = 'midnightntwrk/indexer-standalone:4.3.3';
+const PROOF_SERVER_IMAGE = 'midnightntwrk/proof-server:8.1.0';
 
 export const LOCALNET_DIR = join(homedir(), MIDNIGHT_DIR, LOCALNET_DIR_NAME);
 const COMPOSE_PATH = join(LOCALNET_DIR, 'compose.yml');
 const VERSION_PATH = join(LOCALNET_DIR, '.version');
 
-// Full compose.yml for midnight-local-network — ledger-v8 / wallet-sdk 3.0.0
+// Full compose.yml for midnight-local-network — Preview/Preprod matrix generation
+// (midnight-js 4.1.1 / ledger-v8 8.x / compact-runtime 0.16.0)
 export const COMPOSE_YAML = `services:
   proof-server:
     image: '${PROOF_SERVER_IMAGE}'
@@ -30,6 +34,12 @@ export const COMPOSE_YAML = `services:
   indexer:
     image: '${INDEXER_IMAGE}'
     container_name: "indexer"
+    # indexer >=4.3.x runs an SPO sub-indexer that queries block #1 at startup
+    # and exits the whole process if it isn't there yet. On a fresh chain the
+    # node hasn't produced block #1 in the first few seconds, so the first
+    # launch loses this race. Restart on failure: once the node has minted
+    # block #1 (~6s block time) the retry catches up and stays healthy.
+    restart: on-failure
     ports:
       - '8088:8088'
     environment:
@@ -38,6 +48,12 @@ export const COMPOSE_YAML = `services:
       # Only needed to satisfy the config schema – not meant for secure use.
       APP__INFRA__SECRET: "303132333435363738393031323334353637383930313233343536373839303132"
       APP__INFRA__NODE__URL: "ws://node:9944"
+      # indexer >=4.3.x added a separate SPO poller. Point it at our node
+      # (defaults to localhost, which is the indexer container itself), and
+      # satisfy the now-required blockfrost_id with a placeholder — SPO/staking
+      # features aren't exercised on localnet, and any non-empty value loads.
+      APP__INFRA__SPO_NODE__URL: "ws://node:9944"
+      APP__INFRA__SPO_NODE__BLOCKFROST_ID: "dummy-not-using-spo"
     healthcheck:
       test: ["CMD-SHELL", "cat /var/run/indexer-standalone/running"]
       start_interval: "5s"

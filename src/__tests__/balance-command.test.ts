@@ -50,6 +50,14 @@ describe('balance command — shielded flag errors', () => {
     const args = parseArgs(['balance', '--shielded', '--wallet', path.join(TEST_DIR, 'nonexistent.json')]);
     await expect(balanceCommand(args)).rejects.toThrow('Wallet file not found');
   });
+
+  it('rejects --shielded on a positional address not owned by any wallet', async () => {
+    // Shielded balances need the seed; a bare address we don't own can't be
+    // decrypted, so we fail with a clear pointer to the wallet-based form.
+    const args = parseArgs(['balance', EMPTY_ADDRESS, '--shielded', '--network', 'undeployed']);
+    await expect(balanceCommand(args)).rejects.toThrow(/Shielded balances are private/);
+    await expect(balanceCommand(args)).rejects.toThrow(/--wallet <name> --shielded/);
+  });
 });
 
 describe.skipIf(!HAS_INDEXER)('balance command — reads address from wallet file', () => {
