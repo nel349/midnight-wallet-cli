@@ -221,6 +221,11 @@ export async function readShieldedBalanceCached(
     onProgress: options.onProgress,
     signal: options.signal,
     timeoutMs: options.timeoutMs,
+    // Persist after each chunk so a Ctrl+C / kill during a cold ~70s sync
+    // doesn't lose progress — the next call resumes from the last checkpoint.
+    onCheckpoint: (state, lastAppliedEventId) => {
+      try { saveShieldedCache(network, pubkeyHex, state, lastAppliedEventId, undefined, options.chainId); } catch { /* best-effort */ }
+    },
   });
 
   // Only write if we advanced or this is a first sync. If we had a cache and zero

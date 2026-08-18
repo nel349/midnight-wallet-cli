@@ -6,14 +6,18 @@ import { readShieldedBalanceDirect } from '../lib/shielded-direct.ts';
 import { deriveShieldedSeed } from '../lib/derivation.ts';
 import zswapEvents from './fixtures/zswap-events-localnet.json';
 
-// Real zswap ledger events captured from a localnet chain where genesis
-// (seed 0x01) airdropped shielded NIGHT to kuiratest twice (100M then a
-// spend-with-change 25M), leaving genesis at 125M and kuiratest at 125M.
-// The fixture is the FULL event stream; each wallet's balance is reconstructed
-// by replaying it with that wallet's secret keys.
-const GENESIS_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
-const KUIRATEST_SEED = '408b285c123836004f4b8842c89324c1f01382450c0d439af345ba7fc49acf705489c6fc77dbd4e3dc1dd8cc6bc9f043db8ada1e243c4a0eafb290d399480840';
-const NIGHT_125M = 125_000_000_000_000n; // 125,000,000 NIGHT in atomic units
+// Real zswap ledger events captured from a fresh localnet chain. Seeds 0x01 and
+// 0x02 are localnet genesis-funded wallets (250M shielded NIGHT each); genesis
+// (0x01) airdropped 100M to 0x02, so 0x01 ends at 150M (a spend) and 0x02 at
+// 350M (its 250M allocation + the 100M it received). All seeds are throwaway
+// constants — no real wallet's seed is committed. The fixture is the FULL event
+// stream; each wallet's balance is reconstructed by replaying it with that
+// wallet's secret keys.
+const GENESIS_SEED = '0000000000000000000000000000000000000000000000000000000000000001'; // spender
+const GENESIS2_SEED = '0000000000000000000000000000000000000000000000000000000000000002'; // received on top
+const EMPTY_SEED = '00000000000000000000000000000000000000000000000000000000000000aa'; // non-genesis, no coins
+const NIGHT_150M = 150_000_000_000_000n;
+const NIGHT_350M = 350_000_000_000_000n;
 
 function secretKeysFor(seedHex: string): ledger.ZswapSecretKeys {
   return ledger.ZswapSecretKeys.fromSeed(deriveShieldedSeed(Buffer.from(seedHex, 'hex')));
@@ -60,25 +64,25 @@ describe('readShieldedBalanceDirect', () => {
   beforeAll(async () => { indexer = await startFakeIndexer(zswapEvents as any); });
   afterAll(async () => { await indexer.close(); });
 
-  it('reconstructs the receiver balance from received coins', async () => {
-    const r = await readShieldedBalanceDirect(secretKeysFor(KUIRATEST_SEED), indexer.url, { idleMs: 200 });
-    expect(r.balance).toBe(NIGHT_125M);
-    expect(r.availableCoins).toBe(2);
+  it('removes SPENT coins for the spender (regression: was a 250M over-count)', async () => {
+    // Genesis started with a 250M allocation and spent 100M. If spends weren't
+    // reconciled, this would read 250M — the bug this reader fixes.
+    const r = await readShieldedBalanceDirect(secretKeysFor(GENESIS_SEED), indexer.url, { idleMs: 200 });
+    expect(r.balance).toBe(NIGHT_150M);
+    expect(r.availableCoins).toBe(3);
     expect(r.partial).toBe(false);
     expect(r.eventCount).toBe(zswapEvents.length);
   });
 
-  it('removes SPENT coins for the spender (regression: was 250M over-count)', async () => {
-    // Genesis started with 250M and spent 125M via the airdrops. If spends
-    // weren't reconciled, this would read 250M — the bug this reader fixes.
-    const r = await readShieldedBalanceDirect(secretKeysFor(GENESIS_SEED), indexer.url, { idleMs: 200 });
-    expect(r.balance).toBe(NIGHT_125M);
-    expect(r.availableCoins).toBe(3);
+  it('adds received coins on top of an existing balance', async () => {
+    // 0x02 holds its own 250M allocation AND the 100M it received from genesis.
+    const r = await readShieldedBalanceDirect(secretKeysFor(GENESIS2_SEED), indexer.url, { idleMs: 200 });
+    expect(r.balance).toBe(NIGHT_350M);
+    expect(r.availableCoins).toBe(6);
   });
 
   it('returns a zero balance for a wallet with no shielded coins', async () => {
-    const stranger = '00000000000000000000000000000000000000000000000000000000000000ff';
-    const r = await readShieldedBalanceDirect(secretKeysFor(stranger), indexer.url, { idleMs: 200 });
+    const r = await readShieldedBalanceDirect(secretKeysFor(EMPTY_SEED), indexer.url, { idleMs: 200 });
     expect(r.balance).toBe(0n);
     expect(r.availableCoins).toBe(0);
   });
@@ -101,7 +105,7 @@ describe('readShieldedBalanceDirect', () => {
       initialState: first.state,
       startFromId: first.lastAppliedEventId + 1,
     });
-    expect(resumed.balance).toBe(NIGHT_125M);
+    expect(resumed.balance).toBe(NIGHT_150M);
     expect(resumed.availableCoins).toBe(3);
   });
 });
