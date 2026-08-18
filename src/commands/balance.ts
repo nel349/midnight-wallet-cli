@@ -13,6 +13,9 @@ import { shieldedSyncEnabled, shieldedDisabledReason } from '../lib/shielded-pol
 import { getNetworkId } from '../lib/network-id.ts';
 import { isNativeToken } from '../lib/balance-subscription.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
+import { readShieldedBalanceCached } from '../lib/shielded-direct-cache.ts';
+import { deriveShieldedAddress } from '../lib/derive-address.ts';
+import { getChainGenesisHash } from '../lib/chain-id.ts';
 import { suppressSdkTransientErrors } from '../lib/facade.ts';
 import { createEtaEstimator, formatSyncStatus } from '../lib/sync-eta.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
@@ -253,37 +256,34 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
       if (!isJson) activeSpinner = startSpinner('Syncing shielded...');
       const eta = createEtaEstimator();
       const networkId = getNetworkId(networkConfig.networkId);
-      ({ liveShieldedAddrStr, shieldedBalance, shieldedCoins, pendingCoins } =
-        await defaultRepository().withFacade(
-          seedBuffer,
-          networkConfig,
-          async ({ state }) => {
-            const live = MidnightBech32m.encode(networkId, state.shielded.address).asString();
-            saveShieldedAddress(walletPath, networkName, live);
-            return {
-              liveShieldedAddrStr: live,
-              shieldedBalance: state.shielded.balances[nightToken] ?? 0n,
-              shieldedCoins: state.shielded.availableCoins.length,
-              pendingCoins: state.shielded.pendingCoins.length,
-            };
+
+      // Live shielded address is pure key derivation — no facade sync needed.
+      liveShieldedAddrStr = MidnightBech32m.encode(networkId, deriveShieldedAddress(seedBuffer)).asString();
+      saveShieldedAddress(walletPath, networkName, liveShieldedAddrStr);
+
+      // Shielded balance via the indexer-direct zswap-event reader + cache: it
+      // replays `zswapLedgerEvents` with the full secret keys (reconciling
+      // receives AND spends), replacing the facade's cold sync — ~50-70s first
+      // time on hosted nets, incremental after, memory-bounded. chainId
+      // invalidates the cache on chain reset.
+      const chainId = (await getChainGenesisHash(networkConfig.node).catch(() => null)) ?? undefined;
+      const shieldedResult = await readShieldedBalanceCached(
+        seedBuffer,
+        networkName,
+        networkConfig.indexerWS,
+        {
+          forceFresh: noCache,
+          chainId,
+          onProgress: (applied, highest) => {
+            if (!activeSpinner) return;
+            const snap = eta.sample({ applied, highest, t: Date.now() });
+            activeSpinner.update(formatSyncStatus(snap, 'Syncing shielded'));
           },
-          {
-            // Balance reads NIGHT from unshielded + shielded; dust isn't needed and
-            // skipping it avoids the dust isConnected SDK hang on hosted networks.
-            syncMode: 'no-dust',
-            // requireStrictSync: false because this is a read; opt out of write-mode
-            // so the repo skips the dust pre-prime and the cold-start race retry.
-            requireStrictSync: false,
-            readOnly: true,
-            forceFresh: noCache,
-            onSyncProgress: (applied, highest) => {
-              if (!activeSpinner) return;
-              const snap = eta.sample({ applied, highest, t: Date.now() });
-              activeSpinner.update(formatSyncStatus(snap, 'Syncing shielded'));
-            },
-            onSyncDetail: (detail) => activeSpinner?.update(`Syncing shielded (waiting on: ${detail})`),
-          },
-        ));
+        },
+      );
+      shieldedBalance = shieldedResult.balance;
+      shieldedCoins = shieldedResult.availableCoins;
+      pendingCoins = 0; // confirmed chain state from events; no in-flight coins
 
       if (activeSpinner) {
         activeSpinner.stop('Shielded ready');
