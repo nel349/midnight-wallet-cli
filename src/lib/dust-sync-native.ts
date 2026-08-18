@@ -49,9 +49,13 @@ export function resolveSidecarBinary(): string | null {
 
   const exe = process.platform === 'win32' ? 'dust-sync.exe' : 'dust-sync';
   // Dev build (repo checkout): sidecar/dust-sync/target/release/dust-sync.
+  // Try both nesting depths so it resolves from `src/lib` (tsx) AND the bundled
+  // `dist/` — import.meta.url differs between them.
   const here = dirname(fileURLToPath(import.meta.url));
-  const devBuild = join(here, '..', '..', 'sidecar', 'dust-sync', 'target', 'release', exe);
-  if (existsSync(devBuild)) return devBuild;
+  for (const up of [['..', '..'], ['..']]) {
+    const devBuild = join(here, ...up, 'sidecar', 'dust-sync', 'target', 'release', exe);
+    if (existsSync(devBuild)) return devBuild;
+  }
 
   // Phase 3 platform package: @midnight-wallet-cli/dust-sync-<os>-<arch>.
   try {

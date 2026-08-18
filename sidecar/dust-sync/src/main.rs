@@ -198,7 +198,9 @@ fn main() {
             Some(cp) => {
                 let bytes = hex::decode(&cp.dust_state).unwrap_or_else(|e| die(&format!("resume state hex: {e}")));
                 let st = tagged_deserialize(&bytes[..]).unwrap_or_else(|e| die(&format!("resume deserialize: {e}")));
-                (st, cp.last_applied_event_id, cp.owned_generation_indices.into_iter().collect(), cp.generation_frontier, cp.events_applied)
+                // events_applied counts THIS run (matches the WASM path's per-call
+                // semantics), so reset to 0 on resume rather than carrying it.
+                (st, cp.last_applied_event_id, cp.owned_generation_indices.into_iter().collect(), cp.generation_frontier, 0)
             }
             None => (DustLocalState::new(params.dust), -1, BTreeSet::new(), 0, 0),
         };
