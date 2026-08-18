@@ -203,3 +203,60 @@ halves are still open — which is why we'd build the consumer ourselves for nex
    mainnet / agent wallets holding real funds.
 5. **Indexer version check:** require the #1265 fix (rehash-before-collapse) on the target
    indexer, else reconstructed roots diverge; guard by comparing against `midnight_zswapStateRoot`.
+
+## Validation — live preview/preprod (exploratory, 2026-08-17)
+
+Ran `src/lib/shielded-direct.ts` directly against the real hosted indexers
+(kuiraval, reprogen — both hold 0 shielded coins on these nets):
+
+| net | warm index | result |
+|-----|-----------|--------|
+| preprod | 1.47–1.50s | complete (`partial=false`, balance 0, root computed) |
+| preview | 1.48s | complete (`partial=false`) |
+
+**Cold viewing-key cost (indexer-side, one-time per key):** the first `connect`
+for a never-seen viewing key makes the indexer build its relevance index by
+scanning history. On preview this took **26–120s** across runs, and one probe
+showed `highestCheckedEndIndex` climbing to ~92% of tip then pausing mid-build.
+Once built, a fresh `connect` reports `checked == tip` in **~0.9s** (proven with a
+raw progress probe: `msg#1 @0.9s checked=29918/29918`). The module's completion
+logic (`checked >= tip`) is correct; it simply has to *wait out* the cold build.
+Implication: keep a generous timeout, surface a "building index" progress line,
+and rely on partial-resume (`startFromIndex`/`initialState`) so a cut-off cold
+build resumes instead of restarting.
+
+**Still unvalidated — coin/spend correctness.** Both test wallets have zero
+shielded activity on preprod/preview, so the receive path (`apply`), the spend
+path (`removeCoinByNullifier`), and the cross-stream ordering risk were NOT
+exercised here. There is no shielded faucet on preview/preprod
+(`NO_SHIELDED_FAUCET`), so this path can only be exercised on localnet genesis
+(250M shielded NIGHT). That is the remaining gate before wiring into `balance`.
+
+## Spend-path validation — localnet genesis (2026-08-17) — TWO CONFIRMED BUGS
+
+Set up a real spend on localnet: shielded-airdropped 100M genesis→kuiratest (genesis
+thereby SPENT). Compared `shielded-direct` against `mn balance --shielded` (SDK full sync,
+ground truth):
+
+| wallet | ground truth | shielded-direct | verdict |
+|--------|-------------|-----------------|---------|
+| kuiratest (receive-only) | 100M / 1 coin | 100M / 1 coin | ✅ receive path correct |
+| gen0 (genesis, spender)  | 150M / 5 coins | **250M / 7 coins** | ❌ spent coins NOT removed |
+
+**BUG #1 (spend over-count) — CONFIRMED, stable repro.** Instrumenting gen0 showed the
+indexer delivers genesis as ONE relevant tx (idx 0-28, 28 outputs, 0 inputs = the mint),
+then `shieldedTransactions` reports `checked==tip` and stops. The later airdrop tx that
+SPENT genesis's coins is delivered by NEITHER `shieldedTransactions` NOR
+`shieldedNullifierTransactions` (that stream returned nothing). So the spend is invisible to
+the collapsed sync → the spent coin is never removed → 250M instead of 150M. Root cause
+under investigation: the `connect` viewing key is built from the ENCRYPTION secret key only
+(`ShieldedEncryptionSecretKey`), which likely can't drive nullifier-based spend delivery.
+
+**BUG #2 (cold-index silent zero) — CONFIRMED.** Immediately after an indexer restart (or
+before the session's relevance index is built), `connect`+subscribe reports `checked==tip`
+with zero relevant txs, and the completion logic returns **balance 0** — a silent wrong
+answer, not `partial`. `checked==tip` alone cannot distinguish "genuinely empty wallet" from
+"index not built yet". Needs an index-readiness signal before trusting an all-zero result.
+
+Both must be fixed before wiring `shielded-direct` into `mn balance`. Receive-only path is
+correct; spender + cold-start paths are not.
