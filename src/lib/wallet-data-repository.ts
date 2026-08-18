@@ -47,6 +47,8 @@ import {
 } from './wallet-cache.ts';
 import { checkBalance, type BalanceSummary } from './balance-subscription.ts';
 import { readDustBalanceDirect, type DustDirectResult, type DustRetention } from './dust-direct.ts';
+import { nativeDustSyncAvailable, runDustSyncNative } from './dust-sync-native.ts';
+import { verbose } from './verbose.ts';
 import { callNodeRpc } from './node-rpc.ts';
 import { deriveDustSeed } from './derivation.ts';
 import { deriveUnshieldedAddress } from './derive-address.ts';
@@ -208,7 +210,7 @@ export class WalletDataRepository {
     this.now = deps.now ?? Date.now;
     this.fetchTip = deps.fetchTip ?? defaultTipFetcher;
     this.fetchUnshielded = deps.fetchUnshielded ?? defaultUnshieldedFetcher;
-    this.fetchDust = deps.fetchDust ?? defaultDustFetcher;
+    this.fetchDust = deps.fetchDust ?? nativeOrWasmDustFetcher;
     this.cacheDir = deps.cacheDir;
   }
 
@@ -578,6 +580,26 @@ function defaultDustFetcher(
   const dustSeed = deriveDustSeed(seed);
   const dustSecretKey = ledger.DustSecretKey.fromSeed(dustSeed);
   return readDustBalanceDirect(dustSecretKey, network.indexerWS, opts);
+}
+
+/**
+ * Prefer the native sidecar (~5x faster cold dust sync) when it's available;
+ * fall back to the WASM reader on a missing binary or any failure. The sidecar
+ * is an optional accelerator, so a fallback is a slowdown, never a break.
+ */
+async function nativeOrWasmDustFetcher(
+  seed: Buffer,
+  network: NetworkConfig,
+  opts: Parameters<typeof defaultDustFetcher>[2],
+): Promise<DustDirectResult> {
+  if (nativeDustSyncAvailable()) {
+    try {
+      return await runDustSyncNative(seed, network, opts);
+    } catch (err) {
+      verbose('dust', `native sidecar failed, using WASM: ${(err as Error).message}`);
+    }
+  }
+  return defaultDustFetcher(seed, network, opts);
 }
 
 // ── Helpers ───────────────────────────────────────────────

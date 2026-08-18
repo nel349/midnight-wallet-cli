@@ -21,3 +21,6 @@ midnight-level-db/
 # local spike/scratch dirs
 .shielded-spike/
 .dust-spike/
+
+# Rust sidecar build output
+sidecar/**/target/
