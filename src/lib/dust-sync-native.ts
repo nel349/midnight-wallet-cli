@@ -5,7 +5,7 @@
 // sidecar is an optional accelerator, never a hard dependency.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -107,6 +107,33 @@ function nativeCheckpointPath(networkName: string, pubkeyHex: string): string {
   const dir = join(homedir(), MIDNIGHT_DIR, CACHE_DIR_NAME, networkName);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: DIR_MODE });
   return join(dir, `dust-native-${pubkeyHex.slice(0, 20)}.json`);
+}
+
+/**
+ * Remove native-sidecar checkpoint files (`dust-native-*.json`). Scope mirrors
+ * `clearDustDirectCache`: (network, pubkey) → one file; (network) → that network;
+ * (neither) → all. Called from `mn cache clear` so clearing the cache also forces
+ * a fresh native sync (and drops a stale checkpoint after a chain reset).
+ */
+export function clearNativeDustCheckpoint(network?: string, pubkeyHex?: string): void {
+  const base = join(homedir(), MIDNIGHT_DIR, CACHE_DIR_NAME);
+  if (network && pubkeyHex) {
+    try { unlinkSync(join(base, network, `dust-native-${pubkeyHex.slice(0, 20)}.json`)); } catch { /* not found is ok */ }
+    return;
+  }
+  const wipeDir = (dir: string) => {
+    if (!existsSync(dir)) return;
+    try {
+      for (const f of readdirSync(dir)) {
+        if (f.startsWith('dust-native-') && f.endsWith('.json')) {
+          try { unlinkSync(join(dir, f)); } catch { /* best-effort */ }
+        }
+      }
+    } catch { /* best-effort */ }
+  };
+  if (network) { wipeDir(join(base, network)); return; }
+  if (!existsSync(base)) return;
+  try { for (const net of readdirSync(base)) wipeDir(join(base, net)); } catch { /* best-effort */ }
 }
 
 /**
