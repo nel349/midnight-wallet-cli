@@ -1,5 +1,5 @@
-// dust command — register UTXOs for dust generation and check status
-// Usage: midnight dust register | midnight dust status
+// dust command — register UTXOs for dust generation, check status, export a snapshot
+// Usage: midnight dust register | midnight dust status | midnight dust export
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 
@@ -14,6 +14,7 @@ import { deriveDustSeed } from '../lib/derivation.ts';
 import { ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { checkBalance } from '../lib/balance-subscription.ts';
 import { dustPublicKeyHex } from '../lib/dust-direct-cache.ts';
+import { exportDustSnapshot } from '../lib/dust-export.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { header, keyValue, divider, formatDust, successMessage, toDust } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
@@ -23,23 +24,18 @@ import { writeJsonResult } from '../lib/json-output.ts';
 export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   const subcommand = args.subcommand;
 
-  if (!subcommand || (subcommand !== 'register' && subcommand !== 'status')) {
+  if (!subcommand || (subcommand !== 'register' && subcommand !== 'status' && subcommand !== 'export')) {
     throw new UsageError(
       'Missing or invalid subcommand.\n' +
       'Usage:\n' +
       '  midnight dust register   Register NIGHT UTXOs for dust generation\n' +
-      '  midnight dust status     Check dust registration status'
+      '  midnight dust status     Check dust registration status\n' +
+      '  midnight dust export     Export a restorable dust snapshot (dustSerializedState)'
     );
   }
 
-  // Load wallet config
-  const walletPath = resolveWalletPath(getFlag(args, 'wallet'));
-  const config = loadWalletConfig(walletPath);
-  const seedBuffer = Buffer.from(config.seed, 'hex');
-
-  // Resolve network
+  // Resolve network first — independent of the wallet (--network flag / config / fallback).
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
-  const address = config.addresses[networkName];
 
   // Apply endpoint overrides: --flag > config > network default
   applyEndpointOverrides(networkConfig, {
@@ -51,6 +47,18 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   if (isVerbose(args)) enableVerbose();
   const isJson = hasFlag(args, 'json');
   const minimal = isMinimalMode(args);
+
+  // export: standalone path. Accepts a raw --seed (so a dApp operator can export a
+  // snapshot for its own seed with no named wallet) or falls back to a named wallet.
+  if (subcommand === 'export') {
+    await dustExport(resolveExportSeed(args), networkName, networkConfig, isJson, minimal, signal);
+    return;
+  }
+
+  // status / register: named wallet + its stored address (used by the registration pre-check).
+  const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
+  const seedBuffer = Buffer.from(config.seed, 'hex');
+  const address = config.addresses[networkName];
 
   // status: pre-check registration via the indexer before paying for a full sync.
   // If the wallet isn't registered, no point doing anything else — return fast.
@@ -86,6 +94,69 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   } finally {
     restoreRpc();
     unsuppress();
+  }
+}
+
+// Resolve the seed for `dust export`. Precedence: --seed flag > MN_SEED env >
+// named/active wallet. The MN_SEED env lets a programmatic caller (e.g. a dApp
+// operator) pass the seed without putting it on argv, where `ps` would expose it
+// to every user on the machine — env is only readable by the same user.
+function resolveExportSeed(args: ParsedArgs): Buffer {
+  const seedFlag = getFlag(args, 'seed');
+  const seedSource = seedFlag ?? process.env.MN_SEED;
+  if (seedSource) {
+    // trim first — a seed sourced from a file / command substitution (common with
+    // MN_SEED=$(cat seed.hex)) carries a trailing newline that would fail the length check.
+    const seedHex = seedSource.trim().replace(/^0x/, '');
+    if (seedHex.length !== 64 || !/^[0-9a-fA-F]+$/.test(seedHex)) {
+      throw new UsageError(`${seedFlag ? '--seed' : 'MN_SEED'} must be a 64-character hex string (32 bytes)`);
+    }
+    return Buffer.from(seedHex, 'hex');
+  }
+  return Buffer.from(loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet'))).seed, 'hex');
+}
+
+// export: fast dust-direct sync → emit a facade-restorable snapshot. The snapshot
+// (the pipeable data) goes to stdout; a summary goes to stderr; --json bundles it all.
+async function dustExport(
+  seedBuffer: Buffer,
+  networkName: string,
+  networkConfig: NetworkConfig,
+  jsonMode: boolean,
+  minimal: boolean,
+  signal?: AbortSignal,
+): Promise<void> {
+  const spinner = startSpinner(`Reading dust events from ${networkName}...`);
+  try {
+    const result = await exportDustSnapshot(seedBuffer, networkName, networkConfig, {
+      signal,
+      onProgress: (applied) => spinner.update(`Reading dust events... ${applied}`),
+    });
+    spinner.stop(result.fromCache && result.eventCount === 0 ? 'Cache up to date' : 'Dust snapshot ready');
+
+    if (jsonMode) {
+      writeJsonResult({
+        subcommand: 'export',
+        network: result.network,
+        dustPublicKey: result.dustPublicKey,
+        offset: result.offset,
+        dustBalance: toDust(result.balance),
+        eventCount: result.eventCount,
+        fromCache: result.fromCache,
+        snapshot: result.snapshot,
+      });
+      return;
+    }
+
+    process.stdout.write(result.snapshot + '\n');
+    if (minimal) return;
+    process.stderr.write('\n' + keyValue('Network', result.network) + '\n');
+    process.stderr.write(keyValue('Dust balance', formatDust(result.balance)) + '\n');
+    process.stderr.write(keyValue('Snapshot offset', String(result.offset)) + '\n');
+    process.stderr.write('\n' + dim('Restore with the wallet SDK dustSerializedState to skip the cold dust sync.') + '\n');
+  } catch (err) {
+    spinner.fail('Failed');
+    throw err;
   }
 }
 
