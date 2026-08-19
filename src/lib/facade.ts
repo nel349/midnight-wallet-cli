@@ -17,7 +17,7 @@ import * as rx from 'rxjs';
 import { type NetworkConfig } from './network.ts';
 import { deriveShieldedSeed, deriveUnshieldedSeed, deriveDustSeed } from './derivation.ts';
 import { type WalletCacheData } from './wallet-cache.ts';
-import { loadDustCache, dustPublicKeyHex } from './dust-direct-cache.ts';
+import { loadDustCache, dustPublicKeyHex, type DustCacheEntry } from './dust-direct-cache.ts';
 import {
   DUST_COST_OVERHEAD,
   DUST_FEE_BLOCKS_MARGIN,
@@ -157,13 +157,36 @@ export async function buildFacade(
  */
 // Shape of the facade's serialized dust-wallet snapshot. See
 // dust-wallet/src/v1/Serialization.ts `SnapshotSchema` — JSON on disk with
-// BigInts rendered as decimal strings.
-interface FacadeDustSnapshot {
+// BigInts rendered as decimal strings. The `state` field is a hex-encoded
+// `DustLocalState.serialize()` (ledger-v8) — the same blob the dust-direct
+// cache stores, which is why the two are interchangeable via the overlay below.
+export interface FacadeDustSnapshot {
   publicKey: { publicKey: string };
   state: string;
   protocolVersion: string;
   networkId: string;
   offset?: string;
+}
+
+/**
+ * Overlay a dust-direct checkpoint onto a facade dust snapshot: swap in the
+ * `DustLocalState` from the indexer-direct reader and set the offset to its last
+ * applied event id. Keeps publicKey/protocolVersion/networkId from the base
+ * snapshot untouched. This is an UNCONDITIONAL overlay — whether the dust-direct
+ * state is the one you want is the caller's policy (see `maybeBridgeDustCache`'s
+ * freshness guard, and `dust export`'s "any events applied?" check). Overlaying
+ * must not itself decide to skip: a base facade snapshot always carries
+ * `offset:"0"`, which would otherwise collide with a genuine checkpoint at id 0.
+ *
+ * This is the seam that lets a facade restore from the fast dust-direct sync:
+ * `maybeBridgeDustCache` uses it to speed up write commands, and `dust export`
+ * uses it to hand a restorable snapshot to other wallets (e.g. a dApp operator).
+ */
+export function overlayDustDirectSnapshot(dustSnapshotJson: string, direct: DustCacheEntry): string {
+  const snapshot: FacadeDustSnapshot = JSON.parse(dustSnapshotJson);
+  snapshot.state = Buffer.from(direct.state.serialize()).toString('hex');
+  snapshot.offset = direct.lastAppliedEventId.toString();
+  return JSON.stringify(snapshot);
 }
 
 function maybeBridgeDustCache(
@@ -177,17 +200,17 @@ function maybeBridgeDustCache(
     const direct = loadDustCache(networkName, pubkeyHex);
     if (!direct) return cache;
 
+    // Only overlay when dust-direct is AHEAD of the facade cache's own offset — a prior
+    // write may have advanced the facade past our indexer-direct checkpoint, and we must
+    // not roll it back.
     const snapshot: FacadeDustSnapshot = JSON.parse(cache.dust);
     const facadeOffset = snapshot.offset !== undefined ? Number(snapshot.offset) : -1;
     if (facadeOffset >= direct.lastAppliedEventId) {
       verbose('facade', `Facade dust offset=${facadeOffset} >= dust-direct offset=${direct.lastAppliedEventId}; skipping bridge`);
       return cache;
     }
-
-    snapshot.state = Buffer.from(direct.state.serialize()).toString('hex');
-    snapshot.offset = direct.lastAppliedEventId.toString();
     verbose('facade', `Bridged dust-direct cache (facade offset ${facadeOffset} → dust-direct offset ${direct.lastAppliedEventId})`);
-    return { ...cache, dust: JSON.stringify(snapshot) };
+    return { ...cache, dust: overlayDustDirectSnapshot(cache.dust, direct) };
   } catch (err) {
     verbose('facade', `Dust-direct bridge skipped: ${(err as Error).message}`);
     return cache;
