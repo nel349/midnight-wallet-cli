@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import type { NetworkConfig } from '../network.ts';
 import { WITNESS_FILE_CANDIDATES } from './witness-discovery.ts';
 import { coerceArg } from './arg-coerce.ts';
+import { resolvePrivateStateSecretKey } from './private-state-secret.ts';
 
 /**
  * Walk up from this module to find the closest `node_modules` directory.
@@ -48,6 +49,13 @@ export interface RunnerOptions {
 
 export interface DeployOptions extends RunnerOptions {
   privateStateKey?: string;
+  /**
+   * 32-byte hex secret seeded into the contract's initial private state (for a
+   * contract whose constructor reads its owner from a witness). Passed to the
+   * deploy subprocess via env (MN_PRIVATE_STATE_SECRET), never argv or the
+   * on-disk script, so the private key is not written to disk.
+   */
+  privateStateSecretKey?: string;
   /**
    * Constructor arguments passed to the contract's `Constructor` (the WASM
    * function the SDK invokes during `deployContract`). Forwarded to
@@ -99,7 +107,12 @@ export async function runState(options: StateOptions): Promise<StateResult> {
 
 export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
   const script = generateDeployScript(options);
-  const result = await executeScript(options.dappDir, script, options.onMessage);
+  // The private-state secret goes to the subprocess via env (never the on-disk
+  // script) so a caller-chosen owner is not written to the filesystem.
+  const extraEnv = options.privateStateSecretKey
+    ? { MN_PRIVATE_STATE_SECRET: options.privateStateSecretKey }
+    : undefined;
+  const result = await executeScript(options.dappDir, script, options.onMessage, extraEnv);
   try {
     return JSON.parse(result) as DeployResult;
   } catch {
@@ -200,6 +213,11 @@ const walletState = await rpcCall('getShieldedAddresses', {});
 `;
 }
 
+// resolvePrivateStateSecretKey serialized for the generated script (same
+// .toString()-inlining trick as ARG_COERCE_FN, so makeInitialPrivateState below
+// and the test suite share one implementation).
+const PRIVATE_STATE_SECRET_FN = `\nconst resolvePrivateStateSecretKey = (${resolvePrivateStateSecretKey.toString()});\n`;
+
 function contractSetupCode(contractName: string, managedDir: string): string {
   return `
 import { pathToFileURL } from 'node:url';
@@ -246,24 +264,17 @@ if (!witnesses) {
 // Uses a deterministic seed derived from the wallet so post/takeDown use the same key.
 // The private state provider (leveldb) persists between calls, but initialPrivateState
 // is the fallback when no stored state exists yet.
+${PRIVATE_STATE_SECRET_FN}
 function makeInitialPrivateState() {
   if (createPrivateState) {
-    // Derive a deterministic key from the wallet's coin public key.
-    // This ensures post and takeDown always use the same secret key
-    // for the same wallet, even across separate CLI invocations.
-    const cpk = walletState?.shieldedCoinPublicKey ?? '';
-    let secretKey;
-    if (cpk && cpk.length >= 64) {
-      // Use first 32 bytes of coin public key as seed
-      secretKey = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) {
-        secretKey[i] = parseInt(cpk.substr(i * 2, 2), 16);
-      }
-    } else {
-      // Fallback: random (will break takeDown if state isn't persisted)
-      secretKey = new Uint8Array(32);
-      globalThis.crypto.getRandomValues(secretKey);
-    }
+    // Secret precedence (see resolvePrivateStateSecretKey, injected above via
+    // .toString()): an explicit mn --secret-key (from env MN_PRIVATE_STATE_SECRET,
+    // never on disk) wins, else a deterministic key from the wallet's coin public
+    // key so post/takeDown reuse it, else random.
+    const secretKey = resolvePrivateStateSecretKey(
+      process.env.MN_PRIVATE_STATE_SECRET,
+      walletState?.shieldedCoinPublicKey,
+    );
     try { return createPrivateState(secretKey); } catch {}
     try { return createPrivateState(); } catch {}
   }
@@ -543,6 +554,7 @@ async function executeScript(
   dappDir: string,
   script: string,
   onMessage?: (msg: string) => void,
+  extraEnv?: Record<string, string>,
 ): Promise<string> {
   // ESM resolution walks up from the importing file's location to find
   // node_modules; NODE_PATH does NOT work for ESM. Three different files
@@ -578,6 +590,7 @@ async function executeScript(
       env: {
         ...process.env,
         NODE_NO_WARNINGS: '1',
+        ...extraEnv,
       },
     });
 

@@ -251,6 +251,15 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     }
   }
 
+  // --secret-key seeds the contract's initial private state (32-byte hex). Use it
+  // for a contract whose constructor derives its owner from a witness
+  // (owner = public_key(secret_key())): without it the owner is derived from the
+  // deploy wallet. Passed to the deploy subprocess via env, never on disk.
+  const privateStateSecretKey = getFlag(args, 'secret-key');
+  if (privateStateSecretKey !== undefined && !/^[0-9a-fA-F]{64}$/.test(privateStateSecretKey)) {
+    throw new UsageError('--secret-key must be 32 bytes of hex (64 chars)');
+  }
+
   if (!jsonMode) {
     process.stderr.write(keyValue('Contract', info.name) + '\n');
     process.stderr.write(keyValue('Network', network) + '\n');
@@ -276,6 +285,7 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
       contractName: info.name,
       servePort: serve.port,
       args: constructorArgs,
+      privateStateSecretKey,
       onMessage: (msg) => spinner.update(msg),
     });
 

@@ -4,6 +4,9 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`mn contract deploy --secret-key <64-hex>` — seed a caller-chosen initial private state.** For a contract whose constructor derives its owner from a witness (`owner = public_key(secret_key())`), the private-state secret can now be supplied explicitly instead of being machine-derived from the wallet's coin public key (the previous behaviour, which gave such a contract the wrong owner). The secret reaches the deploy subprocess via env (`MN_PRIVATE_STATE_SECRET`) — never argv or the on-disk generated script — so the key is not written to disk. New `src/lib/contract/private-state-secret.ts` (pure `resolvePrivateStateSecretKey`, unit-tested), injected into the generated deploy script via `.toString()` (same seam as `coerceArg`).
+
 ## [0.5.0] - 2026-08-18
 
 ### Added
