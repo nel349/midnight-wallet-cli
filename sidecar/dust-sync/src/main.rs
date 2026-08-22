@@ -65,15 +65,18 @@ fn http_from_ws(ws: &str) -> String {
     s.strip_suffix("/ws").map(|x| x.to_string()).unwrap_or(s)
 }
 
-/// Parse a hex string into a 32-byte seed. Pure (testable); does not zeroize its
-/// short-lived intermediate — the stdin caller owns zeroization of the buffers.
+/// Parse a hex string into a 32-byte seed. Pure (testable). Zeroizes its own
+/// decoded intermediate — the caller can't reach this buffer, so it must wipe it.
 fn parse_seed(hex_str: &str) -> Result<[u8; 32], String> {
-    let bytes = hex::decode(hex_str.trim()).map_err(|e| format!("seed must be hex: {e}"))?;
+    let mut bytes = hex::decode(hex_str.trim()).map_err(|e| format!("seed must be hex: {e}"))?;
     if bytes.len() != 32 {
-        return Err(format!("seed must be 32 bytes (64 hex chars), got {}", bytes.len()));
+        let n = bytes.len();
+        bytes.zeroize();
+        return Err(format!("seed must be 32 bytes (64 hex chars), got {n}"));
     }
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&bytes);
+    bytes.zeroize();
     Ok(seed)
 }
 
@@ -111,7 +114,19 @@ struct Checkpoint {
     partial: bool,
 }
 
-enum WsMsg { Event { id: i64, raw: String, max_id: i64 }, End }
+// `Complete` = the server cleanly ended the subscription; `Failed` = a connect,
+// subscription, or mid-stream socket error. They must NOT be conflated: a failure
+// while still behind the tip has to be reported `partial` so the CLI resumes,
+// rather than caching an incomplete sync as done.
+enum WsMsg { Event { id: i64, raw: String, max_id: i64 }, Complete, Failed }
+
+/// A clean server `complete` only counts as done if we actually reached the tip
+/// we were told about (`max_id`). If it ended while still behind — or we never
+/// learned a tip but saw events — the sync must resume. (A `complete` with no
+/// events at all, `max_id < 0`, means an empty dust history: genuinely done.)
+fn complete_is_partial(last_id: i64, max_id: i64) -> bool {
+    max_id >= 0 && last_id < max_id
+}
 
 /// Background WS reader: graphql-transport-ws handshake, forwards dust events.
 fn spawn_reader(ws_url: String, start_id: i64, tx: mpsc::Sender<WsMsg>) {
@@ -120,11 +135,11 @@ fn spawn_reader(ws_url: String, start_id: i64, tx: mpsc::Sender<WsMsg>) {
         // header it rejects the upgrade with 400 (the TS client sets it too).
         let req = match ws_url.as_str().into_client_request() {
             Ok(mut r) => { r.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("graphql-transport-ws")); r }
-            Err(e) => { eprintln!("dust-sync: ws request: {e}"); let _ = tx.send(WsMsg::End); return; }
+            Err(e) => { eprintln!("dust-sync: ws request: {e}"); let _ = tx.send(WsMsg::Failed); return; }
         };
         let (mut sock, _) = match tungstenite::connect(req) {
             Ok(x) => x,
-            Err(e) => { eprintln!("dust-sync: ws connect: {e}"); let _ = tx.send(WsMsg::End); return; }
+            Err(e) => { eprintln!("dust-sync: ws connect: {e}"); let _ = tx.send(WsMsg::Failed); return; }
         };
         let _ = sock.send(Message::Text(r#"{"type":"connection_init"}"#.into()));
         let sub = serde_json::json!({
@@ -143,13 +158,13 @@ fn spawn_reader(ws_url: String, start_id: i64, tx: mpsc::Sender<WsMsg>) {
                                 if tx.send(WsMsg::Event { id, raw: raw.to_string(), max_id }).is_err() { break; }
                             }
                         }
-                        Some("error") => { eprintln!("dust-sync: subscription error: {}", m["payload"]); let _ = tx.send(WsMsg::End); break; }
-                        Some("complete") => { let _ = tx.send(WsMsg::End); break; }
+                        Some("error") => { eprintln!("dust-sync: subscription error: {}", m["payload"]); let _ = tx.send(WsMsg::Failed); break; }
+                        Some("complete") => { let _ = tx.send(WsMsg::Complete); break; }
                         _ => {}
                     }
                 }
                 Ok(Message::Ping(p)) => { let _ = sock.send(Message::Pong(p)); }
-                Ok(Message::Close(_)) | Err(_) => { let _ = tx.send(WsMsg::End); break; }
+                Ok(Message::Close(_)) | Err(_) => { let _ = tx.send(WsMsg::Failed); break; }
                 _ => {}
             }
         }
@@ -257,7 +272,12 @@ fn main() {
             // Idle after events means we're behind the tip (a clean catch-up breaks
             // via the tip check above), so mark partial and let the CLI resume.
             Err(RecvTimeoutError::Timeout) => { if saw_event { partial = true; break; } }
-            Ok(WsMsg::End) | Err(RecvTimeoutError::Disconnected) => break,
+            // Server ended the subscription cleanly: done only if we reached the tip.
+            Ok(WsMsg::Complete) => { partial = complete_is_partial(last_id, max_id); break; }
+            // A connect/subscription/socket failure (or the reader thread dying) is
+            // never a clean finish — mark partial so the CLI resumes next run rather
+            // than caching an incomplete sync as complete.
+            Ok(WsMsg::Failed) | Err(RecvTimeoutError::Disconnected) => { partial = true; break; }
         }
     }
 
@@ -314,5 +334,16 @@ mod tests {
         assert_eq!(back.balance, "136016950999999999"); // u128 kept as string (JSON-safe)
         assert_eq!(back.available_coins, 1);
         assert!(!back.partial);
+    }
+
+    #[test]
+    fn complete_is_partial_only_when_behind_the_tip() {
+        // Caught up to a known tip → complete (not partial).
+        assert!(!complete_is_partial(100, 100));
+        assert!(!complete_is_partial(101, 100));
+        // Server ended while still behind the tip → must resume.
+        assert!(complete_is_partial(50, 100));
+        // No events / no known tip → empty dust history, genuinely done.
+        assert!(!complete_is_partial(-1, -1));
     }
 }

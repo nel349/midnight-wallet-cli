@@ -161,13 +161,13 @@ export function saveDustCache(
  * `validateWalletCacheChainId` — both get called at command startup.
  * Returns wiped paths.
  */
-export async function validateDustCacheChainId(
+export function validateDustCacheChainId(
   network: string,
-  nodeWsUrl: string,
+  currentChainId: string | null,
   cacheDir?: string,
-): Promise<string[]> {
-  const { getChainGenesisHash } = await import('./chain-id.ts');
-  const currentChainId = await getChainGenesisHash(nodeWsUrl);
+): string[] {
+  // Caller fetches the chain's current genesis hash once and passes it in.
+  // A null hash (node unreachable) skips validation — proceed best-effort.
   if (!currentChainId) return [];
 
   const dir = dustCacheDir(network, cacheDir);

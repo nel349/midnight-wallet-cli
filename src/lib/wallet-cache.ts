@@ -139,13 +139,12 @@ export async function saveWalletCache(
  * Returns the list of wiped cache file paths so callers can surface a
  * one-line "cache invalidated" message to the user.
  */
-export async function validateWalletCacheChainId(
+export function validateWalletCacheChainId(
   network: string,
-  nodeWsUrl: string,
+  currentChainId: string | null,
   cacheDir?: string,
-): Promise<string[]> {
-  const { getChainGenesisHash } = await import('./chain-id.ts');
-  const currentChainId = await getChainGenesisHash(nodeWsUrl);
+): string[] {
+  // Caller fetches the chain's current genesis hash once and passes it in.
   if (!currentChainId) return []; // node unreachable — skip validation
 
   const base = cacheDir ?? join(homedir(), MIDNIGHT_DIR, CACHE_DIR_NAME);

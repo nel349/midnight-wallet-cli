@@ -4,13 +4,13 @@
 // the SDK, or the proof server. cacheDir points at a per-test tmp directory.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Buffer } from 'node:buffer';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 
-import { WalletDataRepository, type DustView, type UnshieldedView } from '../lib/wallet-data-repository.ts';
+import { WalletDataRepository, type DustView, type UnshieldedView, type RepoDeps } from '../lib/wallet-data-repository.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { BalanceSummary } from '../lib/balance-subscription.ts';
 import type { DustDirectResult } from '../lib/dust-direct.ts';
@@ -266,5 +266,68 @@ describe('WalletDataRepository — invalidation', () => {
     expect(dustAgain.eventsApplied).toBe(0);      // fakeDustResult returns 0 new events
     expect(unshieldedAgain.fromCache).toBe(true); // still memo'd
     expect(unshieldedCalls).toBe(1);              // no network hit
+  });
+});
+
+// ── Cache chain-reset guard (regression: dead genesis-hash guard) ──────────
+// Previously the repo called validateDustCacheChainId with args in the wrong
+// order (node URL slot got the pubkey) AND always saved chainId=undefined, so
+// the guard never wiped anything — a chain reset surfaced a stale balance from
+// the old chain's coins. These lock both halves via the fetchChainId seam.
+
+/** Read the single dust-*.json cache file written under TMP, or null. */
+function readDustCacheFile(): { chainId?: string; lastAppliedEventId?: number } | null {
+  for (const net of readdirSync(TMP)) {
+    let files: string[] = [];
+    try { files = readdirSync(join(TMP, net)); } catch { continue; }
+    const f = files.find((x) => x.startsWith('dust-') && x.endsWith('.json'));
+    if (f) return JSON.parse(readFileSync(join(TMP, net, f), 'utf-8'));
+  }
+  return null;
+}
+
+describe('WalletDataRepository — dust cache chain-reset guard', () => {
+  const mkRepo = (chainId: string, fetchDust: NonNullable<RepoDeps['fetchDust']>) =>
+    new WalletDataRepository({
+      fetchTip: async () => 'tip-A',
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchDust,
+      fetchChainId: async () => chainId,
+      cacheDir: TMP,
+    });
+
+  it('persists the chain genesis hash into the dust cache on save', async () => {
+    await mkRepo('0xchainA', async () => fakeDustResult()).dust(SEED, NETWORK);
+    expect(readDustCacheFile()?.chainId).toBe('0xchainA');
+  });
+
+  it('wipes a cache from a different chain and re-syncs fresh from event 0', async () => {
+    await mkRepo('0xchainA', async () => fakeDustResult({ lastAppliedEventId: 5 })).dust(SEED, NETWORK);
+    expect(readDustCacheFile()?.chainId).toBe('0xchainA');
+
+    // Chain reset: node now reports genesis hash B. A fresh repo must WIPE the
+    // chain-A cache and re-sync from 0, not resume from 6.
+    let startFromSeen = -999;
+    const view = await mkRepo('0xchainB', async (_s, _n, opts) => {
+      startFromSeen = opts.startFromId;
+      return fakeDustResult({ lastAppliedEventId: 2 });
+    }).dust(SEED, NETWORK);
+
+    expect(startFromSeen).toBe(0);                        // wiped → fresh, not resumed
+    expect(view.fromCache).toBe(false);
+    expect(readDustCacheFile()?.chainId).toBe('0xchainB'); // re-keyed to the new chain
+  });
+
+  it('resumes (does NOT wipe) when the genesis hash is unchanged', async () => {
+    await mkRepo('0xchainA', async () => fakeDustResult({ lastAppliedEventId: 5 })).dust(SEED, NETWORK);
+
+    let startFromSeen = -999;
+    const view = await mkRepo('0xchainA', async (_s, _n, opts) => {
+      startFromSeen = opts.startFromId;
+      return fakeDustResult({ lastAppliedEventId: 5 });
+    }).dust(SEED, NETWORK);
+
+    expect(startFromSeen).toBe(6);          // resumed from lastAppliedEventId + 1
+    expect(view.fromCache).toBe(true);
   });
 });

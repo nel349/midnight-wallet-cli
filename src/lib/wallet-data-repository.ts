@@ -45,6 +45,7 @@ import {
   clearWalletCache,
   validateWalletCacheChainId,
 } from './wallet-cache.ts';
+import { getChainGenesisHash } from './chain-id.ts';
 import { checkBalance, type BalanceSummary } from './balance-subscription.ts';
 import { readDustBalanceDirect, type DustDirectResult, type DustRetention } from './dust-direct.ts';
 import { nativeDustSyncAvailable, runDustSyncNative } from './dust-sync-native.ts';
@@ -160,6 +161,8 @@ export interface RepoDeps {
       onCheckpoint?: (state: ledger.DustLocalState, lastAppliedEventId: number, retention: DustRetention) => void;
     },
   ) => Promise<DustDirectResult>;
+  /** Chain genesis-hash fetcher (cache chain-reset guard). Default: `getChainGenesisHash`. */
+  fetchChainId?: (nodeWsUrl: string) => Promise<string | null>;
   /** Override cache directory (tests use a tmp dir). */
   cacheDir?: string;
 }
@@ -200,6 +203,7 @@ export class WalletDataRepository {
   private readonly fetchTip: NonNullable<RepoDeps['fetchTip']>;
   private readonly fetchUnshielded: NonNullable<RepoDeps['fetchUnshielded']>;
   private readonly fetchDust: NonNullable<RepoDeps['fetchDust']>;
+  private readonly fetchChainId: NonNullable<RepoDeps['fetchChainId']>;
   private readonly cacheDir: string | undefined;
 
   private readonly dustMemo = new Map<string, MemoEntry<DustView>>();
@@ -211,6 +215,7 @@ export class WalletDataRepository {
     this.fetchTip = deps.fetchTip ?? defaultTipFetcher;
     this.fetchUnshielded = deps.fetchUnshielded ?? defaultUnshieldedFetcher;
     this.fetchDust = deps.fetchDust ?? nativeOrWasmDustFetcher;
+    this.fetchChainId = deps.fetchChainId ?? getChainGenesisHash;
     this.cacheDir = deps.cacheDir;
   }
 
@@ -226,8 +231,12 @@ export class WalletDataRepository {
       if (hit) return { ...hit, fromCache: true, eventsApplied: 0 };
     }
 
-    // Validate disk cache against chain genesis hash (cheap once memoised).
-    await validateDustCacheChainId(networkName, pubkeyHex, network.node);
+    // Chain-reset guard: fetch the chain's genesis hash once, wipe any
+    // stale-chain dust files, and persist the same hash on every save so the
+    // guard has something to compare on the next run.
+    const currentChainId = await this.fetchChainId(network.node).catch(() => null);
+    validateDustCacheChainId(networkName, currentChainId, this.cacheDir);
+    const chainId = currentChainId ?? undefined;
 
     let cached = opts.forceFresh ? null : loadDustCache(networkName, pubkeyHex, this.cacheDir);
     const startedFromCache = cached !== null;
@@ -261,7 +270,7 @@ export class WalletDataRepository {
         // Persist after each chunk so a Ctrl+C / process kill / SIGTERM
         // doesn't lose 100k events of work.
         onCheckpoint: (state, lastAppliedEventId, retention) => {
-          try { saveDustCache(networkName, pubkeyHex, state, lastAppliedEventId, this.cacheDir, undefined, retention); } catch { /* best-effort */ }
+          try { saveDustCache(networkName, pubkeyHex, state, lastAppliedEventId, this.cacheDir, chainId, retention); } catch { /* best-effort */ }
         },
       });
 
@@ -270,7 +279,7 @@ export class WalletDataRepository {
         const savedId = result.lastAppliedEventId >= 0
           ? result.lastAppliedEventId
           : (cached?.lastAppliedEventId ?? -1);
-        try { saveDustCache(networkName, pubkeyHex, result.state, savedId, this.cacheDir, undefined, result.retention); } catch { /* best-effort */ }
+        try { saveDustCache(networkName, pubkeyHex, result.state, savedId, this.cacheDir, chainId, result.retention); } catch { /* best-effort */ }
       }
 
       totalEventsApplied += result.eventCount;
@@ -362,7 +371,9 @@ export class WalletDataRepository {
     const syncTimeoutMs = opts.syncTimeoutMs
       ?? (isRemote ? SYNC_ATTEMPT_REMOTE_MS : SYNC_ATTEMPT_LOCAL_MS);
 
-    await validateWalletCacheChainId(address, networkName, network.node);
+    const currentChainId = await this.fetchChainId(network.node).catch(() => null);
+    validateWalletCacheChainId(networkName, currentChainId, this.cacheDir);
+    const chainId = currentChainId ?? undefined;
 
     // ── Pre-prime the dust-direct cache for write-mode borrowers ──
     // Equivalent to the legacy `primeDustCacheWithFeedback` step: warms the
@@ -424,7 +435,7 @@ export class WalletDataRepository {
           if (attempt < SYNC_MAX_ATTEMPTS && String(err?.message ?? '').includes('timed out')) {
             // Save partial sync progress to cache before retrying so the next
             // attempt resumes from the latest event id.
-            try { await saveWalletCache(address, networkName, bundle.facade, this.cacheDir); } catch { /* best-effort */ }
+            try { await saveWalletCache(address, networkName, bundle.facade, this.cacheDir, chainId); } catch { /* best-effort */ }
             opts.onStatus?.(`Sync timed out, retrying (attempt ${attempt + 1}/${SYNC_MAX_ATTEMPTS})...`);
             await stopFacade(bundle).catch(() => {});
             bundle = undefined;
@@ -471,7 +482,7 @@ export class WalletDataRepository {
       }
 
       if (!opts.skipAutoSave) {
-        try { await saveWalletCache(address, networkName, bundle.facade, this.cacheDir); } catch { /* best-effort */ }
+        try { await saveWalletCache(address, networkName, bundle.facade, this.cacheDir, chainId); } catch { /* best-effort */ }
       }
       if (!opts.readOnly) this.invalidate({ network, seed });
       return result;
