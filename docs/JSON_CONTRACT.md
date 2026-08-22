@@ -247,13 +247,13 @@ not currently supported; if added, output will be `{"key": "...", "value": "..."
 
 ## MCP tool names
 
-Every tool name shipped in `src/mcp-server.ts` is stable. Current 31 tools:
+Every tool name shipped in `src/mcp-server.ts` is stable. Current 30 tools:
 
 ```
 # Wallet management
 midnight_wallet_generate      midnight_wallet_list
 midnight_wallet_use           midnight_wallet_info
-midnight_wallet_remove        midnight_generate (deprecated, kept)
+midnight_wallet_remove
 
 # Balance & info
 midnight_info                 midnight_balance
@@ -298,11 +298,11 @@ tool-shape data fields.
 
 ```jsonc
 // success:
-{ "subcommand": "deploy", "address": "9b3e…", "_serverVersion": "0.4.0" }
+{ "subcommand": "deploy", "address": "9b3e…", "_serverVersion": "0.5.0" }
 // error:
-{ "error": true, "code": "DUST_REQUIRED", "message": "…", "_serverVersion": "0.4.0" }
+{ "error": true, "code": "DUST_REQUIRED", "message": "…", "_serverVersion": "0.5.0" }
 // pending-token:
-{ "pending": true, "token": "uuid", "description": "…", "_serverVersion": "0.4.0" }
+{ "pending": true, "token": "uuid", "description": "…", "_serverVersion": "0.5.0" }
 ```
 
 ## Compatibility aliases (additive shims)

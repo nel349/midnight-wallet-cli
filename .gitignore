@@ -24,3 +24,7 @@ midnight-level-db/
 
 # Rust sidecar build output
 sidecar/**/target/
+
+# Local tool artifacts (npm/package-lock.json is the tracked lockfile)
+bun.lock
+.codex/

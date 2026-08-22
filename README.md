@@ -30,17 +30,18 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 | `midnight wallet info [name]` | Show wallet details |
 | `midnight wallet remove <name>` | Remove a wallet |
 | `midnight info` | Display wallet address, network, creation date |
-| `midnight balance [address]` | Check unshielded + shielded NIGHT balance |
-| `midnight transfer <to> <amount>` | Send NIGHT tokens (`--shielded` for shielded) |
+| `midnight balance [address]` | Check unshielded + shielded NIGHT balance (`--force-shielded` to sync shielded on preview/preprod, off by default) |
+| `midnight transfer <to> <amount>` | Send NIGHT tokens (`--shielded` for shielded; `--force-shielded` to allow it on preview/preprod) |
 | `midnight airdrop <amount>` | Fund a wallet or raw address from genesis (`--shielded` for shielded, undeployed only) |
 | `midnight dust register` | Register NIGHT UTXOs for dust (fee token) generation |
 | `midnight dust status` | Check dust registration status and balance |
+| `midnight dust export` | Emit a restorable dust snapshot for fast warm-restore |
 | `midnight address --seed <hex>` | Derive an address from a seed |
 | `midnight genesis-address` | Show the genesis wallet address |
 | `midnight inspect-cost` | Display current block cost limits |
 | `midnight serve` | Start DApp Connector server (WebSocket JSON-RPC) |
 | `midnight contract inspect` | Show circuits, witnesses, and types for a compiled contract |
-| `midnight contract deploy` | Deploy a contract to the network |
+| `midnight contract deploy` | Deploy a contract to the network (`--secret-key <64-hex>` seeds a caller-chosen initial private-state secret for constructors that derive their owner from `public_key(secret_key())`; passed via env to the deploy subprocess, never written to disk) |
 | `midnight contract call` | Call a circuit on a deployed contract |
 | `midnight contract state` | Read ledger state of a deployed contract |
 | `midnight dev` | Contract dev loop — watcher auto-compiles on save; `[t]` runs tests, `[d]` deploys |

@@ -115,6 +115,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '<address>           Check a specific address (unshielded only, no wallet sync)',
       '--shielded          Include shielded balance — needs the seed, so the address must be one of your wallets',
       '--force-shielded    Sync shielded even on preview/preprod (skipped by default — no faucet there)',
+      '--no-cache          Bypass wallet state cache (force a fresh sync)',
       '--network <name>    Override network',
       '--indexer-ws <url>  Custom indexer WebSocket URL',
     ],
@@ -247,6 +248,8 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--node <url>          Override substrate node RPC URL (register only)',
       '--indexer-ws <url>    Override indexer WebSocket URL',
       '--no-cache            Bypass wallet state cache (status only)',
+      'MN_DUST_SYNC_BIN=<path>   (env) Use this native dust-sync sidecar binary instead of auto-detecting it',
+      'MN_DISABLE_NATIVE_DUST=1  (env) Disable the native sidecar; fall back to the WASM dust sync',
     ],
     examples: [
       'midnight dust register',
@@ -421,6 +424,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--managed <dir>               Direct path to managed/<name>/ directory (all subcommands)',
       '--name <contract>             Specific contract when the project ships multiple (all subcommands)',
       '--wallet <name>               Wallet to use for the operation (deploy, call, state)',
+      '--secret-key <64-hex>         Seed a caller-chosen initial private-state secret (deploy). For contracts whose constructor derives its owner from public_key(secret_key()); passed to the deploy subprocess via env, never written to disk',
       '--json                        Output structured JSON',
     ],
     examples: [
@@ -690,6 +694,10 @@ proofs. The CLI provides full shielded support:
   address is one of your wallets, it maps to that wallet's full sync;
   otherwise it errors and points you to --wallet <name> --shielded.
 
+  On preview/preprod, shielded sync is off by default (no faucet there).
+  Pass --force-shielded to midnight balance or midnight transfer to force
+  the shielded sync on for those networks.
+
 Note: there is no self-shielding. Shielded coins come from receiving
 transfers from wallets that already have shielded tokens.
 
@@ -779,10 +787,14 @@ ERROR CODES
   INVALID_ARGS            2     Missing or invalid arguments
   WALLET_NOT_FOUND        3     Wallet file does not exist
   NETWORK_ERROR           4     Connection refused, timeout, DNS failure
+  SYNC_TIMEOUT            4     Wallet sync exceeded its deadline (retry resumes)
   INSUFFICIENT_BALANCE    5     Not enough NIGHT for the operation
   TX_REJECTED             6     Transaction rejected by the node
   STALE_UTXO              6     UTXOs consumed by another transaction
+  STALE_CACHE             6     Local cache disagrees with chain state
   PROOF_TIMEOUT           6     ZK proof generation timed out
+  PROOF_FAILURE           6     Proof server failed to generate the ZK proof
+  INVALID_DUST_PROOF      6     Chain rejected the dust spend proof as malformed
   DUST_REQUIRED           5     No dust tokens available for fees
   CANCELLED               7     Operation cancelled (SIGINT)
   UNKNOWN                 1     Unclassified error
@@ -810,7 +822,7 @@ Setup:
 If not installed globally, use "command": "npx" with
 "args": ["-y", "midnight-wallet-cli@latest", "--mcp"].
 
-AVAILABLE MCP TOOLS (31)
+AVAILABLE MCP TOOLS (30)
 ────────────────────────
 
   Wallet Management
@@ -819,7 +831,6 @@ AVAILABLE MCP TOOLS (31)
   midnight_wallet_use          Set active wallet                                    name
   midnight_wallet_info         Show wallet details (incl. shielded address)         —
   midnight_wallet_remove       Remove a named wallet                                name
-  midnight_generate            Generate or restore a wallet (deprecated)            —
 
   Balance & Info
   midnight_info                Display wallet metadata                              —
@@ -898,18 +909,27 @@ midnight_confirm_operation to actually execute.
 
 Tokens are single-use and expire after 5 minutes.
 
-MCP RESOURCES (skill file)
-──────────────────────────
+MCP RESOURCES (skill files)
+───────────────────────────
 
-The server exposes one MCP Resource:
+The server exposes two MCP Resources — a small core and a fuller guide:
 
-  uri       midnight-wallet://skill
-  name      midnight-wallet skill
+  uri       midnight-wallet://skill/core
+  name      midnight-wallet skill (core)
   mimeType  text/markdown
+  Read this first. Intent routing table + non-negotiable safety rules
+  (~830 tokens). Fetch on session start.
 
-Call resources/read on connect to fetch a conversational guide covering
-intent routing, canonical flows, safety rules, and error recovery. Ground
-responses in it instead of training-data guesses.
+  uri       midnight-wallet://skill/full
+  name      midnight-wallet skill (full)
+  mimeType  text/markdown
+  Canonical multi-step flows, error-recovery recipes, concept primers
+  (NIGHT/DUST/shielded), network selection. Fetch on demand — on an error,
+  a multi-step flow, or a concept question.
+
+The bare midnight-wallet://skill URI stays as a deprecated alias for
+skill/full so existing clients keep working; it is not advertised in
+resources/list. Ground responses in these instead of training-data guesses.
 
 TYPICAL AGENT WORKFLOWS
 ───────────────────────
