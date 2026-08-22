@@ -181,6 +181,10 @@ export function runDustSyncNative(
     opts.signal?.addEventListener('abort', onAbort, { once: true });
 
     // Feed the derived dust seed on stdin (sidecar zeroizes it), then close.
+    // If the sidecar exits before reading stdin, the write races an EPIPE that
+    // would otherwise surface as an unhandled stream 'error' and crash us. Swallow
+    // it here — the real outcome is reported via child.on('close'/'error').
+    child.stdin.on('error', () => { /* EPIPE: child gone; handled by close/error */ });
     const dustSeedHex = Buffer.from(deriveDustSeed(seed)).toString('hex');
     child.stdin.write(dustSeedHex + '\n');
     child.stdin.end();

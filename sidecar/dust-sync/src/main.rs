@@ -34,10 +34,11 @@ struct Args {
     resume: Option<String>,
     timeout_secs: u64,
     idle_secs: u64,
+    initial_silence_secs: u64,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { indexer_ws: String::new(), out: String::new(), resume: None, timeout_secs: 600, idle_secs: 5 };
+    let mut a = Args { indexer_ws: String::new(), out: String::new(), resume: None, timeout_secs: 600, idle_secs: 5, initial_silence_secs: 3 };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         match flag.as_str() {
@@ -46,6 +47,7 @@ fn parse_args() -> Args {
             "--resume" => a.resume = it.next(),
             "--timeout-secs" => a.timeout_secs = it.next().and_then(|v| v.parse().ok()).unwrap_or(600),
             "--idle-secs" => a.idle_secs = it.next().and_then(|v| v.parse().ok()).unwrap_or(5),
+            "--initial-silence-secs" => a.initial_silence_secs = it.next().and_then(|v| v.parse().ok()).unwrap_or(3),
             other => die(&format!("unknown flag: {other}")),
         }
     }
@@ -128,6 +130,18 @@ fn complete_is_partial(last_id: i64, max_id: i64) -> bool {
     max_id >= 0 && last_id < max_id
 }
 
+/// Fast-return decision for a resume-at-tip run, mirroring the WASM reader's
+/// `initialSilenceMs` behaviour (src/lib/dust-direct.ts): when we RESUMED from a
+/// cached checkpoint and NO event has arrived within the initial-silence window,
+/// there is nothing new to apply — we're caught up to the tip, so finish cleanly
+/// (`partial = false`). A FRESH sync (no checkpoint) must NOT fast-return on
+/// silence: a cold subscription can be slow to its first event, so it keeps
+/// waiting. Only meaningful while `!saw_event` — once events arrive, the idle
+/// timer governs (idle-after-events means still behind the tip → partial).
+fn caught_up_on_initial_silence(is_resume: bool, saw_event: bool) -> bool {
+    is_resume && !saw_event
+}
+
 /// Background WS reader: graphql-transport-ws handshake, forwards dust events.
 fn spawn_reader(ws_url: String, start_id: i64, tx: mpsc::Sender<WsMsg>) {
     std::thread::spawn(move || {
@@ -207,9 +221,14 @@ fn main() {
 
     let params = fetch_params(&http);
 
-    // Resume from a prior checkpoint, or start fresh.
+    // Resume from a prior checkpoint, or start fresh. `is_resume` records whether
+    // we actually loaded cached state — it mirrors the WASM reader's `initialState`
+    // presence and gates the initial-silence fast-return below (a failed parse
+    // falls through to a fresh sync, which must NOT fast-return on silence).
+    let resumed = args.resume.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str::<Checkpoint>(&s).ok());
+    let is_resume = resumed.is_some();
     let (mut state, mut last_id, mut owned, mut frontier, mut events_applied): (DustLocalState<Db>, i64, BTreeSet<u64>, u64, u64) =
-        match args.resume.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str::<Checkpoint>(&s).ok()) {
+        match resumed {
             Some(cp) => {
                 let bytes = hex::decode(&cp.dust_state).unwrap_or_else(|e| die(&format!("resume state hex: {e}")));
                 let st = tagged_deserialize(&bytes[..]).unwrap_or_else(|e| die(&format!("resume deserialize: {e}")));
@@ -245,7 +264,12 @@ fn main() {
     loop {
         if interrupted.load(Ordering::SeqCst) { partial = true; break; }
         if Instant::now() >= deadline { partial = true; break; }
-        match rx.recv_timeout(Duration::from_secs(args.idle_secs)) {
+        // While a resume run is still waiting for its first event, poll on the
+        // shorter initial-silence window so a resume-at-tip (zero new events)
+        // returns as fast as the WASM reader instead of idling for `idle_secs`.
+        // Once events have arrived (or on a fresh sync) fall back to `idle_secs`.
+        let recv_secs = if caught_up_on_initial_silence(is_resume, saw_event) { args.initial_silence_secs } else { args.idle_secs };
+        match rx.recv_timeout(Duration::from_secs(recv_secs)) {
             Ok(WsMsg::Event { id, raw, max_id: mid }) => {
                 saw_event = true;
                 let bytes = hex::decode(&raw).unwrap_or_else(|e| die(&format!("event hex: {e}")));
@@ -269,9 +293,18 @@ fn main() {
                 }
                 if max_id >= 0 && last_id >= max_id { break; } // caught up to tip
             }
-            // Idle after events means we're behind the tip (a clean catch-up breaks
-            // via the tip check above), so mark partial and let the CLI resume.
-            Err(RecvTimeoutError::Timeout) => { if saw_event { partial = true; break; } }
+            // Timeout with no message. Three cases:
+            //  - events already seen → behind the tip (a clean catch-up breaks via
+            //    the tip check above), so mark partial and let the CLI resume.
+            //  - resume run, still no event → the initial-silence window elapsed
+            //    with nothing to apply: we're caught up to the tip. Finish cleanly
+            //    (partial = false), mirroring the WASM reader's initialSilence path.
+            //  - fresh sync, still no event → keep waiting; a cold subscription can
+            //    be slow to its first event, and there's no cached tip to trust.
+            Err(RecvTimeoutError::Timeout) => {
+                if saw_event { partial = true; break; }
+                if caught_up_on_initial_silence(is_resume, saw_event) { partial = false; break; }
+            }
             // Server ended the subscription cleanly: done only if we reached the tip.
             Ok(WsMsg::Complete) => { partial = complete_is_partial(last_id, max_id); break; }
             // A connect/subscription/socket failure (or the reader thread dying) is
@@ -345,5 +378,17 @@ mod tests {
         assert!(complete_is_partial(50, 100));
         // No events / no known tip → empty dust history, genuinely done.
         assert!(!complete_is_partial(-1, -1));
+    }
+
+    #[test]
+    fn initial_silence_fast_returns_only_for_resume_before_first_event() {
+        // Resume run, no event yet → initial-silence elapsed means caught up to tip.
+        assert!(caught_up_on_initial_silence(true, false));
+        // Resume run but an event already arrived → idle timer governs, not this.
+        assert!(!caught_up_on_initial_silence(true, true));
+        // Fresh sync, no event yet → must keep waiting (cold first-event latency).
+        assert!(!caught_up_on_initial_silence(false, false));
+        // Fresh sync with events → never fast-returns via this path.
+        assert!(!caught_up_on_initial_silence(false, true));
     }
 }

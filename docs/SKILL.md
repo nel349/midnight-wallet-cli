@@ -77,7 +77,7 @@ Use `midnight_contract_*` MCP tools (or `mn contract` CLI). Flow: `compact compi
 
 Plain strings, booleans, fractional numbers, and `null` pass through unchanged. No hex-string detection — `"1234"` stays a string.
 
-**Compatibility caveat — runtime version skew.** Contracts compiled with an older `compactc` may fail at deploy/call with a message like `Version mismatch: compiled code expects <X>, runtime is <Y>`. The CLI bundles one specific `@midnight-ntwrk/compact-runtime` version; if the user's contract was compiled against a different one, recompile the contract with a matching `compactc` rather than asking the user to downgrade `mn`. `midnight_contract_inspect` shows the compiled `runtimeVersion` so you can flag the mismatch before attempting deploy.
+**Compatibility caveat — runtime version skew.** Contracts must be compiled with the current Compact toolchain. The CLI bundles `@midnight-ntwrk/compact-runtime` `^0.16.0`, so contracts have to target runtime `0.16.0`. Pre-compiled artifacts built for an older runtime (e.g. `0.15.0`) are rejected at deploy/call with a clear message like `CompactError: Version mismatch: compiled code expects 0.15.0`. The fix is to recompile against the current runtime — run `compact compile` (or `mn dev`, which auto-compiles on save) rather than asking the user to downgrade `mn`. `midnight_contract_inspect` shows the compiled `runtimeVersion` so you can flag the mismatch before attempting deploy.
 
 **Stale MCP server.** Every MCP response carries `_serverVersion`. If the user upgraded `midnight-wallet-cli` but `_serverVersion` lags `mn --version`, the MCP client is talking to a long-lived stale process. Tell them to disconnect and re-add the MCP server (a /mcp reconnect alone will not respawn it).
 

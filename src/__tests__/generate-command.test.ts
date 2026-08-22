@@ -14,12 +14,14 @@ let io: CapturedOutput;
 
 beforeEach(() => {
   process.env.NO_COLOR = '';
+  delete process.env.MN_SEED;
   fs.mkdirSync(TEST_DIR, { recursive: true });
   io = captureOutput();
 });
 
 afterEach(() => {
   delete process.env.NO_COLOR;
+  delete process.env.MN_SEED;
   io.restore();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
@@ -101,6 +103,25 @@ describe('generate command — seed mode', () => {
   it('accepts 0x-prefixed seed', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     await generateCommand(parseArgs(['generate', '--network', 'preprod', '--seed', '0x' + TEST_SEED, '--output', walletFile]));
+
+    const config = loadWalletConfig(walletFile);
+    expect(config.seed).toBe(TEST_SEED);
+  });
+
+  it('reads the seed from MN_SEED when --seed is absent', async () => {
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    process.env.MN_SEED = TEST_SEED;
+    await generateCommand(parseArgs(['generate', '--network', 'preprod', '--output', walletFile]));
+
+    const config = loadWalletConfig(walletFile);
+    expect(config.seed).toBe(TEST_SEED);
+    expect(config.mnemonic).toBeUndefined();
+  });
+
+  it('lets --seed win over MN_SEED', async () => {
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    process.env.MN_SEED = '0000000000000000000000000000000000000000000000000000000000000009';
+    await generateCommand(parseArgs(['generate', '--network', 'preprod', '--seed', TEST_SEED, '--output', walletFile]));
 
     const config = loadWalletConfig(walletFile);
     expect(config.seed).toBe(TEST_SEED);

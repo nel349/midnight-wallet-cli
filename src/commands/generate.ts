@@ -21,8 +21,12 @@ export default async function generateCommand(args: ParsedArgs): Promise<void> {
   const networkName = resolveNetworkName({ args });
   const outputPath = getFlag(args, 'output');
 
-  // Mutual exclusion: --seed and --mnemonic cannot both be specified
-  const seedHex = getFlag(args, 'seed');
+  // Mutual exclusion: --seed and --mnemonic cannot both be specified.
+  // Seed source precedence: --seed flag > MN_SEED env. MN_SEED keeps the seed off
+  // argv, where `ps` would leak it to every user on the box (env is same-user only).
+  const seedFlag = getFlag(args, 'seed');
+  const envSeed = process.env.MN_SEED?.trim();
+  const seedHex = seedFlag ?? (envSeed ? envSeed : undefined);
   const mnemonicStr = getFlag(args, 'mnemonic');
 
   if (seedHex !== undefined && mnemonicStr !== undefined) {

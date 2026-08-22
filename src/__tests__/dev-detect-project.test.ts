@@ -16,7 +16,7 @@ afterEach(() => {
 
 describe('detectProject', () => {
   it('finds .compact files at the project root', () => {
-    writeFileSync(join(TEST_DIR, 'counter.compact'), 'pragma language_version >= 0.15;\n');
+    writeFileSync(join(TEST_DIR, 'counter.compact'), 'pragma language_version >= 0.20;\n');
     const info = detectProject(TEST_DIR);
     expect(info.sourceFiles).toHaveLength(1);
     expect(info.sourceFiles[0]).toBe(join(TEST_DIR, 'counter.compact'));

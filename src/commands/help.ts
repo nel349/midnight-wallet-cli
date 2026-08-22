@@ -12,6 +12,7 @@ import { hasShownIntroThisSession, markIntroShown } from '../lib/intro-marker.ts
 import { UsageError } from '../lib/errors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { PKG_NAME, PKG_VERSION, PKG_DESCRIPTION } from '../lib/pkg.ts';
+import { INDEXER_GRAPHQL_WS_PATH } from '../lib/constants.ts';
 
 interface CommandSpec {
   name: string;
@@ -292,7 +293,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight config set wallet alice',
       'midnight config set proof-server http://localhost:6300',
       'midnight config set node wss://rpc.preprod.midnight.network',
-      'midnight config set indexer-ws wss://indexer.preprod.midnight.network/api/v4/graphql/ws',
+      `midnight config set indexer-ws wss://indexer.preprod.midnight.network${INDEXER_GRAPHQL_WS_PATH}`,
       'midnight config unset proof-server',
     ],
     jsonFields: {

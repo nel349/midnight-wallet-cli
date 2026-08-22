@@ -1,20 +1,28 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import addressCommand from '../commands/address.ts';
 import { parseArgs } from '../lib/argv.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
 
 const TEST_SEED = '0000000000000000000000000000000000000000000000000000000000000002';
+const TEST_DIR = path.join(os.tmpdir(), `midnight-address-cmd-test-${process.pid}`);
 
 let io: CapturedOutput;
 
 beforeEach(() => {
   process.env.NO_COLOR = '';
+  delete process.env.MN_SEED;
+  fs.mkdirSync(TEST_DIR, { recursive: true });
   io = captureOutput();
 });
 
 afterEach(() => {
   delete process.env.NO_COLOR;
+  delete process.env.MN_SEED;
   io.restore();
+  fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 describe('address command', () => {
@@ -72,13 +80,71 @@ describe('address command', () => {
     const out = io.stdout().trim();
     expect(out.startsWith('mn_addr_undeployed1')).toBe(true);
   });
+
+  it('resolves the seed from MN_SEED when --seed is absent', async () => {
+    const refArgs = parseArgs(['address', '--seed', TEST_SEED, '--network', 'undeployed']);
+    await addressCommand(refArgs);
+    const fromFlag = io.stdout().trim();
+
+    io.clearStdout();
+    process.env.MN_SEED = TEST_SEED;
+    const envArgs = parseArgs(['address', '--network', 'undeployed']);
+    await addressCommand(envArgs);
+    const fromEnv = io.stdout().trim();
+
+    expect(fromEnv).toBe(fromFlag);
+  });
+
+  it('lets --seed win over MN_SEED', async () => {
+    const otherSeed = '0000000000000000000000000000000000000000000000000000000000000003';
+    process.env.MN_SEED = otherSeed;
+    const args = parseArgs(['address', '--seed', TEST_SEED, '--network', 'undeployed']);
+    await addressCommand(args);
+    const fromFlag = io.stdout().trim();
+
+    io.clearStdout();
+    delete process.env.MN_SEED;
+    await addressCommand(parseArgs(['address', '--seed', TEST_SEED, '--network', 'undeployed']));
+    const seedOnly = io.stdout().trim();
+
+    expect(fromFlag).toBe(seedOnly);
+  });
+
+  it('derives the address from a saved wallet via --wallet', async () => {
+    const walletFile = path.join(TEST_DIR, 'alice.json');
+    fs.writeFileSync(walletFile, JSON.stringify({
+      seed: TEST_SEED,
+      addresses: {},
+      createdAt: new Date().toISOString(),
+    }));
+
+    const refArgs = parseArgs(['address', '--seed', TEST_SEED, '--network', 'undeployed']);
+    await addressCommand(refArgs);
+    const fromSeed = io.stdout().trim();
+
+    io.clearStdout();
+    const walletArgs = parseArgs(['address', '--wallet', walletFile, '--network', 'undeployed']);
+    await addressCommand(walletArgs);
+    const fromWallet = io.stdout().trim();
+
+    expect(fromWallet).toBe(fromSeed);
+  });
 });
 
 describe('address command — error handling', () => {
-  it('throws when --seed is missing', async () => {
+  it('throws a clear error naming every seed source when none is provided', async () => {
     const args = parseArgs(['address', '--network', 'undeployed']);
-    await expect(addressCommand(args)).rejects.toThrow('Missing required flag');
+    await expect(addressCommand(args)).rejects.toThrow('address needs a seed source');
     await expect(addressCommand(args)).rejects.toThrow('--seed');
+    await expect(addressCommand(args)).rejects.toThrow('MN_SEED');
+    await expect(addressCommand(args)).rejects.toThrow('--wallet');
+  });
+
+  it('throws for an invalid MN_SEED', async () => {
+    process.env.MN_SEED = 'aabb';
+    const args = parseArgs(['address', '--network', 'undeployed']);
+    await expect(addressCommand(args)).rejects.toThrow('64-character hex string');
+    await expect(addressCommand(args)).rejects.toThrow('MN_SEED');
   });
 
   it('throws for non-hex seed', async () => {
