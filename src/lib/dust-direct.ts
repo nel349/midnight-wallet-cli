@@ -12,6 +12,12 @@
 import WebSocket from 'ws';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { collapseForeignGenerations } from './dust-collapse.ts';
+import {
+  INITIAL_NIGHT_DUST_RATIO,
+  INITIAL_GENERATION_DECAY_RATE,
+  INITIAL_DUST_GRACE_PERIOD_SECONDS,
+} from './constants.ts';
+import { subscribeGraphqlWs } from './graphql-ws-subscription.ts';
 
 // Set to '1' to disable dust generation-tree collapse (debugging / safety valve).
 const DUST_COLLAPSE_DISABLE_ENV = 'MN_DISABLE_DUST_COLLAPSE';
@@ -28,13 +34,10 @@ export interface DustRetention {
   generationFrontier: number;
 }
 
-// Well-known initial dust parameters. `ParamChange` events in the replay stream
-// will update these to the chain's current values before any UTXO events are
-// applied, so the starting values only affect state-construction, not results.
-// Matches the SDK test constants (NIGHT_DUST_RATIO etc in midnight-ledger).
-const INITIAL_NIGHT_DUST_RATIO = 5_000_000_000n;
-const INITIAL_GENERATION_DECAY_RATE = 8_267n;
-const INITIAL_DUST_GRACE_PERIOD_SECONDS = 3n * 60n * 60n;
+// Initial dust parameters live in constants.ts (single source of truth).
+// `ParamChange` events in the replay stream update these to the chain's current
+// values before any UTXO events are applied, so the starting values only affect
+// state-construction, not results.
 
 const SUBSCRIPTION_QUERY = `
   subscription DustLedgerEvents($id: Int) {
@@ -155,85 +158,85 @@ export function readDustBalanceDirect(
   // synchronous WASM call blocks the event loop for tens of seconds.
   const CHUNK_SIZE = 500;
 
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(indexerWS, ['graphql-transport-ws']);
-    let state = initialState ?? createInitialDustState();
-    const pending: ledger.Event[] = [];
+  let state = initialState ?? createInitialDustState();
+  const pending: ledger.Event[] = [];
 
-    // Retention tracking (owner-match): a generation leaf is ours iff its owner
-    // is our dust public key. We accumulate the owned index set + frontier as
-    // events arrive so we can collapse only foreign ranges. Seeded from the
-    // cached checkpoint on resume.
-    const myPubkey = dustSecretKey.publicKey;
-    const ownedGenIndices = new Set<bigint>((initialRetention?.ownedGenerationIndices ?? []).map(BigInt));
-    let frontier = BigInt(initialRetention?.generationFrontier ?? 0);
-    const trackRetention = (event: ledger.Event) => {
-      const content = event.content as { tag?: string; generationIndex?: bigint; generation?: { owner?: bigint } };
-      if (content?.tag !== 'dustInitialUtxo' || content.generationIndex === undefined) return;
-      const idx = content.generationIndex;
-      if (idx + 1n > frontier) frontier = idx + 1n;
-      if (content.generation?.owner === myPubkey) ownedGenIndices.add(idx);
-    };
-    const currentRetention = (): DustRetention => ({
-      ownedGenerationIndices: [...ownedGenIndices].map(Number),
-      generationFrontier: Number(frontier),
-    });
-    let eventsAppliedCount = 0;
-    let lastEventId = startFromId - 1;
-    let maxIdSeen = -1;
-    let sawFirstEvent = false;
-    let settled = false;
-    let timeoutId: ReturnType<typeof setTimeout>;
-    let idleTimerId: ReturnType<typeof setTimeout> | undefined;
-    let initialSilenceTimerId: ReturnType<typeof setTimeout> | undefined;
+  // Retention tracking (owner-match): a generation leaf is ours iff its owner is
+  // our dust public key. Accumulate the owned index set + frontier as events
+  // arrive so we collapse only foreign ranges. Seeded from the cached checkpoint.
+  const myPubkey = dustSecretKey.publicKey;
+  const ownedGenIndices = new Set<bigint>((initialRetention?.ownedGenerationIndices ?? []).map(BigInt));
+  let frontier = BigInt(initialRetention?.generationFrontier ?? 0);
+  const trackRetention = (event: ledger.Event) => {
+    const content = event.content as { tag?: string; generationIndex?: bigint; generation?: { owner?: bigint } };
+    if (content?.tag !== 'dustInitialUtxo' || content.generationIndex === undefined) return;
+    const idx = content.generationIndex;
+    if (idx + 1n > frontier) frontier = idx + 1n;
+    if (content.generation?.owner === myPubkey) ownedGenIndices.add(idx);
+  };
+  const currentRetention = (): DustRetention => ({
+    ownedGenerationIndices: [...ownedGenIndices].map(Number),
+    generationFrontier: Number(frontier),
+  });
 
-    const cleanup = () => {
-      clearTimeout(timeoutId);
-      if (idleTimerId) clearTimeout(idleTimerId);
-      if (initialSilenceTimerId) clearTimeout(initialSilenceTimerId);
-      try { ws.close(); } catch { /* best-effort */ }
-      signal?.removeEventListener('abort', onAbort);
-    };
+  let eventsAppliedCount = 0;
+  let lastEventId = startFromId - 1;
+  let maxIdSeen = -1;
 
-    const flushPending = () => {
-      if (pending.length === 0) return;
-      state = state.replayEvents(dustSecretKey, pending);
-      eventsAppliedCount += pending.length;
-      pending.length = 0;
-      // Collapse foreign generation ranges now so both the checkpoint we write
-      // and the state we keep replaying onto stay small. Continuing to replay
-      // over a collapsed state is safe (foreign leaves are never indexed; dtime
-      // updates carry their own collapse-tolerant path). The guard inside the
-      // helper falls back to the uncollapsed state if anything looks wrong.
-      if (collapseEnabled) {
-        state = collapseForeignGenerations(state, ownedGenIndices, frontier).state;
+  // Replay accumulated events in chunks so the final step is cheap and the event
+  // loop can breathe between WASM calls; collapse foreign ranges and checkpoint
+  // after each chunk so a timeout/abort doesn't lose the work. lastEventId is
+  // updated before the flush so the checkpoint cursor matches the events applied.
+  const flushPending = () => {
+    if (pending.length === 0) return;
+    state = state.replayEvents(dustSecretKey, pending);
+    eventsAppliedCount += pending.length;
+    pending.length = 0;
+    if (collapseEnabled) {
+      state = collapseForeignGenerations(state, ownedGenIndices, frontier).state;
+    }
+    if (onCheckpoint && lastEventId >= 0) {
+      try { onCheckpoint(state, lastEventId, currentRetention()); } catch { /* best-effort */ }
+    }
+  };
+
+  return subscribeGraphqlWs<DustDirectResult>(indexerWS, {
+    query: SUBSCRIPTION_QUERY,
+    variables: { id: startFromId },
+    idleMs,
+    timeoutMs,
+    // Fast-return only when resuming from cached state; a fresh cold sync must
+    // wait for its (possibly slow) first event.
+    initialSilenceMs: initialState ? initialSilenceMs : 0,
+    signal,
+    onNext: (data) => {
+      const evt = (data as { dustLedgerEvents?: RawDustEvent } | undefined)?.dustLedgerEvents;
+      if (!evt) return false;
+      let event: ledger.Event;
+      try {
+        event = ledger.Event.deserialize(Buffer.from(evt.raw, 'hex'));
+      } catch (err) {
+        throw new Error(`Failed to deserialize dust event ${evt.id}: ${(err as Error).message}`);
       }
-      // Checkpoint after each chunk so a timeout / abort / crash doesn't
-      // lose the work. Caller decides cost (typically a small JSON write).
-      if (onCheckpoint && lastEventId >= 0) {
-        try { onCheckpoint(state, lastEventId, currentRetention()); } catch { /* best-effort */ }
+      trackRetention(event); // read owner/index before replayEvents consumes it
+      pending.push(event);
+      lastEventId = evt.id;
+      if (evt.maxId > maxIdSeen) maxIdSeen = evt.maxId;
+      if (pending.length >= CHUNK_SIZE) {
+        try { flushPending(); } catch (err) {
+          throw new Error(`Failed applying dust events: ${(err as Error).message}`);
+        }
       }
-    };
-
-    // Reset the idle timer on every event. If `idleMs` elapses with no new
-    // event AFTER we've received at least one, we treat the stream as caught
-    // up (the indexer stopped delivering, chain tail reached or backpressure).
-    const resetIdleTimer = () => {
-      if (idleTimerId) clearTimeout(idleTimerId);
-      idleTimerId = setTimeout(() => {
-        if (sawFirstEvent && !settled) finishOk();
-      }, idleMs);
-    };
-
-    const finishOk = (partial = false) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
+      onProgress?.(eventsAppliedCount + pending.length, maxIdSeen);
+      // Caught up when we've received the final event in the current stream.
+      return lastEventId >= maxIdSeen;
+    },
+    buildResult: (partial) => {
       try {
         flushPending();
         const now = new Date();
         state = state.processTtls(now);
-        resolve({
+        return {
           balance: state.walletBalance(now),
           availableCoins: state.utxos.length,
           eventCount: eventsAppliedCount,
@@ -243,134 +246,10 @@ export function readDustBalanceDirect(
           retention: currentRetention(),
           lastAppliedEventId: lastEventId,
           partial,
-        });
+        };
       } catch (err) {
-        reject(new Error(`Failed to build dust state: ${(err as Error).message}`));
+        throw new Error(`Failed to build dust state: ${(err as Error).message}`);
       }
-    };
-
-    const finishErr = (err: Error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(err);
-    };
-
-    // Abort still rejects — the user pressed Ctrl+C and the caller (which
-    // may be orchestrating multiple steps) needs to know to stop. The
-    // periodic onCheckpoint inside flushPending means at most one chunk
-    // (~500 events) of work is lost; the next call resumes from the last
-    // saved checkpoint.
-    const onAbort = () => finishErr(new Error('Operation cancelled'));
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    ws.on('open', () => {
-      ws.send(JSON.stringify({ type: 'connection_init' }));
-    });
-
-    ws.on('message', (data: WebSocket.Data) => {
-      let msg: any;
-      try { msg = JSON.parse(data.toString()); } catch { return; }
-
-      if (msg.type === 'connection_ack') {
-        ws.send(JSON.stringify({
-          id: '1',
-          type: 'subscribe',
-          payload: {
-            query: SUBSCRIPTION_QUERY,
-            variables: { id: startFromId },
-          },
-        }));
-        // After subscribing, arm the initial-silence timer IF we have a cached
-        // state to fall back on. If NO event arrives within `initialSilenceMs`,
-        // the stream is empty (nothing new to apply) and we return cached data.
-        // For fresh runs (no cached state), we must wait for events — a cold
-        // preprod subscription can take several seconds before the first
-        // event arrives.
-        if (initialState) {
-          initialSilenceTimerId = setTimeout(() => {
-            if (!sawFirstEvent && !settled) finishOk();
-          }, initialSilenceMs);
-        }
-        return;
-      }
-
-      if (msg.type === 'error') {
-        finishErr(new Error(`GraphQL subscription error: ${JSON.stringify(msg.payload)}`));
-        return;
-      }
-
-      if (msg.type !== 'next') return;
-
-      if (msg.payload?.errors) {
-        finishErr(new Error(`GraphQL error: ${msg.payload.errors[0]?.message || 'unknown'}`));
-        return;
-      }
-
-      const evt = msg.payload?.data?.dustLedgerEvents as RawDustEvent | undefined;
-      if (!evt) return;
-      sawFirstEvent = true;
-      if (initialSilenceTimerId) { clearTimeout(initialSilenceTimerId); initialSilenceTimerId = undefined; }
-
-      try {
-        const bytes = Buffer.from(evt.raw, 'hex');
-        const event = ledger.Event.deserialize(bytes);
-        trackRetention(event); // read owner/index before replayEvents consumes it
-        pending.push(event);
-      } catch (err) {
-        finishErr(new Error(`Failed to deserialize dust event ${evt.id}: ${(err as Error).message}`));
-        return;
-      }
-
-      // Update lastEventId BEFORE flushPending so onCheckpoint sees the id
-      // of the most recent event included in the chunk it just applied. If
-      // we update after flush, the saved checkpoint claims it covers id N
-      // when it actually contains events through id N+CHUNK_SIZE-1 — the
-      // next call resumes at N+1 and re-applies events already in the
-      // state, corrupting the dust commitment tree.
-      lastEventId = evt.id;
-      if (evt.maxId > maxIdSeen) maxIdSeen = evt.maxId;
-
-      // Flush to the state in chunks so the final step is cheap and the
-      // event loop can breathe between WASM calls.
-      if (pending.length >= CHUNK_SIZE) {
-        try {
-          flushPending();
-        } catch (err) {
-          finishErr(new Error(`Failed applying dust events: ${(err as Error).message}`));
-          return;
-        }
-      }
-      onProgress?.(eventsAppliedCount + pending.length, maxIdSeen);
-      resetIdleTimer();
-
-      // Caught up when we've received the final event in the current stream.
-      // (maxId can grow during replay if new events land on-chain; the idle
-      // timer catches the case where the stream stalls short of maxId.)
-      if (lastEventId >= maxIdSeen) {
-        finishOk();
-      }
-    });
-
-    ws.on('error', (err: Error) => finishErr(new Error(`WebSocket error: ${err.message}`)));
-
-    ws.on('close', () => {
-      if (settled) return;
-      // Some indexers close immediately when there are zero dust events.
-      // Treat a clean close with no events as "empty stream" → zero balance.
-      if (!sawFirstEvent) {
-        finishOk();
-      } else {
-        finishErr(new Error('Indexer closed connection before dust sync completed'));
-      }
-    });
-
-    timeoutId = setTimeout(() => {
-      // Don't throw away progress. Resolve with `partial: true` so the caller
-      // persists the checkpoint and can resume from `lastAppliedEventId` next
-      // call. Pre-existing behavior was reject — that lost 100k+ events of
-      // work on cold preprod syncs.
-      finishOk(true);
-    }, timeoutMs);
+    },
   });
 }

@@ -12,8 +12,9 @@
 // The batched replay keeps the working set bounded (~155MB even on preview),
 // unlike the SDK's cold sync.
 
-import WebSocket from 'ws';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
+
+import { subscribeGraphqlWs } from './graphql-ws-subscription.ts';
 
 const SUBSCRIPTION_QUERY = `
   subscription ZswapLedgerEvents($id: Int) {
@@ -125,168 +126,72 @@ export function readShieldedBalanceDirect(
   // between WASM calls, and the working set stays bounded on large chains.
   const CHUNK_SIZE = 500;
 
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(indexerWS, ['graphql-transport-ws']);
-    let state = initialState ?? new ledger.ZswapLocalState();
-    const pending: ledger.Event[] = [];
+  let state = initialState ?? new ledger.ZswapLocalState();
+  const pending: ledger.Event[] = [];
+  let eventsAppliedCount = 0;
+  let lastEventId = startFromId - 1;
+  let maxIdSeen = -1;
 
-    let eventsAppliedCount = 0;
-    let lastEventId = startFromId - 1;
-    let maxIdSeen = -1;
-    let sawFirstEvent = false;
-    let settled = false;
-    let timeoutId: ReturnType<typeof setTimeout>;
-    let idleTimerId: ReturnType<typeof setTimeout> | undefined;
-    let initialSilenceTimerId: ReturnType<typeof setTimeout> | undefined;
+  // Apply events in chunks so the final step is cheap, the event loop can breathe
+  // between WASM calls, and the working set stays bounded on large chains.
+  // Checkpoint after each chunk so a timeout/abort/crash doesn't lose the work.
+  const flushPending = () => {
+    if (pending.length === 0) return;
+    state = state.replayEventsWithChanges(secretKeys, pending).state;
+    eventsAppliedCount += pending.length;
+    pending.length = 0;
+    if (onCheckpoint && lastEventId >= 0) {
+      try { onCheckpoint(state, lastEventId); } catch { /* best-effort */ }
+    }
+  };
 
-    const cleanup = () => {
-      clearTimeout(timeoutId);
-      if (idleTimerId) clearTimeout(idleTimerId);
-      if (initialSilenceTimerId) clearTimeout(initialSilenceTimerId);
-      try { ws.close(); } catch { /* best-effort */ }
-      signal?.removeEventListener('abort', onAbort);
-    };
-
-    const flushPending = () => {
-      if (pending.length === 0) return;
-      state = state.replayEventsWithChanges(secretKeys, pending).state;
-      eventsAppliedCount += pending.length;
-      pending.length = 0;
-      // Checkpoint after each chunk so a timeout / abort / crash doesn't lose the
-      // work. lastEventId is updated before flush, so the checkpoint's cursor
-      // matches the events actually applied.
-      if (onCheckpoint && lastEventId >= 0) {
-        try { onCheckpoint(state, lastEventId); } catch { /* best-effort */ }
+  return subscribeGraphqlWs<ShieldedDirectResult>(indexerWS, {
+    query: SUBSCRIPTION_QUERY,
+    variables: { id: startFromId },
+    idleMs,
+    timeoutMs,
+    // Fast-return only when resuming from cached state; a fresh cold sync must
+    // wait for its (possibly slow) first event.
+    initialSilenceMs: initialState ? initialSilenceMs : 0,
+    signal,
+    onNext: (data) => {
+      const evt = (data as { zswapLedgerEvents?: RawZswapEvent } | undefined)?.zswapLedgerEvents;
+      if (!evt) return false;
+      let event: ledger.Event;
+      try {
+        event = ledger.Event.deserialize(new Uint8Array(Buffer.from(evt.raw, 'hex')));
+      } catch (err) {
+        throw new Error(`Failed to deserialize zswap event ${evt.id}: ${(err as Error).message}`);
       }
-    };
-
-    const resetIdleTimer = () => {
-      if (idleTimerId) clearTimeout(idleTimerId);
-      idleTimerId = setTimeout(() => {
-        if (sawFirstEvent && !settled) finishOk();
-      }, idleMs);
-    };
-
-    const finishOk = (partial = false) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
+      pending.push(event);
+      // Update lastEventId BEFORE flushing so the checkpoint cursor matches the
+      // events actually applied (resuming at cursor+1 must not re-apply).
+      lastEventId = evt.id;
+      if (evt.maxId > maxIdSeen) maxIdSeen = evt.maxId;
+      if (pending.length >= CHUNK_SIZE) {
+        try { flushPending(); } catch (err) {
+          throw new Error(`Failed applying zswap events: ${(err as Error).message}`);
+        }
+      }
+      onProgress?.(eventsAppliedCount + pending.length, maxIdSeen);
+      // Caught up when we've received the final event in the current stream.
+      return lastEventId >= maxIdSeen;
+    },
+    buildResult: (partial) => {
       try {
         flushPending();
         const { balance, count } = nativeBalance(state);
-        resolve({
+        return {
           balance,
           availableCoins: count,
           eventCount: eventsAppliedCount,
           state,
           lastAppliedEventId: lastEventId,
           partial,
-        });
+        };
       } catch (err) {
-        reject(new Error(`Failed to build shielded state: ${(err as Error).message}`));
+        throw new Error(`Failed to build shielded state: ${(err as Error).message}`);
       }
-    };
-
-    const finishErr = (err: Error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(err);
-    };
-
-    // Abort rejects — the user pressed Ctrl+C. The periodic onCheckpoint means at
-    // most one chunk (~500 events) of work is lost; the next call resumes.
-    const onAbort = () => finishErr(new Error('Operation cancelled'));
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    ws.on('open', () => {
-      ws.send(JSON.stringify({ type: 'connection_init' }));
-    });
-
-    ws.on('message', (data: WebSocket.Data) => {
-      let msg: any;
-      try { msg = JSON.parse(data.toString()); } catch { return; }
-
-      if (msg.type === 'connection_ack') {
-        ws.send(JSON.stringify({
-          id: '1',
-          type: 'subscribe',
-          payload: { query: SUBSCRIPTION_QUERY, variables: { id: startFromId } },
-        }));
-        // If resuming from a cached state and NO event arrives within the silence
-        // window, the stream is empty (nothing new) → return cached data fast.
-        // Fresh runs must wait — a cold subscription can be slow to first event.
-        if (initialState) {
-          initialSilenceTimerId = setTimeout(() => {
-            if (!sawFirstEvent && !settled) finishOk();
-          }, initialSilenceMs);
-        }
-        return;
-      }
-
-      if (msg.type === 'error') {
-        finishErr(new Error(`GraphQL subscription error: ${JSON.stringify(msg.payload)}`));
-        return;
-      }
-
-      if (msg.type !== 'next') return;
-
-      if (msg.payload?.errors) {
-        finishErr(new Error(`GraphQL error: ${msg.payload.errors[0]?.message || 'unknown'}`));
-        return;
-      }
-
-      const evt = msg.payload?.data?.zswapLedgerEvents as RawZswapEvent | undefined;
-      if (!evt) return;
-      sawFirstEvent = true;
-      if (initialSilenceTimerId) { clearTimeout(initialSilenceTimerId); initialSilenceTimerId = undefined; }
-
-      try {
-        const event = ledger.Event.deserialize(new Uint8Array(Buffer.from(evt.raw, 'hex')));
-        pending.push(event);
-      } catch (err) {
-        finishErr(new Error(`Failed to deserialize zswap event ${evt.id}: ${(err as Error).message}`));
-        return;
-      }
-
-      // Update lastEventId BEFORE flushPending so the checkpoint cursor matches
-      // the events actually applied (resuming at cursor+1 must not re-apply).
-      lastEventId = evt.id;
-      if (evt.maxId > maxIdSeen) maxIdSeen = evt.maxId;
-
-      if (pending.length >= CHUNK_SIZE) {
-        try {
-          flushPending();
-        } catch (err) {
-          finishErr(new Error(`Failed applying zswap events: ${(err as Error).message}`));
-          return;
-        }
-      }
-      onProgress?.(eventsAppliedCount + pending.length, maxIdSeen);
-      resetIdleTimer();
-
-      // Caught up when we've received the final event in the current stream.
-      if (lastEventId >= maxIdSeen) {
-        finishOk();
-      }
-    });
-
-    ws.on('error', (err: Error) => finishErr(new Error(`WebSocket error: ${err.message}`)));
-
-    ws.on('close', () => {
-      if (settled) return;
-      // Some indexers close immediately when there are zero events → empty stream.
-      if (!sawFirstEvent) {
-        finishOk();
-      } else {
-        finishErr(new Error('Indexer closed connection before shielded sync completed'));
-      }
-    });
-
-    timeoutId = setTimeout(() => {
-      // Don't throw away progress — resolve partial so the caller persists the
-      // checkpoint and resumes from lastAppliedEventId next call.
-      finishOk(true);
-    }, timeoutMs);
+    },
   });
 }

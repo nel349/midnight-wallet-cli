@@ -30,6 +30,14 @@ export const DUST_FEE_BLOCKS_MARGIN = 5;
 // balancing which hangs or retries uselessly when dust is too low.
 export const MIN_DUST_FOR_TRANSFER = 800_000_000_000_000n;
 
+// Initial dust-accrual parameters (protocol constants, matching the ledger's
+// INITIAL_PARAMETERS). Single source of truth: the direct dust readers build a
+// `DustParameters` from these. The native sidecar (Rust) carries its own copy
+// from the same midnight-ledger crate — keep them in sync if the protocol changes.
+export const INITIAL_NIGHT_DUST_RATIO = 5_000_000_000n;
+export const INITIAL_GENERATION_DECAY_RATE = 8_267n;
+export const INITIAL_DUST_GRACE_PERIOD_SECONDS = 10_800n; // 3h (3 * 60 * 60)
+
 // Timeouts (milliseconds)
 export const SYNC_TIMEOUT_MS = 300_000;       // 5 minutes — full wallet sync (used by dust/balance commands)
 export const SYNC_ATTEMPT_TIMEOUT_MS = 30_000;        // 30 seconds — per sync attempt on localnet

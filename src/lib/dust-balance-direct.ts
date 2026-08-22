@@ -16,16 +16,16 @@
 // the initial constants are used. A `ParamChange` on-chain would require a full
 // sync to pick up — acceptable for a fast balance read.
 
-import WebSocket from 'ws';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { DustAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
 
-// Initial dust parameters (match dust-direct's starting state). NIGHT:dust ratio,
-// generation decay rate, and the grace period in seconds.
-const INITIAL_NIGHT_DUST_RATIO = 5_000_000_000n;
-const INITIAL_GENERATION_DECAY_RATE = 8_267n;
-const INITIAL_DUST_GRACE_PERIOD_SECONDS = 10_800n; // 3h
+import {
+  INITIAL_NIGHT_DUST_RATIO,
+  INITIAL_GENERATION_DECAY_RATE,
+  INITIAL_DUST_GRACE_PERIOD_SECONDS,
+} from './constants.ts';
+import { subscribeGraphqlWs } from './graphql-ws-subscription.ts';
 
 const SUBSCRIPTION_QUERY = `
   subscription DustGenerations($a: DustAddress!, $s: Int!, $e: Int!) {
@@ -99,105 +99,55 @@ export function readDustBalanceFast(
   const owner = dustSecretKey.publicKey;
   const dustAddress = DustAddress.encodePublicKey(networkId, dustSecretKey.publicKey);
 
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(indexerWS, ['graphql-transport-ws']);
-    // generation index -> its latest generation record and dtime (ms), if any.
-    const generations = new Map<number, RawGeneration>();
-    const dtimes = new Map<number, number>();
-    let subscribed = false;
-    let settled = false;
-    let timeoutId: ReturnType<typeof setTimeout>;
-    let idleTimerId: ReturnType<typeof setTimeout> | undefined;
+  // generation index -> its latest generation record and dtime (ms), if any.
+  const generations = new Map<number, RawGeneration>();
+  const dtimes = new Map<number, number>();
 
-    const cleanup = () => {
-      clearTimeout(timeoutId);
-      if (idleTimerId) clearTimeout(idleTimerId);
-      try { ws.close(); } catch { /* best-effort */ }
-      signal?.removeEventListener('abort', onAbort);
-    };
+  const computeBalance = (): { balance: bigint; active: number } => {
+    let balance = 0n;
+    let active = 0;
+    for (const [index, gen] of generations) {
+      const dt = dtimes.get(index);
+      const genInfo = {
+        value: BigInt(gen.value),
+        owner,
+        nonce: gen.backingNight,
+        dtime: dt !== undefined ? new Date(dt) : undefined,
+      } as ledger.DustGenerationInfo;
+      const v = ledger.updatedValue(new Date(gen.ctime * 1000), BigInt(gen.initialValue), genInfo, now, params);
+      if (v > 0n) active++;
+      balance += v;
+    }
+    return { balance, active };
+  };
 
-    const computeBalance = (): { balance: bigint; active: number } => {
-      let balance = 0n;
-      let active = 0;
-      for (const [index, gen] of generations) {
-        const dt = dtimes.get(index);
-        const genInfo = {
-          value: BigInt(gen.value),
-          owner,
-          nonce: gen.backingNight,
-          dtime: dt !== undefined ? new Date(dt) : undefined,
-        } as ledger.DustGenerationInfo;
-        const v = ledger.updatedValue(new Date(gen.ctime * 1000), BigInt(gen.initialValue), genInfo, now, params);
-        if (v > 0n) active++;
-        balance += v;
-      }
-      return { balance, active };
-    };
-
-    const finish = (partial = false) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      try {
-        const { balance, active } = computeBalance();
-        resolve({ balance, generationCount: generations.size, activeGenerations: active, partial });
-      } catch (err) {
-        reject(new Error(`Failed to compute dust balance: ${(err as Error).message}`));
-      }
-    };
-
-    const fail = (err: Error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(err);
-    };
-
-    const onAbort = () => fail(new Error('Operation cancelled'));
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    // Once subscribed, the stream delivers our (few) generations then goes quiet;
-    // finish after `idleMs` of silence.
-    const armIdle = () => {
-      if (idleTimerId) clearTimeout(idleTimerId);
-      idleTimerId = setTimeout(() => { if (subscribed && !settled) finish(); }, idleMs);
-    };
-
-    ws.on('open', () => ws.send(JSON.stringify({ type: 'connection_init' })));
-
-    ws.on('message', (data: WebSocket.Data) => {
-      let msg: any;
-      try { msg = JSON.parse(data.toString()); } catch { return; }
-
-      if (msg.type === 'connection_ack') {
-        ws.send(JSON.stringify({
-          id: '1',
-          type: 'subscribe',
-          payload: { query: SUBSCRIPTION_QUERY, variables: { a: dustAddress, s: 0, e: endIndex } },
-        }));
-        subscribed = true;
-        armIdle();
-        return;
-      }
-      if (msg.type === 'error') { fail(new Error(`GraphQL subscription error: ${JSON.stringify(msg.payload)?.slice(0, 200)}`)); return; }
-      if (msg.type !== 'next') return;
-      if (msg.payload?.errors) { fail(new Error(`GraphQL error: ${msg.payload.errors[0]?.message || 'unknown'}`)); return; }
-
-      const p = msg.payload?.data?.dustGenerations;
-      if (!p) return;
+  return subscribeGraphqlWs<DustBalanceFastResult>(indexerWS, {
+    query: SUBSCRIPTION_QUERY,
+    variables: { a: dustAddress, s: 0, e: endIndex },
+    idleMs,
+    timeoutMs,
+    // Snapshot read: the stream delivers our (few) generations then goes quiet,
+    // so finish on idle even before a first item (an empty wallet has none).
+    idleBeforeFirstEvent: true,
+    signal,
+    onNext: (data) => {
+      const p = (data as { dustGenerations?: { __typename?: string; generationMtIndex?: unknown; newDtime?: unknown } } | undefined)?.dustGenerations;
+      if (!p) return false;
       if (p.__typename === 'DustGenerationsItem') {
-        generations.set(Number(p.generationMtIndex), p as RawGeneration);
+        generations.set(Number(p.generationMtIndex), p as unknown as RawGeneration);
       } else if (p.__typename === 'DustGenerationDtimeUpdateItem') {
         dtimes.set(Number(p.generationMtIndex), Number(p.newDtime));
       }
-      // DustGenerationsProgress carries only tree/index bookkeeping we don't need
-      // for the balance; idle detection ends the read.
-      armIdle();
-    });
-
-    ws.on('error', (err: Error) => fail(new Error(`WebSocket error: ${err.message}`)));
-    ws.on('close', () => { if (!settled) finish(); });
-
-    timeoutId = setTimeout(() => finish(true), timeoutMs);
+      // DustGenerationsProgress carries only tree/index bookkeeping; idle ends the read.
+      return false; // no tip concept — idle/timeout terminate the snapshot read
+    },
+    buildResult: (partial) => {
+      try {
+        const { balance, active } = computeBalance();
+        return { balance, generationCount: generations.size, activeGenerations: active, partial };
+      } catch (err) {
+        throw new Error(`Failed to compute dust balance: ${(err as Error).message}`);
+      }
+    },
   });
 }
