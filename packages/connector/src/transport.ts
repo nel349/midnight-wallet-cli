@@ -57,8 +57,14 @@ export async function createTransport(options: TransportOptions): Promise<RpcTra
   let nextId = 1;
   let closed = false;
 
-  // Import ws for Node.js (browser uses globalThis.WebSocket)
-  const WS = typeof globalThis.WebSocket === 'function'
+  // Use the `ws` package in Node (stable, and the same library the server side
+  // uses); use the global WebSocket only outside Node (browser / worker). Node
+  // >=22 now exposes a global (undici) WebSocket, so a bare
+  // `typeof globalThis.WebSocket === 'function'` check would wrongly pick it in
+  // Node — and undici's client races on the connect handshake against a ws
+  // server under load (empty-message connect errors). Detect Node explicitly.
+  const isNode = typeof (globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node === 'string';
+  const WS = !isNode && typeof globalThis.WebSocket === 'function'
     ? globalThis.WebSocket
     : (await import('ws')).default;
 
