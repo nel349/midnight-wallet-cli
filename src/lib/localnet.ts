@@ -8,7 +8,7 @@ import { join } from 'path';
 import { MIDNIGHT_DIR, LOCALNET_DIR_NAME, DIR_MODE } from './constants.ts';
 
 // Version tag — bump when compose content changes so stale files get overwritten
-export const COMPOSE_VERSION = '3.0.5';
+export const COMPOSE_VERSION = '3.0.6';
 
 // Docker image versions — update together per Midnight support matrix.
 // Tracks the Preview/Preprod generation (the row our SDK stack targets:
@@ -28,18 +28,25 @@ export const COMPOSE_YAML = `services:
   proof-server:
     image: '${PROOF_SERVER_IMAGE}'
     container_name: "proof-server"
+    # Self-heal across Docker Desktop restarts and transient stops. Without this,
+    # a stopped node/proof-server never comes back while the indexer (below) does,
+    # leaving a half-dead localnet: the indexer answers but the node's ws is gone,
+    # surfacing downstream as ws "Normal Closure" churn and a wedged dust sync.
+    restart: unless-stopped
     ports:
       - "6300:6300"
 
   indexer:
     image: '${INDEXER_IMAGE}'
     container_name: "indexer"
-    # indexer >=4.3.x runs an SPO sub-indexer that queries block #1 at startup
-    # and exits the whole process if it isn't there yet. On a fresh chain the
-    # node hasn't produced block #1 in the first few seconds, so the first
-    # launch loses this race. Restart on failure: once the node has minted
-    # block #1 (~6s block time) the retry catches up and stays healthy.
-    restart: on-failure
+    # unless-stopped covers two cases: (1) indexer >=4.3.x runs an SPO sub-indexer
+    # that queries block #1 at startup and exits the whole process if it isn't there
+    # yet — on a fresh chain the node hasn't minted block #1 in the first few seconds,
+    # so the first launch loses this race and the restart lets the retry catch up once
+    # the node mints block #1 (~6s block time); and (2) Docker Desktop restarts /
+    # transient stops, so the whole localnet self-heals (see node + proof-server)
+    # instead of going half-dead.
+    restart: unless-stopped
     ports:
       - '8088:8088'
     environment:
@@ -68,6 +75,8 @@ export const COMPOSE_YAML = `services:
   node:
     image: '${NODE_IMAGE}'
     container_name: "node"
+    # Self-heal across Docker Desktop restarts / transient stops (see proof-server).
+    restart: unless-stopped
     ports:
       - "9944:9944"
     healthcheck:

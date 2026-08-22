@@ -102,6 +102,25 @@ describe('COMPOSE_YAML content', () => {
   it('starts with services: key (valid compose format)', () => {
     expect(COMPOSE_YAML.trimStart()).toMatch(/^services:/);
   });
+
+  // Regression: node + proof-server used to have no restart policy while only the
+  // indexer did. A Docker Desktop restart or any transient stop then left a
+  // half-dead localnet (indexer up, node gone) — surfacing as ws "Normal Closure"
+  // churn and a wedged dust sync. Every service must self-heal.
+  it('gives every service a restart policy so the localnet self-heals', () => {
+    const serviceBlock = (svc: string): string => {
+      const start = COMPOSE_YAML.indexOf(`\n  ${svc}:`);
+      if (start < 0) return '';
+      const rest = COMPOSE_YAML.slice(start + 1);
+      const next = rest.search(/\n {2}\S/); // next top-level (2-space) service key
+      return next < 0 ? rest : rest.slice(0, next + 1);
+    };
+    for (const svc of ['proof-server', 'indexer', 'node']) {
+      const block = serviceBlock(svc);
+      expect(block, `service ${svc} present in compose`).not.toBe('');
+      expect(block, `service ${svc} has a restart policy`).toMatch(/^\s+restart:/m);
+    }
+  });
 });
 
 describe('COMPOSE_VERSION', () => {
