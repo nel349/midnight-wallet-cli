@@ -17,7 +17,7 @@ import * as ledger from '@midnight-ntwrk/ledger-v8';
 
 import { MIDNIGHT_DIR, CACHE_DIR_NAME, DIR_MODE, FILE_MODE } from './constants.ts';
 import { deriveDustSeed } from './derivation.ts';
-import { readDustBalanceDirect, type DustDirectOptions, type DustRetention } from './dust-direct.ts';
+import { type DustRetention } from './dust-direct.ts';
 
 // v2 added the retention fields (owned generation indices + frontier) that the
 // generation-tree collapse needs. v1 caches lack them and are invalidated, so
@@ -233,68 +233,4 @@ export function clearDustDirectCache(
       wipeNetworkDir(join(base, net));
     }
   } catch { /* best-effort */ }
-}
-
-export interface PrimeDustCacheResult {
-  /** Number of events applied in this prime call (delta since last cache save). */
-  eventCount: number;
-  /** Latest event id in the saved cache (may be carried from prior cache if no new events). */
-  lastAppliedEventId: number;
-  /** True if an existing cache was loaded and extended; false if primed from scratch. */
-  fromCache: boolean;
-}
-
-/**
- * Prime (or refresh) the indexer-direct dust cache for the given wallet seed.
- *
- * This walks the `dustLedgerEvents` subscription from the last cached event
- * (or 0 if no cache), replays all events into a DustLocalState, and persists
- * the result. When a subsequent `buildFacade` call runs, `maybeBridgeDustCache`
- * overlays this state into the facade's dust snapshot — so strict sync
- * resumes from near chain-tip instead of slowly catching up from scratch.
- *
- * Intended as a pre-flight step for WRITE operations (transfer, airdrop,
- * dust register, serve) on networks where the dust-wallet SDK's sync is slow.
- * Read-only operations (`balance`, `dust status`) use `readDustBalanceDirect`
- * directly and don't need this wrapper.
- */
-export async function primeDustCache(
-  seedBuffer: Buffer,
-  network: string,
-  indexerWS: string,
-  options: Pick<DustDirectOptions, 'onProgress' | 'signal'> = {},
-): Promise<PrimeDustCacheResult> {
-  const dustSeed = deriveDustSeed(seedBuffer);
-  const dustSecretKey = ledger.DustSecretKey.fromSeed(dustSeed);
-  const pubkeyHex = dustPublicKeyHex(dustSecretKey.publicKey);
-
-  const cached = loadDustCache(network, pubkeyHex);
-  const startFromId = cached ? cached.lastAppliedEventId + 1 : 0;
-
-  const result = await readDustBalanceDirect(dustSecretKey, indexerWS, {
-    initialState: cached?.state,
-    initialRetention: cached?.retention,
-    startFromId,
-    onProgress: options.onProgress,
-    signal: options.signal,
-  });
-
-  // Only write if we advanced or this is a first prime. If we had a cache and
-  // zero new events arrived, leave the on-disk file untouched (it's already
-  // current as far as the indexer is concerned).
-  if (result.lastAppliedEventId >= 0) {
-    saveDustCache(network, pubkeyHex, result.state, result.lastAppliedEventId, undefined, undefined, result.retention);
-  } else if (!cached) {
-    // No cache AND no events on-chain for this network yet — still persist an
-    // empty snapshot so the next call sees `fromCache: true` and short-circuits.
-    saveDustCache(network, pubkeyHex, result.state, -1, undefined, undefined, result.retention);
-  }
-
-  return {
-    eventCount: result.eventCount,
-    lastAppliedEventId: result.lastAppliedEventId >= 0
-      ? result.lastAppliedEventId
-      : (cached?.lastAppliedEventId ?? -1),
-    fromCache: cached !== null,
-  };
 }

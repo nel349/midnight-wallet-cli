@@ -73,3 +73,95 @@ describe('overlayDustDirectSnapshot', () => {
     expect(restored.walletBalance(now)).toBe(ownedState.walletBalance(now));
   });
 });
+
+// ── exportDustSnapshot orchestration ──────────────────────────────────────
+// The command-facing entry point. It must route the sync through the repository
+// (inheriting the native sidecar + partial-resume loop), surface `partial`, and
+// take the snapshot state/offset from the returned view — not a cache re-read.
+// buildFacade opens the node relay, so the base-dust build is stubbed to stay
+// offline; the repository's fetchDust is faked to control the sync outcome, and
+// a per-test temp cacheDir keeps disk state isolated.
+import { beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { exportDustSnapshot } from '../lib/dust-export.ts';
+import { WalletDataRepository } from '../lib/wallet-data-repository.ts';
+import type { NetworkConfig } from '../lib/network.ts';
+import type { DustDirectResult } from '../lib/dust-direct.ts';
+
+const EXPORT_NETWORK: NetworkConfig = {
+  indexer: 'http://test/indexer', indexerWS: 'ws://test/indexer/ws',
+  node: 'ws://test/node', proofServer: 'http://test/proof', networkId: 'Undeployed',
+};
+const EXPORT_SEED = Buffer.from('11'.repeat(32), 'hex');
+
+let EXPORT_TMP: string;
+beforeEach(() => { EXPORT_TMP = mkdtempSync(join(tmpdir(), 'mn-export-test-')); });
+afterEach(() => { rmSync(EXPORT_TMP, { recursive: true, force: true }); });
+
+function fakeDust(state: ledger.DustLocalState, over: Partial<DustDirectResult> = {}): DustDirectResult {
+  return {
+    balance: 0n, availableCoins: 0, eventCount: 0, ownedUtxoCount: 0,
+    syncTime: state.syncTime, state,
+    retention: { ownedGenerationIndices: [], generationFrontier: 0 },
+    lastAppliedEventId: 0, partial: false, ...over,
+  };
+}
+
+function fakeRepo(result: DustDirectResult): WalletDataRepository {
+  return new WalletDataRepository({
+    now: () => 1_000_000,
+    fetchTip: async () => 'tip-A',
+    fetchChainId: async () => null,           // skip the node RPC (offline)
+    fetchUnshielded: async () => ({ balances: new Map(), utxoCount: 0, txCount: 0, highestTxId: 0, registeredUtxos: 0, unregisteredUtxos: 0 }),
+    fetchDust: async () => result,
+    cacheDir: EXPORT_TMP,
+  });
+}
+
+describe('exportDustSnapshot', () => {
+  const ownedState = ledger.DustLocalState.deserialize(Buffer.from(DUST_STATE_OWNED_HEX, 'hex'));
+
+  it('routes through the repository, surfaces partial, and overlays the synced state', async () => {
+    // partial:true drives the repo's bounded resume loop, so the export reports
+    // the incomplete result rather than a false "warm" snapshot.
+    const repo = fakeRepo(fakeDust(ownedState, { lastAppliedEventId: 42, balance: 500n, partial: true }));
+    const res = await exportDustSnapshot(EXPORT_SEED, 'undeployed', EXPORT_NETWORK, {
+      repository: repo,
+      buildBaseDust: async () => baseSnapshot('0'),
+    });
+    expect(res.partial).toBe(true);          // the incomplete sync is reported
+    expect(res.offset).toBe(42);             // offset comes from the view
+    expect(res.balance).toBe(500n);
+    expect(res.fromCache).toBe(false);
+    // Snapshot was overlaid with the view's state + offset (not the empty base).
+    const snap = JSON.parse(res.snapshot);
+    expect(snap.offset).toBe('42');
+    expect(snap.state).toBe(Buffer.from(ownedState.serialize()).toString('hex'));
+    expect(snap.networkId).toBe('preview');  // base metadata preserved
+  });
+
+  it('reports partial: false for a completed sync', async () => {
+    const repo = fakeRepo(fakeDust(ownedState, { lastAppliedEventId: 100, eventCount: 100, partial: false }));
+    const res = await exportDustSnapshot(EXPORT_SEED, 'undeployed', EXPORT_NETWORK, {
+      repository: repo,
+      buildBaseDust: async () => baseSnapshot('0'),
+    });
+    expect(res.partial).toBe(false);
+    expect(res.offset).toBe(100);
+    expect(res.eventCount).toBe(100);
+  });
+
+  it('leaves the base snapshot untouched for a wallet with no dust events (offset -1)', async () => {
+    const fresh = new ledger.DustLocalState(new ledger.DustParameters(5_000_000_000n, 8_267n, 10_800n));
+    const repo = fakeRepo(fakeDust(fresh, { lastAppliedEventId: -1, eventCount: 0, partial: false }));
+    const base = baseSnapshot('0');
+    const res = await exportDustSnapshot(EXPORT_SEED, 'undeployed', EXPORT_NETWORK, {
+      repository: repo,
+      buildBaseDust: async () => base,
+    });
+    expect(res.offset).toBe(-1);
+    expect(res.snapshot).toBe(base);         // no overlay applied
+  });
+});

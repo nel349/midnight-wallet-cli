@@ -70,6 +70,20 @@ export interface DustView {
   fromCache: boolean;
   /** Number of events applied by this call (0 on memo hits; delta count on disk-resume; full count on cold). */
   eventsApplied: number;
+  /**
+   * Id of the last dust event folded into `state`; -1 when the wallet has no
+   * dust events on this chain yet. This is the snapshot offset a restoring
+   * wallet resumes from, and it lives nowhere else in the view.
+   */
+  lastAppliedEventId: number;
+  /**
+   * True iff the sync stopped short of the chain tip even after exhausting the
+   * partial-resume loop — the state is a valid checkpoint but NOT current.
+   * Callers that hand this state to another wallet (`dust export`) must surface
+   * it: restoring a short state looks like success and then silently falls back
+   * to the SDK's cold sync for the remaining events.
+   */
+  partial: boolean;
   /** Wall-clock millis when this value was last refreshed from the network. */
   fetchedAt: number;
 }
@@ -228,6 +242,7 @@ export class WalletDataRepository {
 
     if (!opts.forceFresh) {
       const hit = await this.tryMemo(memoKey, network, this.dustMemo, opts.signal);
+      // `partial` rides through from the memoized view — a short state stays short.
       if (hit) return { ...hit, fromCache: true, eventsApplied: 0 };
     }
 
@@ -241,6 +256,7 @@ export class WalletDataRepository {
     let cached = opts.forceFresh ? null : loadDustCache(networkName, pubkeyHex, this.cacheDir);
     const startedFromCache = cached !== null;
     let totalEventsApplied = 0;
+    let lastAppliedEventId = cached?.lastAppliedEventId ?? -1;
     let result: DustDirectResult | null = null;
 
     // Auto-retry on `partial: true`. Cold preprod has ~250k dust events;
@@ -266,6 +282,11 @@ export class WalletDataRepository {
         onProgress: (applied, max) => {
           const target = Math.max(1, max + 1 - startFromId);
           opts.onStatus?.(`Reading dust events… ${applied}/${target}`);
+          // Also forward the raw counts, as ReadOptions.onProgress documents.
+          // Callers that render their own progress (e.g. `dust export`'s spinner)
+          // have no other signal — without this they show a frozen spinner for
+          // the whole cold sync.
+          opts.onProgress?.(applied, max);
         },
         // Persist after each chunk so a Ctrl+C / process kill / SIGTERM
         // doesn't lose 100k events of work.
@@ -275,11 +296,13 @@ export class WalletDataRepository {
       });
 
       // Final save (covers the last sub-chunk that didn't trip onCheckpoint).
+      // A run that applied no events keeps the prior checkpoint's id rather than
+      // regressing to -1 — the state is still valid as far as that id.
+      lastAppliedEventId = result.lastAppliedEventId >= 0
+        ? result.lastAppliedEventId
+        : (cached?.lastAppliedEventId ?? -1);
       if (result.lastAppliedEventId >= 0 || !cached) {
-        const savedId = result.lastAppliedEventId >= 0
-          ? result.lastAppliedEventId
-          : (cached?.lastAppliedEventId ?? -1);
-        try { saveDustCache(networkName, pubkeyHex, result.state, savedId, this.cacheDir, chainId, result.retention); } catch { /* best-effort */ }
+        try { saveDustCache(networkName, pubkeyHex, result.state, lastAppliedEventId, this.cacheDir, chainId, result.retention); } catch { /* best-effort */ }
       }
 
       totalEventsApplied += result.eventCount;
@@ -298,10 +321,11 @@ export class WalletDataRepository {
       syncTime: result.syncTime,
       fromCache: startedFromCache,
       eventsApplied: totalEventsApplied,
+      lastAppliedEventId,
+      partial: result.partial,
       fetchedAt: this.now(),
     };
-    const tip = await this.getTip(network, opts.signal);
-    this.dustMemo.set(memoKey, { value: view, fetchedAt: view.fetchedAt, tipAtFetch: tip });
+    await this.memoize(this.dustMemo, memoKey, view, network, opts.signal);
     return view;
   }
 
@@ -323,8 +347,7 @@ export class WalletDataRepository {
 
     const summary = await this.fetchUnshielded(address, network, opts.onProgress);
     const view: UnshieldedView = { ...summary, fromCache: false, fetchedAt: this.now() };
-    const tip = await this.getTip(network, opts.signal);
-    this.unshieldedMemo.set(memoKey, { value: view, fetchedAt: view.fetchedAt, tipAtFetch: tip });
+    await this.memoize(this.unshieldedMemo, memoKey, view, network, opts.signal);
     return view;
   }
 
@@ -545,6 +568,32 @@ export class WalletDataRepository {
     if (tip === entry.tipAtFetch) return entry.value;
     memo.delete(key);
     return null;
+  }
+
+  /**
+   * Record a freshly-fetched view in a memo, stamped with the current chain tip.
+   *
+   * The tip fetch is best-effort: `tryMemo` already treats an unreachable node as
+   * "serve the cache" rather than an error, and the same has to hold here. A cold
+   * dust sync can be 5-22 minutes of work, and letting a 3s RPC timeout throw it
+   * away — after it completed and was written to disk — would be absurd. Skipping
+   * the memo just means the next read re-checks.
+   */
+  private async memoize<T>(
+    memo: Map<string, MemoEntry<T>>,
+    key: string,
+    value: T,
+    network: NetworkConfig,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      const tip = await this.getTip(network, signal);
+      memo.set(key, { value, fetchedAt: this.now(), tipAtFetch: tip });
+    } catch {
+      // Also swallows an abort landing on this final tip probe — fine: the sync
+      // already completed and was persisted, so there is no work left to cancel.
+      verbose('repo', `tip unavailable; skipping memo for ${key}`);
+    }
   }
 
   private async getTip(network: NetworkConfig, signal?: AbortSignal): Promise<TipFingerprint> {

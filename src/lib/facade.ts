@@ -182,7 +182,10 @@ export interface FacadeDustSnapshot {
  * `maybeBridgeDustCache` uses it to speed up write commands, and `dust export`
  * uses it to hand a restorable snapshot to other wallets (e.g. a dApp operator).
  */
-export function overlayDustDirectSnapshot(dustSnapshotJson: string, direct: DustCacheEntry): string {
+export function overlayDustDirectSnapshot(
+  dustSnapshotJson: string,
+  direct: Pick<DustCacheEntry, 'state' | 'lastAppliedEventId'>,
+): string {
   const snapshot: FacadeDustSnapshot = JSON.parse(dustSnapshotJson);
   snapshot.state = Buffer.from(direct.state.serialize()).toString('hex');
   snapshot.offset = direct.lastAppliedEventId.toString();

@@ -17,7 +17,7 @@ import { dustPublicKeyHex } from '../lib/dust-direct-cache.ts';
 import { exportDustSnapshot } from '../lib/dust-export.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { header, keyValue, divider, formatDust, successMessage, toDust } from '../ui/format.ts';
-import { bold, dim } from '../ui/colors.ts';
+import { bold, dim, yellow } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
@@ -130,9 +130,17 @@ async function dustExport(
   try {
     const result = await exportDustSnapshot(seedBuffer, networkName, networkConfig, {
       signal,
-      onProgress: (applied) => spinner.update(`Reading dust events... ${applied}`),
+      onProgress: (applied, maxIdSeen) => spinner.update(
+        maxIdSeen > 0
+          ? `Reading dust events... ${applied}/${maxIdSeen + 1}`
+          : `Reading dust events... ${applied}`,
+      ),
     });
-    spinner.stop(result.fromCache && result.eventCount === 0 ? 'Cache up to date' : 'Dust snapshot ready');
+    spinner.stop(
+      result.partial
+        ? 'Dust snapshot ready (incomplete)'
+        : result.fromCache && result.eventCount === 0 ? 'Cache up to date' : 'Dust snapshot ready',
+    );
 
     if (jsonMode) {
       writeJsonResult({
@@ -143,6 +151,7 @@ async function dustExport(
         dustBalance: toDust(result.balance),
         eventCount: result.eventCount,
         fromCache: result.fromCache,
+        partial: result.partial,
         snapshot: result.snapshot,
       });
       return;
@@ -153,6 +162,16 @@ async function dustExport(
     process.stderr.write('\n' + keyValue('Network', result.network) + '\n');
     process.stderr.write(keyValue('Dust balance', formatDust(result.balance)) + '\n');
     process.stderr.write(keyValue('Snapshot offset', String(result.offset)) + '\n');
+    if (result.partial) {
+      // Loud, because a partial snapshot restores without error and then quietly
+      // hands the remaining events back to the SDK's cold sync — the exact failure
+      // this command exists to prevent.
+      process.stderr.write(
+        '\n' + yellow(bold('⚠ Snapshot is INCOMPLETE — the sync did not reach the chain tip.')) + '\n' +
+        dim('  Restoring it still beats a cold start, but the wallet has events left to catch up on.') + '\n' +
+        dim('  Re-run `mn dust export` to resume from this checkpoint and finish.') + '\n',
+      );
+    }
     process.stderr.write('\n' + dim('Restore with the wallet SDK dustSerializedState to skip the cold dust sync.') + '\n');
   } catch (err) {
     spinner.fail('Failed');

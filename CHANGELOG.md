@@ -2,6 +2,16 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **`mn dust export` on a brand-new wallet no longer silently truncates.** The export ran its own dust sync (`primeDustCache → readDustBalanceDirect`) instead of going through `WalletDataRepository.dust()` like the rest of the CLI, so on a *cold `mn` cache* it (1) bypassed the native sidecar — WASM-only, ~22 min instead of ~5 min on a fresh preprod wallet — and (2) hit the reader's 600 s soft timeout and exited **0 with a `partial` snapshot half the chain behind**, with no field to signal it. A consumer restored it, the wallet looked warm, and the SDK then quietly cold-synced the rest — the exact failure this command exists to prevent. `exportDustSnapshot` now routes through the repository, inheriting the native sidecar, the bounded partial-resume loop, the chain-reset guard, and per-chunk checkpointing. `DustView`/`DustExportResult` gain `partial` (+ `lastAppliedEventId`), surfaced in `--json` and as a loud "INCOMPLETE" warning + resume hint in the human output; the export reads state/offset from the returned view instead of re-reading the cache file. (`mn`'s cache was already warm for wallets used normally, so a delta export was unaffected — this only bit a from-scratch sync.) Removed the now-unused `primeDustCache`.
+- **A completed dust/unshielded sync could be discarded by a 3 s tip-probe timeout.** `dust()` and `unshielded()` ended with a bare `await this.getTip(...)` to stamp the memo; if the node was briefly unreachable, that threw away a 5–22 min sync already written to disk. Both now stamp the memo through a `memoize()` helper that treats a tip failure as "skip the memo," matching `tryMemo`'s existing "network down → serve cache" stance.
+- **`ReadOptions.onProgress` is now actually forwarded for dust** — it was documented ("per-chunk events applied vs max event id") but never called, so `dust export` showed a frozen spinner through a multi-minute cold sync. `dust()` forwards it as documented, and `mn dust export`'s spinner renders a live `applied/total` counter.
+
+> **Packaging caveat (unchanged):** the native dust-sync sidecar is not yet published to npm (`@midnight-wallet-cli/dust-sync-<os>-<arch>` 404s), so an `npm install`ed `mn` still falls back to WASM (~22 min vs ~5 min for a fresh preprod wallet — both finite and resumable, which the SDK's own cold sync is not). Point `MN_DUST_SYNC_BIN` at a local sidecar build for native speed until the platform packages ship.
+
 ## [0.5.0] - 2026-08-21
 
 ### Added

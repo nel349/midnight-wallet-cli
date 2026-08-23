@@ -195,6 +195,93 @@ describe('WalletDataRepository — dust reads', () => {
     expect(view.fromCache).toBe(false);            // we started cold
   });
 
+  it('keeps a completed sync when the tip fetch fails at memo time', async () => {
+    // The tip probe is an optimization. A cold dust sync is minutes of work that
+    // is already on disk by this point; a node blip must not turn it into a throw.
+    const repo = new WalletDataRepository({
+      now: () => 1_000_000,
+      fetchTip: async () => { throw new Error('node unreachable'); },
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchDust: async () => fakeDustResult({ lastAppliedEventId: 77, eventCount: 78 }),
+      cacheDir: TMP,
+    });
+
+    const view = await repo.dust(SEED, NETWORK);
+    expect(view.lastAppliedEventId).toBe(77);
+    expect(view.partial).toBe(false);
+  });
+
+  it('reports partial: false and the synced offset once the resume loop reaches the tip', async () => {
+    const repo = new WalletDataRepository({
+      now: () => 1_000_000,
+      fetchTip: async () => 'tip-A',
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchDust: async () => fakeDustResult({ lastAppliedEventId: 4242, eventCount: 4243, partial: false }),
+      cacheDir: TMP,
+    });
+
+    const view = await repo.dust(SEED, NETWORK);
+    expect(view.partial).toBe(false);
+    expect(view.lastAppliedEventId).toBe(4242);
+  });
+
+  it('reports partial: true when the resume loop is exhausted before the tip', async () => {
+    // A sync that never catches up: every attempt returns partial. The repo
+    // bounds the loop, so it gives up holding a short state — and MUST say so.
+    // Silently returning it is what let `dust export` ship a snapshot cut off at
+    // event 686,503 of 1,450,904 on preprod while exiting 0.
+    let calls = 0;
+    let nextLastEventId = 249;
+    const repo = new WalletDataRepository({
+      now: () => 1_000_000,
+      fetchTip: async () => 'tip-A',
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchDust: async (_seed, _net, opts) => {
+        calls++;
+        const result = fakeDustResult({
+          lastAppliedEventId: nextLastEventId,
+          eventCount: 250,
+          partial: true, // never catches up
+        });
+        opts.onCheckpoint?.(result.state, result.lastAppliedEventId, result.retention);
+        nextLastEventId += 250;
+        return result;
+      },
+      cacheDir: TMP,
+    });
+
+    const view = await repo.dust(SEED, NETWORK);
+    expect(view.partial).toBe(true);
+    expect(calls).toBeGreaterThan(1);                  // it did exhaust the loop, not bail early
+    expect(view.lastAppliedEventId).toBe(nextLastEventId - 250); // the checkpoint it got to
+    expect(view.eventsApplied).toBe(250 * calls);
+  });
+
+  it('keeps the prior checkpoint id when a resume applies no new events', async () => {
+    // A second process (fresh memo, shared cache dir) re-syncs an already
+    // up-to-date wallet and the indexer has nothing new. lastAppliedEventId must
+    // hold at the cached value, not regress to -1 — `dust export` reads it as the
+    // snapshot offset, and -1 would drop the state from the exported snapshot.
+    const deps = (fetchDust: NonNullable<RepoDeps['fetchDust']>): RepoDeps => ({
+      now: () => 1_000_000,
+      fetchTip: async () => 'tip-A',
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchDust,
+      cacheDir: TMP,
+    });
+
+    const cold = await new WalletDataRepository(
+      deps(async () => fakeDustResult({ lastAppliedEventId: 900, eventCount: 901 })),
+    ).dust(SEED, NETWORK);
+    expect(cold.lastAppliedEventId).toBe(900);
+
+    const warm = await new WalletDataRepository(
+      deps(async () => fakeDustResult({ lastAppliedEventId: -1, eventCount: 0 })),
+    ).dust(SEED, NETWORK);
+    expect(warm.lastAppliedEventId).toBe(900);
+    expect(warm.fromCache).toBe(true);
+  });
+
   it('forceFresh on dust bypasses both memos and disk cache', async () => {
     let fetchCalls = 0;
     let lastStartFromId = -999;
