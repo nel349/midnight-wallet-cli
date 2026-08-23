@@ -15,7 +15,8 @@ import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MIDNIGHT_DIR, CACHE_DIR_NAME, DIR_MODE, FILE_MODE } from './constants.ts';
 import { deriveDustSeed } from './derivation.ts';
 import type { NetworkConfig } from './network.ts';
-import type { DustDirectResult, DustRetention } from './dust-direct.ts';
+import { DUST_COLLAPSE_DISABLE_ENV, type DustDirectResult, type DustRetention } from './dust-direct.ts';
+import { collapseForeignGenerations } from './dust-collapse.ts';
 import { dustPublicKeyHexFromSeed } from './dust-direct-cache.ts';
 
 /** Sidecar checkpoint JSON shape (snake_case — matches the Rust `Checkpoint`). */
@@ -225,9 +226,19 @@ export function runDustSyncNative(
 /** Map the sidecar's checkpoint JSON to a `DustDirectResult`. Exported for tests. */
 export function adaptResult(cp: SidecarCheckpoint): DustDirectResult {
   const now = new Date();
+  let state = ledger.DustLocalState.deserialize(new Uint8Array(Buffer.from(cp.dust_state, 'hex')));
+  // The Rust sidecar doesn't collapse the generation tree, so a native sync would
+  // otherwise persist/export an unbounded state (~1.46 MB on a cold preprod wallet
+  // vs ~23 KB collapsed). Apply the same TS collapse the WASM reader uses, reusing
+  // the owned-indices + frontier the checkpoint already carries. Idempotent, and it
+  // fails safe to the uncollapsed state via the balance+root guard.
+  if (process.env[DUST_COLLAPSE_DISABLE_ENV] !== '1') {
+    const owned = new Set(cp.owned_generation_indices.map((i) => BigInt(i)));
+    state = collapseForeignGenerations(state, owned, BigInt(cp.generation_frontier)).state;
+  }
   // processTtls is immutable (returns a new state) — parity with the WASM reader,
   // which drops expired coins before reading the balance.
-  const state = ledger.DustLocalState.deserialize(new Uint8Array(Buffer.from(cp.dust_state, 'hex'))).processTtls(now);
+  state = state.processTtls(now);
   const utxoCount = state.utxos.length;
   return {
     balance: state.walletBalance(now),

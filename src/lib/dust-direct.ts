@@ -20,7 +20,7 @@ import {
 import { subscribeGraphqlWs } from './graphql-ws-subscription.ts';
 
 // Set to '1' to disable dust generation-tree collapse (debugging / safety valve).
-const DUST_COLLAPSE_DISABLE_ENV = 'MN_DISABLE_DUST_COLLAPSE';
+export const DUST_COLLAPSE_DISABLE_ENV = 'MN_DISABLE_DUST_COLLAPSE';
 
 /**
  * Data the collapse needs to keep working correctly across restarts: which

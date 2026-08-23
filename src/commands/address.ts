@@ -2,45 +2,16 @@
 // Bare address to stdout (pipeable), formatted details to stderr
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
-import { UsageError } from '../lib/errors.ts';
-import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
+import { resolveSeed } from '../lib/seed-resolver.ts';
 import { deriveUnshieldedAddress } from '../lib/derive-address.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
 import { keyValue, divider, formatAddress } from '../ui/format.ts';
 import { dim } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 
-// Resolve the seed for `address`. Precedence: --seed flag > MN_SEED env > named wallet.
-// MN_SEED keeps the seed off argv, where `ps` would leak it to every user on the box —
-// env vars are only readable by the same user. Mirrors `dust export`'s resolver.
-function resolveAddressSeed(args: ParsedArgs): Buffer {
-  const seedFlag = getFlag(args, 'seed');
-  const seedSource = seedFlag ?? process.env.MN_SEED;
-  if (seedSource) {
-    // trim first — a seed sourced from a file / command substitution (common with
-    // MN_SEED=$(cat seed.hex)) carries a trailing newline that would fail the length check.
-    const seedHex = seedSource.trim().replace(/^0x/, '');
-    if (seedHex.length !== 64 || !/^[0-9a-fA-F]+$/.test(seedHex)) {
-      throw new UsageError(`${seedFlag ? '--seed' : 'MN_SEED'} must be a 64-character hex string (32 bytes)`);
-    }
-    return Buffer.from(seedHex, 'hex');
-  }
-
-  const walletName = getFlag(args, 'wallet');
-  if (walletName !== undefined) {
-    return Buffer.from(loadWalletConfig(resolveWalletPath(walletName)).seed, 'hex');
-  }
-
-  throw new UsageError(
-    'address needs a seed source. Provide one of:\n' +
-    '  --seed <hex>     32-byte seed as 64 hex characters\n' +
-    '  MN_SEED=<hex>    same seed via env (kept off the process list)\n' +
-    '  --wallet <name>  derive from a saved wallet'
-  );
-}
-
 export default async function addressCommand(args: ParsedArgs): Promise<void> {
-  const seedBuffer = resolveAddressSeed(args);
+  // `address` is a seed-derivation tool with no active-wallet notion → requireExplicit.
+  const seedBuffer = resolveSeed(args, { requireExplicit: true, label: 'address' });
 
   const indexStr = getFlag(args, 'index');
   const keyIndex = indexStr !== undefined ? parseInt(indexStr, 10) : 0;

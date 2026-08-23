@@ -112,3 +112,47 @@ describe('binary resolution + gating', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+describe('adaptResult — native-path generation-tree collapse', () => {
+  // The Rust sidecar returns an UNcollapsed state; adaptResult applies the same TS
+  // collapse the WASM reader uses so the fast/default path is also lean-restart.
+  // The size win (~1.46 MB → ~23 KB) only shows at ~1.4M generations on real synced
+  // state, so it's verified live, not here (and collapseForeignGenerations itself is
+  // covered by dust-collapse.test.ts). This locks the invariants on the new branch:
+  // both collapse-on and collapse-off run without error and preserve balance, owned
+  // retention, and the generation-tree root.
+  function stateWithForeignLeaves(n: number, ownedIdx: number): ledger.DustLocalState {
+    const owner = ledger.sampleDustSecretKey().publicKey;
+    const intent = ledger.sampleIntentHash();
+    let s = new ledger.DustLocalState(new ledger.DustParameters(5_000_000_000n, 8_267n, 10_800n));
+    for (let i = 0; i < n; i++) {
+      s = s.insertGenerationInfo(BigInt(i), {
+        value: 1_000_000n + BigInt(i),
+        owner,
+        nonce: ledger.dustInitialNonce(BigInt(i), intent),
+        dtime: undefined,
+      } as unknown as ledger.DustGenerationInfo);
+    }
+    return s;
+  }
+
+  const cpFor = (dustStateHex: string, over: Partial<SidecarCheckpoint> = {}): SidecarCheckpoint => ({
+    dust_state: dustStateHex, last_applied_event_id: 100, owned_generation_indices: [3],
+    generation_frontier: 8, balance: '0', available_coins: 0, events_applied: 8, partial: false, ...over,
+  });
+
+  it('collapse-on and collapse-off preserve balance, retention, and the tree root', () => {
+    // owned index 3; foreign ranges [0,2] and [4,7] → collapseForeignGenerations runs.
+    const hex = Buffer.from(stateWithForeignLeaves(8, 3).serialize()).toString('hex');
+    const cp = cpFor(hex, { owned_generation_indices: [3], generation_frontier: 8 });
+
+    const on = adaptResult(cp);
+    process.env.MN_DISABLE_DUST_COLLAPSE = '1';
+    let off: ReturnType<typeof adaptResult>;
+    try { off = adaptResult(cp); } finally { delete process.env.MN_DISABLE_DUST_COLLAPSE; }
+
+    expect(on.balance).toBe(off.balance);                                   // collapse never moves the balance
+    expect(on.retention.ownedGenerationIndices).toEqual([3]);              // owned indices pass through
+    expect(on.state.generatingTreeRoot()).toBe(off.state.generatingTreeRoot()); // root invariant held
+  });
+});

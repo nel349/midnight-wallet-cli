@@ -7,6 +7,7 @@ import { type ParsedArgs, getFlag, hasFlag, isVerbose, isMinimalMode, rejectNoCa
 import { UsageError } from '../lib/errors.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
+import { resolveSeed } from '../lib/seed-resolver.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides, type NetworkConfig } from '../lib/network.ts';
 import { suppressSdkTransientErrors, waitForLiteSyncedState } from '../lib/facade.ts';
@@ -51,7 +52,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   // export: standalone path. Accepts a raw --seed (so a dApp operator can export a
   // snapshot for its own seed with no named wallet) or falls back to a named wallet.
   if (subcommand === 'export') {
-    await dustExport(resolveExportSeed(args), networkName, networkConfig, isJson, minimal, signal);
+    await dustExport(resolveSeed(args), networkName, networkConfig, isJson, minimal, signal);
     return;
   }
 
@@ -95,25 +96,6 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     restoreRpc();
     unsuppress();
   }
-}
-
-// Resolve the seed for `dust export`. Precedence: --seed flag > MN_SEED env >
-// named/active wallet. The MN_SEED env lets a programmatic caller (e.g. a dApp
-// operator) pass the seed without putting it on argv, where `ps` would expose it
-// to every user on the machine — env is only readable by the same user.
-function resolveExportSeed(args: ParsedArgs): Buffer {
-  const seedFlag = getFlag(args, 'seed');
-  const seedSource = seedFlag ?? process.env.MN_SEED;
-  if (seedSource) {
-    // trim first — a seed sourced from a file / command substitution (common with
-    // MN_SEED=$(cat seed.hex)) carries a trailing newline that would fail the length check.
-    const seedHex = seedSource.trim().replace(/^0x/, '');
-    if (seedHex.length !== 64 || !/^[0-9a-fA-F]+$/.test(seedHex)) {
-      throw new UsageError(`${seedFlag ? '--seed' : 'MN_SEED'} must be a 64-character hex string (32 bytes)`);
-    }
-    return Buffer.from(seedHex, 'hex');
-  }
-  return Buffer.from(loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet'))).seed, 'hex');
 }
 
 // export: fast dust-direct sync → emit a facade-restorable snapshot. The snapshot

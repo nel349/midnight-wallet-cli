@@ -6,7 +6,8 @@ import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { type ParsedArgs, getFlag, hasFlag, isMinimalMode, isVerbose } from '../lib/argv.ts';
 import { enableVerbose, verbose } from '../lib/verbose.ts';
 import { type NetworkName, isValidNetworkName } from '../lib/network.ts';
-import { loadWalletConfig, resolveWalletPath, saveShieldedAddress, findWalletByAddress } from '../lib/wallet-config.ts';
+import { saveShieldedAddress, findWalletByAddress } from '../lib/wallet-config.ts';
+import { resolveSeedSource } from '../lib/seed-resolver.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { shieldedSyncEnabled, shieldedDisabledReason } from '../lib/shielded-policy.ts';
@@ -14,7 +15,7 @@ import { getNetworkId } from '../lib/network-id.ts';
 import { isNativeToken } from '../lib/balance-subscription.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { readShieldedBalanceCached } from '../lib/shielded-direct-cache.ts';
-import { deriveShieldedAddress } from '../lib/derive-address.ts';
+import { deriveShieldedAddress, deriveUnshieldedAddress } from '../lib/derive-address.ts';
 import { getChainGenesisHash } from '../lib/chain-id.ts';
 import { suppressSdkTransientErrors } from '../lib/facade.ts';
 import { createEtaEstimator, formatSyncStatus } from '../lib/sync-eta.ts';
@@ -179,12 +180,13 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
   if (isVerbose(args)) enableVerbose();
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
   verbose('balance', `network=${networkName} indexerWS=${networkConfig.indexerWS}`);
-  const walletPath = resolveWalletPath(getFlag(args, 'wallet'));
-  verbose('balance', `wallet path=${walletPath}`);
-  const config = loadWalletConfig(walletPath);
-  const seedBuffer = Buffer.from(config.seed, 'hex');
-  const address = config.addresses[networkName];
-  const shieldedAddrStr = config.shieldedAddresses?.[networkName] ?? '';
+  // Seed source: --seed → MN_SEED → --wallet <name> → active wallet (shared resolver).
+  const { seed: seedBuffer, walletPath, config } = resolveSeedSource(args);
+  verbose('balance', `wallet path=${walletPath ?? '(from --seed/MN_SEED)'}`);
+  // Derive the unshielded address from the seed so a --seed/MN_SEED caller (no wallet
+  // file) behaves identically to a named wallet — for a wallet this equals the stored one.
+  const address = config?.addresses[networkName] ?? deriveUnshieldedAddress(seedBuffer, networkName);
+  const shieldedAddrStr = config?.shieldedAddresses?.[networkName] ?? '';
 
   applyEndpointOverrides(networkConfig, {
     proofServer: getFlag(args, 'proof-server'),
@@ -259,7 +261,8 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
 
       // Live shielded address is pure key derivation — no facade sync needed.
       liveShieldedAddrStr = MidnightBech32m.encode(networkId, deriveShieldedAddress(seedBuffer)).asString();
-      saveShieldedAddress(walletPath, networkName, liveShieldedAddrStr);
+      // Cache the shielded address only when there's a backing wallet file (skip for --seed/MN_SEED).
+      if (walletPath) saveShieldedAddress(walletPath, networkName, liveShieldedAddrStr);
 
       // Shielded balance via the indexer-direct zswap-event reader + cache: it
       // replays `zswapLedgerEvents` with the full secret keys (reconciling
