@@ -28,3 +28,6 @@ sidecar/**/target/
 # Local tool artifacts (npm/package-lock.json is the tracked lockfile)
 bun.lock
 .codex/
+
+# Internal planning docs live in the private repo (midnight-cli-private), not here
+tasks/
