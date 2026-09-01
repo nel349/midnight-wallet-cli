@@ -23,7 +23,7 @@ const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serv
 
 // --mcp: start MCP server instead of CLI (for: npx midnight-wallet-cli --mcp)
 if (process.argv.includes('--mcp')) {
-  ensureHeapForSync(); // MCP server runs facades on demand — give it the same headroom
+  await ensureHeapForSync(); // MCP server runs facades on demand — give it the same headroom
   await import('./mcp-server.ts');
 } else {
 
@@ -47,7 +47,7 @@ const command = args.command ?? 'help';
 // Sync commands re-exec with more heap headroom before any SDK/WASM loads.
 // No-op for non-sync commands, for the re-exec'd child, and when the heap is
 // already large enough — so help/version/config etc. pay nothing.
-if (FACADE_COMMANDS.has(command)) ensureHeapForSync();
+if (FACADE_COMMANDS.has(command)) await ensureHeapForSync();
 
 // Auto-migrate old ~/.midnight/wallet.json → wallets/default.json (silent, one-time)
 migrateOldWallet();

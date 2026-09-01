@@ -2,6 +2,12 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [0.5.2] - 2026-09-01
+
+### Fixed
+
+- **`mn serve` no longer orphans its heap-bumped child when the launcher is killed.** Facade commands re-exec themselves with a larger `--max-old-space-size` (the heap-guard), and the **re-exec'd child** is the process that binds the `serve` port. The launcher previously *ignored* `SIGINT`/`SIGTERM` (it blocked in `spawnSync`), so `kill <launcher-pid>` was swallowed and the child kept running and holding the port — you couldn't kill it, and a new `mn serve` reported the port "already running." The launcher now **forwards `SIGINT`/`SIGTERM`/`SIGHUP` to the child and force-kills it on any exit**, and the child **self-terminates if it gets reparented** (the uncatchable `kill -9 <launcher>` case). Verified live: killing only the launcher now takes the child down and frees the port.
+
 ## [0.5.1] - 2026-08-23
 
 ### Changed

@@ -950,7 +950,7 @@ async function main() {
   // sync would overflow Node's default heap, so re-exec once at startup with
   // more headroom. No-op when launched via `mn --mcp` (already bumped) or when
   // the heap is already large enough. See lib/heap-guard.ts.
-  ensureHeapForSync();
+  await ensureHeapForSync();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
