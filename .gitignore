@@ -31,3 +31,7 @@ bun.lock
 
 # Internal planning docs live in the private repo (midnight-cli-private), not here
 tasks/
+
+# Native sidecar binaries — built fresh by CI into the platform packages, never committed
+packages/dust-sync-*/dust-sync
+packages/dust-sync-*/dust-sync.exe

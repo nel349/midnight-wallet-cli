@@ -1,0 +1,19 @@
+{
+  "name": "@midnight-wallet-cli/dust-sync-darwin-arm64",
+  "version": "0.5.2",
+  "description": "Native dust-sync sidecar binary for midnight-wallet-cli (darwin-arm64). Optional accelerator — the CLI falls back to WASM when it's absent.",
+  "license": "Apache-2.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "dust-sync"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nel349/midnight-wallet-cli.git"
+  }
+}

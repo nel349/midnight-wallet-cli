@@ -4,6 +4,10 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [0.5.2] - 2026-09-01
 
+### Added
+
+- **The native dust-sync sidecar now ships to npm — fast cold dust sync out of the box.** Until now the Rust sidecar was source-only, so every `npm install` fell back to the WASM reader (~22 min for a cold ~1.45M-event preprod prime vs ~4.5 min native); native was reachable only from a repo checkout or via `MN_DUST_SYNC_BIN`. The prebuilt binary now ships as per-platform packages (`@midnight-wallet-cli/dust-sync-<os>-<arch>` for darwin-arm64/x64, linux-x64/arm64, win32-x64), wired as `optionalDependencies` so npm installs only the one matching the host and a platform with no published binary still installs fine and falls back to WASM. A GitHub Actions matrix builds each target on its native runner (Cargo pins `--locked` to `ledger-v8 =8.1.0` so the serialized `DustLocalState` round-trips byte-identically) and publishes the platform packages before the main package. `resolveSidecarBinary()` already preferred this package; it now finds it on a plain install. `MN_DUST_SYNC_BIN` still overrides; `MN_DISABLE_NATIVE_DUST=1` still forces WASM.
+
 ### Fixed
 
 - **`mn serve` no longer orphans its heap-bumped child when the launcher is killed.** Facade commands re-exec themselves with a larger `--max-old-space-size` (the heap-guard), and the **re-exec'd child** is the process that binds the `serve` port. The launcher previously *ignored* `SIGINT`/`SIGTERM` (it blocked in `spawnSync`), so `kill <launcher-pid>` was swallowed and the child kept running and holding the port — you couldn't kill it, and a new `mn serve` reported the port "already running." The launcher now **forwards `SIGINT`/`SIGTERM`/`SIGHUP` to the child and force-kills it on any exit**, and the child **self-terminates if it gets reparented** (the uncatchable `kill -9 <launcher>` case). Verified live: killing only the launcher now takes the child down and frees the port.
