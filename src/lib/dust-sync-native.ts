@@ -58,9 +58,9 @@ export function resolveSidecarBinary(): string | null {
     if (existsSync(devBuild)) return devBuild;
   }
 
-  // Phase 3 platform package: @midnight-wallet-cli/dust-sync-<os>-<arch>.
+  // Phase 3 platform package: @nel349/dust-sync-<os>-<arch>.
   try {
-    const pkg = `@midnight-wallet-cli/dust-sync-${process.platform}-${process.arch}`;
+    const pkg = `@nel349/dust-sync-${process.platform}-${process.arch}`;
     const req = createRequire(import.meta.url);
     const binPath = join(dirname(req.resolve(`${pkg}/package.json`)), exe);
     if (existsSync(binPath)) return binPath;

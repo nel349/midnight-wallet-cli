@@ -85,10 +85,10 @@
     "vitest": "^3.2.4"
   },
   "optionalDependencies": {
-    "@midnight-wallet-cli/dust-sync-darwin-arm64": "0.5.2",
-    "@midnight-wallet-cli/dust-sync-darwin-x64": "0.5.2",
-    "@midnight-wallet-cli/dust-sync-linux-x64": "0.5.2",
-    "@midnight-wallet-cli/dust-sync-linux-arm64": "0.5.2",
-    "@midnight-wallet-cli/dust-sync-win32-x64": "0.5.2"
+    "@nel349/dust-sync-darwin-arm64": "0.5.2",
+    "@nel349/dust-sync-darwin-x64": "0.5.2",
+    "@nel349/dust-sync-linux-x64": "0.5.2",
+    "@nel349/dust-sync-linux-arm64": "0.5.2",
+    "@nel349/dust-sync-win32-x64": "0.5.2"
   }
 }
