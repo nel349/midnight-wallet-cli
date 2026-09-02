@@ -103,6 +103,15 @@ midnight transfer mn_addr_preprod1... 100
 
 Wallets are network-agnostic — one seed derives addresses for all three networks. Use `--network <name>` on any command, or persist it with `midnight config set network preview`.
 
+## Native dust acceleration
+
+The first dust sync for a wallet on a hosted network (`preprod`/`preview`) replays the chain's full dust event history — the slow part of a cold start. The CLI bundles a native (Rust) accelerator that does this ~5× faster than the WASM fallback: a ~1.45M-event preprod prime drops from ~22 min to ~4.5 min.
+
+It installs automatically — a per-platform `optionalDependency` (`@nel349/dust-sync-<os>-<arch>`) for macOS (arm64/x64), Linux (x64/arm64), and Windows (x64). No configuration, no install scripts. On any other platform the CLI falls back to the WASM reader, so dust priming still works, just slower.
+
+- `MN_DISABLE_NATIVE_DUST=1` — force the WASM path (to compare, or if a binary misbehaves).
+- `MN_DUST_SYNC_BIN=/path/to/dust-sync` — use your own build instead of the installed binary.
+
 ## DApp Connector
 
 `midnight serve` starts a WebSocket JSON-RPC server that implements the same `ConnectedAPI` interface as the Lace browser wallet. Any DApp can connect to it — no browser extension needed.

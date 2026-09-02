@@ -127,7 +127,7 @@ Every MCP tool error returns `{ error: true, code: <ERROR_CODE>, message: <human
 ## What this CLI is NOT
 
 - Not a custody service. Keys are on the user's disk (`~/.midnight/wallets/<name>.json`).
-- Not a fast-sync solution for a first-time wallet on a hosted network. The wallet SDK must process the chain's event history on first run; the CLI caches state after that so repeat runs are fast.
+- Not an instant-sync tool for a first-time wallet on a hosted network. First run replays the chain's event history; the CLI caches state after that so repeat runs are fast. Dust priming specifically uses a bundled native accelerator (~5× faster than the WASM fallback — set `MN_DISABLE_NATIVE_DUST=1` to force WASM), but a cold prime is still minutes, not seconds.
 - Not a contract compiler. The project's `package.json` should expose a `compact` script (Midnight convention, e.g. `"compact": "compact compile src/foo.compact src/managed/foo"`) or a `compile` script as a generic fallback. `mn dev` detects whichever is present; create-mn-app and midnight-starship templates ship with the `compact` script already wired.
 
 ## Authoritative references
