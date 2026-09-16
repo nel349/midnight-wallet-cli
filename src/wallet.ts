@@ -4,7 +4,7 @@
 // Also supports: midnight --mcp (starts MCP server for AI agent integration)
 
 import { parseArgs, hasFlag } from './lib/argv.ts';
-import { errorBox, usageBox } from './ui/format.ts';
+import { errorMessage, usageMessage } from './ui/format.ts';
 import { classifyError, humanizeNetworkError, EXIT_INVALID_ARGS } from './lib/exit-codes.ts';
 import { UsageError, isUsageError } from './lib/errors.ts';
 import { writeJsonError } from './lib/json-output.ts';
@@ -170,7 +170,7 @@ run().then(() => {
     if (jsonMode) {
       writeJsonError(err, 'INVALID_ARGS', EXIT_INVALID_ARGS);
     } else {
-      process.stderr.write('\n' + usageBox(message, 'Run "midnight manual" for the full reference, or "midnight help <command>" for one command.') + '\n\n');
+      process.stderr.write('\n' + usageMessage(message, 'Run "midnight manual" for the full reference, or "midnight help <command>" for one command.') + '\n\n');
     }
     process.exit(EXIT_INVALID_ARGS);
   } else if (jsonMode) {
@@ -178,7 +178,7 @@ run().then(() => {
     writeJsonError(err, errorCode, exitCode);
     process.exit(exitCode);
   } else {
-    process.stderr.write('\n' + errorBox(message, 'Run "midnight help" for usage information.') + '\n\n');
+    process.stderr.write('\n' + errorMessage(message, 'Run "midnight help" for usage information.') + '\n\n');
     const { exitCode } = classifyError(err);
     process.exit(exitCode);
   }

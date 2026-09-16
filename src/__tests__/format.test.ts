@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   header, divider, keyValue,
   toNight, formatNight, toDust, formatDust, formatAddress,
-  box, errorBox, usageBox, successMessage,
+  box, errorMessage, usageMessage, successMessage,
 } from '../ui/format.ts';
 
 // Run format tests with NO_COLOR so we can assert exact string content
@@ -293,59 +293,77 @@ describe('box', () => {
     const lengths = contentLines.map(l => l.length);
     expect(new Set(lengths).size).toBe(1);
   });
+
+  it('hard-breaks unbreakable tokens so no line exceeds maxWidth', () => {
+    // A bech32m address has no whitespace — must not blow the box open
+    const address = 'mn_shield-addr_undeployed1' + 'x'.repeat(110);
+    const result = box([`Got: ${address}`], 'heavy', 70);
+    const lines = result.split('\n');
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(70);
+    }
+    // Borders stay aligned: every line has the same length
+    expect(new Set(lines.map(l => l.length)).size).toBe(1);
+    // And the content survives intact once rejoined
+    const rejoined = lines.map(l => l.replace(/[║ ]/g, '')).join('');
+    expect(rejoined).toContain('x'.repeat(110));
+  });
 });
 
-describe('errorBox', () => {
+describe('errorMessage', () => {
   it('contains the error message', () => {
-    const result = errorBox('Something failed');
+    const result = errorMessage('Something failed');
     expect(result).toContain('Something failed');
   });
 
   it('contains "Error:" label', () => {
-    const result = errorBox('Bad thing');
+    const result = errorMessage('Bad thing');
     expect(result).toContain('Error:');
   });
 
   it('includes suggestion when provided', () => {
-    const result = errorBox('No wallet', 'Run wallet generate');
+    const result = errorMessage('No wallet', 'Run wallet generate');
     expect(result).toContain('Run wallet generate');
     expect(result).toContain('Suggestion:');
   });
 
-  it('uses heavy box style', () => {
-    const result = errorBox('Fail');
-    expect(result).toContain('╔');
-    expect(result).toContain('╝');
+  it('draws no box borders', () => {
+    const result = errorMessage('Fail', 'Try again');
+    expect(result).not.toMatch(/[╔╗╚╝═║┌┐└┘│]/);
+  });
+
+  it('preserves long addresses on a single unwrapped line', () => {
+    const address = 'mn_shield-addr_undeployed1' + 'x'.repeat(110);
+    const result = errorMessage(`Bad address.\nGot: ${address}`);
+    expect(result.split('\n').some(l => l.includes(address))).toBe(true);
   });
 });
 
-describe('usageBox', () => {
+describe('usageMessage', () => {
   it('contains the usage message', () => {
-    const result = usageBox('Unknown subcommand: foo');
+    const result = usageMessage('Unknown subcommand: foo');
     expect(result).toContain('Unknown subcommand: foo');
   });
 
   it('uses "Usage:" label, not "Error:"', () => {
-    const result = usageBox('do this thing');
+    const result = usageMessage('do this thing');
     expect(result).toContain('Usage:');
     expect(result).not.toContain('Error:');
   });
 
-  it('uses light box style, not heavy', () => {
-    const result = usageBox('hint');
-    expect(result).toContain('┌');
-    expect(result).toContain('┘');
-    expect(result).not.toContain('╔');
+  it('draws no box borders', () => {
+    const result = usageMessage('hint', 'Run mn help');
+    expect(result).not.toMatch(/[╔╗╚╝═║┌┐└┘│]/);
   });
 
   it('includes hint when provided', () => {
-    const result = usageBox('Missing key', 'Run mn help config');
+    const result = usageMessage('Missing key', 'Run mn help config');
     expect(result).toContain('Run mn help config');
     expect(result).toContain('Hint:');
   });
 
   it('does not double-prefix when message already starts with "Usage:"', () => {
-    const result = usageBox('Usage: mn wallet <subcommand>');
+    const result = usageMessage('Usage: mn wallet <subcommand>');
     // Strip ANSI to count occurrences cleanly.
     const plain = result.replace(/\x1b\[[0-9;]*m/g, '');
     const matches = plain.match(/Usage:/g) ?? [];

@@ -2,7 +2,7 @@
 // All functions return strings — callers decide where to write (stdout vs stderr)
 
 import { TOKEN_DECIMALS } from '../lib/constants.ts';
-import { teal, red, green, yellow, bold, dim, gray, isColorEnabled } from './colors.ts';
+import { teal, red, green, yellow, bold, dim, gray } from './colors.ts';
 
 const DEFAULT_WIDTH = 60;
 
@@ -77,13 +77,49 @@ export function formatAddress(address: string, truncate: boolean = false): strin
 // Strip ANSI escape codes for visible length measurement
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
-// Word-wrap a string to a max visible width, preserving ANSI codes
+// Hard-break a single token wider than maxWidth into visible-width chunks.
+// ANSI sequences are carried along without counting toward the width; any
+// chunk containing one is closed with a reset so color can't bleed into the
+// box border.
+function hardBreak(word: string, maxWidth: number): string[] {
+  const chunks: string[] = [];
+  let chunk = '';
+  let len = 0;
+  let hasAnsi = false;
+  let i = 0;
+  while (i < word.length) {
+    const ansi = /^\x1b\[[0-9;]*m/.exec(word.slice(i));
+    if (ansi) {
+      chunk += ansi[0];
+      hasAnsi = true;
+      i += ansi[0].length;
+      continue;
+    }
+    if (len === maxWidth) {
+      chunks.push(hasAnsi ? chunk + '\x1b[0m' : chunk);
+      chunk = '';
+      len = 0;
+      hasAnsi = false;
+    }
+    chunk += word[i];
+    len += 1;
+    i += 1;
+  }
+  if (chunk.length > 0) chunks.push(hasAnsi ? chunk + '\x1b[0m' : chunk);
+  return chunks;
+}
+
+// Word-wrap a string to a max visible width, preserving ANSI codes.
+// Tokens with no whitespace (addresses, hashes) are hard-broken so no
+// output line ever exceeds maxWidth.
 function wrapLine(line: string, maxWidth: number): string[] {
   const visible = stripAnsi(line);
   if (visible.length <= maxWidth) return [line];
 
   // Split on word boundaries for the visible text, then reconstruct with ANSI
-  const words = line.split(/(\s+)/);
+  const words = line.split(/(\s+)/).flatMap(word =>
+    stripAnsi(word).length > maxWidth ? hardBreak(word, maxWidth) : [word]
+  );
   const result: string[] = [];
   let currentLine = '';
   let currentLen = 0;
@@ -133,9 +169,11 @@ export function box(lines: string[], style: 'light' | 'heavy' = 'light', maxWidt
   return [top, ...body, bottom].join('\n');
 }
 
-// Error box with red border and optional recovery suggestion
-export function errorBox(error: string, suggestion?: string): string {
-  // Split error on newlines and color each line separately to avoid ANSI bleed
+// Error message: flat red text, no border. Boxes shatter on narrow
+// terminals when content carries unbreakable tokens (addresses, hashes),
+// so errors let the terminal wrap naturally instead.
+export function errorMessage(error: string, suggestion?: string): string {
+  // Color each line separately to avoid ANSI bleed across newlines
   const errorLines = error.split('\n');
   const lines = errorLines.map((line, i) =>
     i === 0 ? red(bold('Error: ')) + red(line) : red(line)
@@ -144,19 +182,14 @@ export function errorBox(error: string, suggestion?: string): string {
     lines.push('');
     lines.push(dim('Suggestion: ') + suggestion);
   }
-  const output = box(lines, 'heavy');
-  // Color the border red if colors enabled
-  if (isColorEnabled()) {
-    return output.replace(/[╔╗╚╝═║]/g, match => red(match));
-  }
-  return output;
+  return lines.join('\n');
 }
 
-// Usage hint box: yellow border, light style. Reserved for cases where the
-// user invoked the CLI with missing or wrong arguments (e.g. `mn wallet`
-// with no subcommand). Visually softer than errorBox so real errors keep
+// Usage hint: flat yellow text. Reserved for cases where the user invoked
+// the CLI with missing or wrong arguments (e.g. `mn wallet` with no
+// subcommand). Visually softer than errorMessage so real errors keep
 // their alarming red.
-export function usageBox(message: string, suggestion?: string): string {
+export function usageMessage(message: string, suggestion?: string): string {
   // Normalize: drop any leading "Usage:" the caller already added so we
   // don't render "Usage: Usage: ...". The bold header is added below.
   const normalized = message.replace(/^Usage:\s*/i, '');
@@ -168,11 +201,7 @@ export function usageBox(message: string, suggestion?: string): string {
     lines.push('');
     lines.push(dim('Hint: ') + suggestion);
   }
-  const output = box(lines, 'light');
-  if (isColorEnabled()) {
-    return output.replace(/[┌┐└┘─│]/g, match => yellow(match));
-  }
-  return output;
+  return lines.join('\n');
 }
 
 // Success message with green checkmark
