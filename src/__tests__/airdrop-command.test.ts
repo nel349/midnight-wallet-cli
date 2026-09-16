@@ -138,7 +138,10 @@ describe('airdrop command — address as destination', () => {
   // dir; without the pin, a preprod-default config short-circuits these tests
   // at the network-restriction check before address validation runs).
 
-  it('rejects a shielded address when --shielded is not passed', async () => {
+  it('infers --shielded from a shielded address prefix', async () => {
+    // No --shielded flag: the prefix alone must route this down the
+    // shielded path, whose bech32m decode rejects this junk payload.
+    // The old behavior errored with "add --shielded" instead.
     const args = parseArgs([
       'airdrop',
       '100',
@@ -146,7 +149,18 @@ describe('airdrop command — address as destination', () => {
       'mn_shield-addr_undeployed1abcdef',
       '--network', 'undeployed',
     ]);
-    await expect(airdropCommand(args)).rejects.toThrow(/shielded address but --shielded was not passed/);
+    await expect(airdropCommand(args)).rejects.toThrow(/Invalid shielded address/);
+  });
+
+  it('network check on an inferred-shielded address expects the shielded prefix', async () => {
+    const args = parseArgs([
+      'airdrop',
+      '100',
+      '--wallet',
+      'mn_shield-addr_preprod1abcdef',
+      '--network', 'undeployed',
+    ]);
+    await expect(airdropCommand(args)).rejects.toThrow(/Expected prefix: mn_shield-addr_undeployed1/);
   });
 
   it('rejects an unshielded address when --shielded is passed', async () => {

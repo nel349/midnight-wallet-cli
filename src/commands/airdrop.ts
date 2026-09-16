@@ -6,7 +6,8 @@
 //   1. a wallet name (resolved from ~/.midnight/wallets/<name>.json)
 //   2. a path to a wallet JSON
 //   3. a raw bech32m address (mn_addr_… or mn_shield-addr_…) — no wallet
-//      file required, useful for funding externally-generated addresses
+//      file required, useful for funding externally-generated addresses.
+//      A shielded address implies --shielded; the flag is optional there.
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { MidnightBech32m, ShieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
@@ -56,7 +57,13 @@ export default async function airdropCommand(args: ParsedArgs, signal?: AbortSig
     );
   }
 
-  const isShielded = hasFlag(args, 'shielded');
+  // A shielded address prefix is unambiguous — infer --shielded instead of
+  // making the user repeat what the address already says. The reverse
+  // (--shielded with an unshielded address) stays an error: that's a real
+  // contradiction, resolved in resolveAddressDestination.
+  const walletFlag = getFlag(args, 'wallet');
+  const isShielded = hasFlag(args, 'shielded') ||
+    (walletFlag !== undefined && walletFlag.startsWith('mn_shield-addr_'));
   const destination = resolveDestination(args, networkName, networkConfig, isShielded);
 
   if (isShielded) {
@@ -118,17 +125,12 @@ function resolveAddressDestination(
 ): UnshieldedDestination | ShieldedDestination {
   const looksShielded = address.startsWith('mn_shield-addr_');
 
+  // The inverse mismatch (shielded address without --shielded) never
+  // reaches here: the entry point infers --shielded from the prefix.
   if (isShielded && !looksShielded) {
     throw new Error(
       `--shielded was passed but --wallet is an unshielded address.\n` +
       `Pass a shielded address (mn_shield-addr_...) or drop --shielded.\n` +
-      `Got: ${address}`
-    );
-  }
-  if (!isShielded && looksShielded) {
-    throw new Error(
-      `--wallet is a shielded address but --shielded was not passed.\n` +
-      `Add --shielded, or pass an unshielded address (mn_addr_...).\n` +
       `Got: ${address}`
     );
   }
