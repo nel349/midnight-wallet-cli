@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getNetworkId } from '../lib/network-id.ts';
-import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
+import { NetworkId } from '@midnightntwrk/wallet-sdk';
 
 describe('getNetworkId', () => {
   it('returns Undeployed for "Undeployed"', () => {

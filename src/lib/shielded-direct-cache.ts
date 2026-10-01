@@ -14,13 +14,15 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 
 import { MIDNIGHT_DIR, CACHE_DIR_NAME, DIR_MODE, FILE_MODE } from './constants.ts';
 import { deriveShieldedSeed } from './derivation.ts';
 import { readShieldedBalanceDirect, type ShieldedDirectOptions } from './shielded-direct.ts';
 
-const SHIELDED_CACHE_VERSION = 1;
+// v2: ledger-9 states replace ledger-8 ones. Dev-preset localnets share a genesis
+// hash, so the chain-id guard can't keep a ledger-8 cache off a ledger-9 chain.
+const SHIELDED_CACHE_VERSION = 2;
 
 interface ShieldedCacheFile {
   version: number;

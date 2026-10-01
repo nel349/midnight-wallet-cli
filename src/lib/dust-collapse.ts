@@ -7,7 +7,7 @@
 // to source the owned index set (owner-match during event replay). See
 // tasks/dust-collapse-plan.md.
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 
 export interface CollapseOutcome {
   /** The collapsed state, or the original state if collapse was skipped/rejected. */

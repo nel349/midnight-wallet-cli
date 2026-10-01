@@ -1,6 +1,6 @@
 // Prep runner — execute prep steps defined in dapp.test.json by calling existing lib functions.
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -9,7 +9,7 @@ import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
 import type { NetworkConfig, NetworkName } from '../network.ts';
 import { checkDockerAvailable, ensureComposeFile, dockerCompose, getServiceStatus, waitForHealthy } from '../localnet.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
+import { buildFacade, hasDustAvailable, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
 import { loadWalletCache, saveWalletCache } from '../wallet-cache.ts';
 import { executeTransfer, ensureDust, suppressRpcNoise } from '../transfer.ts';
 import { GENESIS_SEED, INDEXER_GRAPHQL_PATH } from '../constants.ts';
@@ -301,12 +301,7 @@ async function stepDust(config: DappTestConfig, callbacks: PrepCallbacks): Promi
     const dustState = await waitForDustAvailable(bundle, DUST_WAIT_TIMEOUT_MS);
 
     // Verify dust is actually available — don't trust silent timeouts
-    const dustAvailable = (() => {
-      try {
-        const dust = dustState.dust as any;
-        return dust?.availableCoins?.length > 0 || dust?.balance(new Date()) > 0n;
-      } catch { return false; }
-    })();
+    const dustAvailable = hasDustAvailable(dustState);
 
     if (!dustAvailable) {
       if (network !== 'undeployed') {

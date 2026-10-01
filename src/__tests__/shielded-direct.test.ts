@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { WebSocketServer, type WebSocket as WsSocket } from 'ws';
 import type { AddressInfo } from 'node:net';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import { readShieldedBalanceDirect } from '../lib/shielded-direct.ts';
 import { deriveShieldedSeed } from '../lib/derivation.ts';
 import zswapEvents from './fixtures/zswap-events-localnet.json';
 
-// Real zswap ledger events captured from a fresh localnet chain. Seeds 0x01 and
+// Real zswap ledger events (ledger 9, event[v14]) captured from a fresh localnet chain. Seeds 0x01 and
 // 0x02 are localnet genesis-funded wallets (250M shielded NIGHT each); genesis
 // (0x01) airdropped 100M to 0x02, so 0x01 ends at 150M (a spend) and 0x02 at
 // 350M (its 250M allocation + the 100M it received). All seeds are throwaway

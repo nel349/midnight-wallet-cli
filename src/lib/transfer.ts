@@ -1,14 +1,14 @@
 // Shared transfer execution — used by both airdrop and transfer commands
 // Handles: facade lifecycle, sync, balance check, dust, tx build/sign/prove/submit, retries
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
-import { MidnightBech32m, UnshieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
-import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
-import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
+import * as ledger from '@midnightntwrk/ledger-v9';
+import { MidnightBech32m, UnshieldedAddress, type DustAddress } from '@midnightntwrk/wallet-sdk/address-format';
+import { type FacadeState, type UtxoWithMeta } from '@midnightntwrk/wallet-sdk/facade';
 import * as rx from 'rxjs';
 
 import { type NetworkConfig } from './network.ts';
-import { type FacadeBundle, quickSync, suppressSdkTransientErrors } from './facade.ts';
+import { getNetworkId } from './network-id.ts';
+import { type FacadeBundle, hasDustAvailable, quickSync, suppressSdkTransientErrors } from './facade.ts';
 import { defaultRepository } from './wallet-data-repository.ts';
 import { verbose } from './verbose.ts';
 import {
@@ -25,12 +25,6 @@ import {
   DUST_COST_OVERHEAD,
   MIN_DUST_FOR_TRANSFER,
 } from './constants.ts';
-
-const NETWORK_ID_MAP: Record<string, NetworkId.NetworkId> = {
-  PreProd: NetworkId.NetworkId.PreProd,
-  Preview: NetworkId.NetworkId.Preview,
-  Undeployed: NetworkId.NetworkId.Undeployed,
-};
 
 export interface TransferParams {
   seedBuffer: Buffer;
@@ -103,10 +97,7 @@ export function parseAmount(amountStr: string): number {
  * Returns the decoded UnshieldedAddress for use with the facade.
  */
 export function validateRecipientAddress(address: string, networkConfig: NetworkConfig): UnshieldedAddress {
-  const networkId = NETWORK_ID_MAP[networkConfig.networkId];
-  if (networkId === undefined) {
-    throw new Error(`Unknown networkId: ${networkConfig.networkId}`);
-  }
+  const networkId = getNetworkId(networkConfig.networkId);
 
   try {
     return MidnightBech32m.parse(address).decode(UnshieldedAddress, networkId);
@@ -168,16 +159,15 @@ export function suppressRpcNoise(): () => void {
 // ── Dust registration ────────────────────────────────────────────────
 
 /**
- * Build and submit a dust registration transaction using the v1 DustWallet API.
- * Separated so the retry wrapper can call it on each attempt with a fresh timestamp.
+ * Build, prove and submit a dust registration transaction. Separated so the
+ * retry wrapper can call it on each attempt with a fresh timestamp.
  */
 async function submitDustRegistration(
   bundle: FacadeBundle,
-  dustUtxos: DustUtxoWithMeta[],
-  dustReceiverAddress: any,
+  nightUtxos: readonly UtxoWithMeta[],
+  dustReceiverAddress: DustAddress,
+  waitTimeoutMs: number,
 ): Promise<string> {
-  const ttl = new Date(Date.now() + TX_TTL_MINUTES * 60 * 1000);
-
   // Timeout-protected: waitForSyncedState() can hang if the dust wallet's
   // shareReplay buffer cleared or the indexer is slow. Throw a retryable error
   // so registerNightUtxos' retry loop catches it.
@@ -187,22 +177,18 @@ async function submitDustRegistration(
       reject(new Error('Insufficient funds: dust wallet sync timed out')), SYNC_ATTEMPT_TIMEOUT_MS)),
   ]);
 
-  const unprovenTx = await bundle.facade.dust.createDustGenerationTransaction(
-    new Date(),
-    ttl,
-    dustUtxos,
+  // The registration pays its own fee from the dust these coins generate, so
+  // wait until they've generated enough. Estimated per attempt: the fee drifts.
+  const { fee } = await bundle.facade.estimateRegistration(nightUtxos);
+  await bundle.facade.waitForGeneratedDust(nightUtxos, fee, { timeoutMs: waitTimeoutMs });
+
+  const recipe = await bundle.facade.registerNightUtxosForDustGeneration(
+    nightUtxos,
     bundle.keystore.getPublicKey(),
+    bundle.keystore.signDataAsync,
     dustReceiverAddress,
   );
-
-  const intent = unprovenTx.intents?.get(1);
-  if (!intent) {
-    throw new Error('Dust generation intent not found on transaction');
-  }
-  const signature = bundle.keystore.signData(intent.signatureData(1));
-  const signedTx = await bundle.facade.dust.addDustGenerationSignature(unprovenTx, signature);
-
-  const finalized = await bundle.facade.finalizeTransaction(signedTx);
+  const finalized = await bundle.facade.finalizeRecipe(recipe);
   return await bundle.facade.submitTransaction(finalized);
 }
 
@@ -218,8 +204,8 @@ async function submitDustRegistration(
  */
 export async function registerNightUtxos(
   bundle: FacadeBundle,
-  dustUtxos: DustUtxoWithMeta[],
-  dustReceiverAddress: any,
+  nightUtxos: readonly UtxoWithMeta[],
+  dustReceiverAddress: DustAddress,
   onStatus?: (status: string) => void,
 ): Promise<string> {
   const startTime = Date.now();
@@ -239,7 +225,7 @@ export async function registerNightUtxos(
   try {
     while (Date.now() < deadline) {
       try {
-        return await submitDustRegistration(bundle, dustUtxos, dustReceiverAddress);
+        return await submitDustRegistration(bundle, nightUtxos, dustReceiverAddress, deadline - Date.now());
       } catch (err: any) {
         lastError = err;
         if (isDustRelatedError(err) && Date.now() + DUST_REGISTRATION_RETRY_DELAY_MS < deadline) {
@@ -281,7 +267,7 @@ export async function ensureDust(
   /** Pre-fetched synced state from the caller. Avoids re-fetching through
    *  facade.state() / waitForSyncedState() which are unreliable due to
    *  shareReplay({ refCount: true }) clearing its buffer between subscriptions. */
-  syncedState?: any,
+  syncedState?: FacadeState,
 ): Promise<EnsureDustResult> {
   // Prefer caller-provided state; fall back to waitForSyncedState (best-effort).
   const state = syncedState ?? await bundle.facade.waitForSyncedState();
@@ -289,14 +275,14 @@ export async function ensureDust(
   // If dust coins are already available, proceed immediately.
   // Skip registration even if unregistered UTXOs exist — registration costs
   // dust, and we don't want to burn fees when dust is already sufficient.
-  if (state.dust.availableCoins.length > 0 || state.dust.balance(new Date()) > 0n) {
+  if (hasDustAvailable(state)) {
     onStatus?.('Dust available');
     return { alreadyAvailable: true };
   }
 
   // No dust — check for unregistered NIGHT UTXOs and register them.
   const nightUtxos = state.unshielded.availableCoins.filter(
-    (coin: any) => coin.meta?.registeredForDustGeneration !== true
+    (coin) => !coin.meta.registeredForDustGeneration,
   );
 
   let txHash: string | undefined;
@@ -304,12 +290,7 @@ export async function ensureDust(
   if (nightUtxos.length > 0) {
     onStatus?.(`Registering ${nightUtxos.length} UTXO(s) for dust generation...`);
 
-    const dustUtxos: DustUtxoWithMeta[] = nightUtxos.map((coin: any) => ({
-      ...coin.utxo,
-      ctime: new Date(coin.meta.ctime),
-    }));
-
-    txHash = await registerNightUtxos(bundle, dustUtxos, state.dust.address, onStatus);
+    txHash = await registerNightUtxos(bundle, nightUtxos, state.dust.address, onStatus);
   } else {
     onStatus?.('UTXOs already registered, waiting for dust generation...');
   }
@@ -390,14 +371,11 @@ async function buildAndSubmitTransfer(
             ],
           },
         ],
-        { shieldedSecretKeys: bundle.zswapSecretKeys, dustSecretKey: bundle.dustSecretKey },
         { ttl, payFees: true },
       );
 
       verbose('transfer', 'Signing recipe...');
-      const signedRecipe = await bundle.facade.signRecipe(unprovenRecipe, (payload) =>
-        bundle.keystore.signData(payload)
-      );
+      const signedRecipe = await bundle.facade.signRecipe(unprovenRecipe, bundle.keystore.signDataAsync);
 
       verbose('transfer', 'Generating ZK proof...');
       onProving?.();

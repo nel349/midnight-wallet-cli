@@ -24,7 +24,7 @@
 // This patch is applied once at import time and affects all facade operations.
 
 import { DustLocalState } from '@midnight-ntwrk/ledger-v8';
-import { CoreWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
+import { CoreWallet } from '@midnightntwrk/wallet-sdk/dust/v1';
 
 // Map from nullifier → serialized DustLocalState bytes (pre-spend snapshot).
 // Cleaned up on revert (rejection) and on applyEvents (successful on-chain confirmation).

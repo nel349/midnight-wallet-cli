@@ -92,8 +92,9 @@ export const FILE_MODE = 0o600;  // owner rw only — wallet files containing se
 // Localnet directory name (under ~/.midnight/)
 export const LOCALNET_DIR_NAME = 'localnet';
 
-// Wallet state cache
-export const CACHE_VERSION = 1;
+// Wallet state cache. v2: ledger-9 states replace ledger-8 ones. Dev-preset localnets share a genesis
+// hash, so the chain-id guard can't keep a ledger-8 cache off a ledger-9 chain.
+export const CACHE_VERSION = 2;
 export const CACHE_DIR_NAME = 'cache';
 
 // Multi-wallet support

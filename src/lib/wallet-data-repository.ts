@@ -18,11 +18,11 @@
 // tests against localnet — accepted scope per architecture-deepening.md.
 
 import { Buffer } from 'node:buffer';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 
 import type { NetworkConfig, NetworkName } from './network.ts';
 import { isValidNetworkName } from './network.ts';
-import { type FacadeState } from '@midnight-ntwrk/wallet-sdk-facade';
+import { type FacadeState } from '@midnightntwrk/wallet-sdk/facade';
 import {
   buildFacade,
   startAndSyncFacade,
@@ -46,6 +46,7 @@ import {
   validateWalletCacheChainId,
 } from './wallet-cache.ts';
 import { getChainGenesisHash } from './chain-id.ts';
+import { assertLedgerSupported, fetchProtocolVersion } from './ledger-guard.ts';
 import { checkBalance, type BalanceSummary } from './balance-subscription.ts';
 import { readDustBalanceDirect, type DustDirectResult, type DustRetention } from './dust-direct.ts';
 import { nativeDustSyncAvailable, runDustSyncNative } from './dust-sync-native.ts';
@@ -177,6 +178,8 @@ export interface RepoDeps {
   ) => Promise<DustDirectResult>;
   /** Chain genesis-hash fetcher (cache chain-reset guard). Default: `getChainGenesisHash`. */
   fetchChainId?: (nodeWsUrl: string) => Promise<string | null>;
+  /** Chain protocol-version fetcher (ledger-9-only guard). Default: indexer `block { protocolVersion }`. */
+  fetchProtocolVersion?: (indexerHttpUrl: string) => Promise<bigint | null>;
   /** Override cache directory (tests use a tmp dir). */
   cacheDir?: string;
 }
@@ -218,6 +221,7 @@ export class WalletDataRepository {
   private readonly fetchUnshielded: NonNullable<RepoDeps['fetchUnshielded']>;
   private readonly fetchDust: NonNullable<RepoDeps['fetchDust']>;
   private readonly fetchChainId: NonNullable<RepoDeps['fetchChainId']>;
+  private readonly fetchProtocolVersion: NonNullable<RepoDeps['fetchProtocolVersion']>;
   private readonly cacheDir: string | undefined;
 
   private readonly dustMemo = new Map<string, MemoEntry<DustView>>();
@@ -230,6 +234,7 @@ export class WalletDataRepository {
     this.fetchUnshielded = deps.fetchUnshielded ?? defaultUnshieldedFetcher;
     this.fetchDust = deps.fetchDust ?? nativeOrWasmDustFetcher;
     this.fetchChainId = deps.fetchChainId ?? getChainGenesisHash;
+    this.fetchProtocolVersion = deps.fetchProtocolVersion ?? fetchProtocolVersion;
     this.cacheDir = deps.cacheDir;
   }
 
@@ -237,6 +242,7 @@ export class WalletDataRepository {
 
   async dust(seed: Buffer, network: NetworkConfig, opts: ReadOptions = {}): Promise<DustView> {
     const networkName = networkNameOf(network);
+    await assertLedgerSupported(networkName, network, this.fetchProtocolVersion);
     const pubkeyHex = dustPublicKeyHexFromSeed(seed);
     const memoKey = `${networkName}:${pubkeyHex}`;
 
@@ -393,6 +399,9 @@ export class WalletDataRepository {
     const isRemote = network.networkId !== 'Undeployed';
     const syncTimeoutMs = opts.syncTimeoutMs
       ?? (isRemote ? SYNC_ATTEMPT_REMOTE_MS : SYNC_ATTEMPT_LOCAL_MS);
+
+    // On a ledger-8 chain the SDK's sync retries forever; refuse up front.
+    await assertLedgerSupported(networkName, network, this.fetchProtocolVersion);
 
     const currentChainId = await this.fetchChainId(network.node).catch(() => null);
     validateWalletCacheChainId(networkName, currentChainId, this.cacheDir);

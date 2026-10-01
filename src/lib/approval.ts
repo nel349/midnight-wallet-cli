@@ -21,6 +21,12 @@ export interface ApprovalRequest {
   network: string;
   /** Key-value details to display */
   details: ApprovalDetail[];
+  /**
+   * The wallet's whole contribution is the fee: a balance run Dust-only, or the
+   * submit of a transaction this server balanced that way. Only counts under
+   * `approveFees`.
+   */
+  feeOnly?: boolean;
 }
 
 export type ApprovalResult = 'approve' | 'reject';
@@ -30,6 +36,12 @@ export interface ApprovalOptions {
   autoApproveReads?: boolean;
   /** Auto-approve all operations (for agent/automated use) */
   approveAll?: boolean;
+  /**
+   * Fee-wallet mode: auto-approve requests where the wallet only pays the fee
+   * (`feeOnly`). Everything else still needs a prompt, so an agent without a
+   * terminal gets it rejected.
+   */
+  approveFees?: boolean;
 }
 
 // ── Read-only method set ──
@@ -113,6 +125,11 @@ export async function promptApproval(
   // Auto-approve checks
   if (options.approveAll) {
     process.stderr.write(dim(`  Auto-approved: ${request.method}`) + '\n');
+    return 'approve';
+  }
+
+  if (options.approveFees && request.feeOnly) {
+    process.stderr.write(dim(`  Auto-approved (fee-only): ${request.method}`) + '\n');
     return 'approve';
   }
 

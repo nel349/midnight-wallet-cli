@@ -1,8 +1,8 @@
 // balance command — check unshielded + shielded balance via full wallet sync
 // For positional address: unshielded only (GraphQL, no facade needed)
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
-import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
+import * as ledger from '@midnightntwrk/ledger-v9';
+import { MidnightBech32m } from '@midnightntwrk/wallet-sdk/address-format';
 import { type ParsedArgs, getFlag, hasFlag, isMinimalMode, isVerbose } from '../lib/argv.ts';
 import { enableVerbose, verbose } from '../lib/verbose.ts';
 import { type NetworkName, isValidNetworkName } from '../lib/network.ts';
@@ -15,6 +15,7 @@ import { getNetworkId } from '../lib/network-id.ts';
 import { isNativeToken } from '../lib/balance-subscription.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { readShieldedBalanceCached } from '../lib/shielded-direct-cache.ts';
+import { assertLedgerSupported } from '../lib/ledger-guard.ts';
 import { deriveShieldedAddress, deriveUnshieldedAddress } from '../lib/derive-address.ts';
 import { getChainGenesisHash } from '../lib/chain-id.ts';
 import { suppressSdkTransientErrors } from '../lib/facade.ts';
@@ -269,6 +270,7 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
       // receives AND spends), replacing the facade's cold sync — ~50-70s first
       // time on hosted nets, incremental after, memory-bounded. chainId
       // invalidates the cache on chain reset.
+      await assertLedgerSupported(networkName, networkConfig);
       const chainId = (await getChainGenesisHash(networkConfig.node).catch(() => null)) ?? undefined;
       const shieldedResult = await readShieldedBalanceCached(
         seedBuffer,

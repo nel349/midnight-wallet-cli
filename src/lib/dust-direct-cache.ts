@@ -13,7 +13,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 
 import { MIDNIGHT_DIR, CACHE_DIR_NAME, DIR_MODE, FILE_MODE } from './constants.ts';
 import { deriveDustSeed } from './derivation.ts';
@@ -22,7 +22,9 @@ import { type DustRetention } from './dust-direct.ts';
 // v2 added the retention fields (owned generation indices + frontier) that the
 // generation-tree collapse needs. v1 caches lack them and are invalidated, so
 // they re-sync once and come back collapsed.
-const DUST_CACHE_VERSION = 2;
+// v3: ledger-9 states replace ledger-8 ones. Dev-preset localnets share a genesis
+// hash, so the chain-id guard can't keep a ledger-8 cache off a ledger-9 chain.
+const DUST_CACHE_VERSION = 3;
 
 interface DustCacheFile {
   version: number;

@@ -1,5 +1,5 @@
 // ConnectedAPI-compatible type definitions
-// Structurally compatible with @midnight-ntwrk/dapp-connector-api@4.0.1
+// Structurally compatible with @midnightntwrk/dapp-connector-api@4.0.1
 // Own definitions because the official package is on GitHub Package Registry, not public npm
 
 // ── Token & Balance ──

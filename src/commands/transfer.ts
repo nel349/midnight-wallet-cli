@@ -1,8 +1,8 @@
 // transfer command — send NIGHT from my wallet to another address
 // Usage: midnight transfer <to> <amount> [--shielded]
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
-import { MidnightBech32m, ShieldedAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
+import * as ledger from '@midnightntwrk/ledger-v9';
+import { MidnightBech32m, ShieldedAddress } from '@midnightntwrk/wallet-sdk/address-format';
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
@@ -256,14 +256,13 @@ async function shieldedTransfer(
             type: 'shielded' as const,
             outputs: [{ type: nightToken, amount, receiverAddress: decodedRecipient }],
           }],
-          { shieldedSecretKeys: bundle.zswapSecretKeys, dustSecretKey: bundle.dustSecretKey },
           { ttl: new Date(Date.now() + 60 * 60 * 1000) },
         );
 
         spinner.update('Signing...');
         const signed = await bundle.facade.signRecipe(
           recipe,
-          (payload: Uint8Array) => bundle.keystore.signData(payload),
+          bundle.keystore.signDataAsync,
         );
 
         spinner.update('Generating ZK proof (this may take a few minutes)...');

@@ -1,12 +1,13 @@
 // Tests for dapp-connector.ts — createDAppConnector handler map
 // Stubs the FacadeBundle at the SDK boundary (per CLAUDE.md: no mocks of our own code).
-// SDK modules (address encoding, tx deserialization) are stubbed at the boundary.
+// SDK address encoding is stubbed at the boundary; transactions reach the code
+// as opaque handles the stub facade adopts, and leave as their real hex.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as rx from 'rxjs';
 
 // Stub SDK address encoding — MidnightBech32m.encode returns a mock
-vi.mock('@midnight-ntwrk/wallet-sdk-address-format', () => ({
+vi.mock('@midnightntwrk/wallet-sdk/address-format', () => ({
   MidnightBech32m: {
     encode: (_networkId: any, address: any) => ({
       asString: () => 'bech32m_mock_address',
@@ -19,18 +20,13 @@ vi.mock('@midnight-ntwrk/wallet-sdk-address-format', () => ({
   ShieldedAddress: {},
 }));
 
-// Stub tx-serde — SDK Transaction.deserialize calls
-vi.mock('../lib/tx-serde.ts', () => ({
-  serializeTx: (tx: any) => 'serialized_' + (tx?.type ?? 'unknown'),
-  deserializeUnsealed: (hex: string) => ({ type: 'unsealed', hex }),
-  deserializeSealed: (hex: string) => ({ type: 'sealed', hex }),
-  fromHex: (hex: string) => new Uint8Array(Buffer.from(hex, 'hex')),
-}));
-
-import { createDAppConnector, type DAppConnector } from '../lib/dapp-connector.ts';
+import { createDAppConnector, signatureScheme, type DAppConnector } from '../lib/dapp-connector.ts';
 import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
+
+/** A finalized transaction handle as the SDK returns it: it serializes to these bytes. */
+const finalizedTx = (...bytes: number[]) => ({ serialize: () => new Uint8Array(bytes) });
 
 /** Mock handler context with no-op notify */
 const ctx = (connectionId = 'conn_test'): RpcHandlerContext => ({ notify: vi.fn(), connectionId, requestId: 1, metadata: {} });
@@ -57,12 +53,6 @@ function mockState(overrides?: {
       balances: overrides?.unshieldedBalances ?? { '0000000000000000000000000000000000000000000000000000000000000000': 5000000n },
       address: { data: Buffer.alloc(32) },
       progress: { appliedId: 1n, highestTransactionId: 1n },
-      transactionHistory: {
-        async *getAll() {
-          yield { hash: 'tx-hash-001', status: 'SUCCESS' };
-          yield { hash: 'tx-hash-002', status: 'FAILURE' };
-        },
-      },
     },
     shielded: {
       balances: overrides?.shieldedBalances ?? {},
@@ -73,10 +63,18 @@ function mockState(overrides?: {
     },
     dust: {
       balance: (_time: Date) => overrides?.dustBalance ?? 1000n,
+      availableCoins: [],
       address: { data: 0n },
     },
   };
 }
+
+/** Wallet history as the SDK records it: one finalized, one rejected, one pending. */
+const HISTORY = [
+  { hash: 'tx-hash-001', identifiers: [], lifecycle: { status: 'finalized', finalizedBlock: { hash: 'b1', height: 1, timestamp: new Date(0) } } },
+  { hash: 'tx-hash-002', identifiers: [], lifecycle: { status: 'rejected', rejectedAt: new Date(0) } },
+  { hash: 'tx-hash-003', identifiers: [], lifecycle: { status: 'pending', submittedAt: new Date(0) } },
+];
 
 /** Create a minimal FacadeBundle stub. */
 function createBundleStub(overrides?: {
@@ -88,6 +86,7 @@ function createBundleStub(overrides?: {
   balanceUnboundTransaction?: () => Promise<any>;
   balanceFinalizedTransaction?: () => Promise<any>;
   initSwap?: () => Promise<any>;
+  getAllFromTxHistory?: () => Promise<any[]>;
 }): FacadeBundle {
   const defaultStateFn = () => rx.of(mockState());
 
@@ -98,19 +97,19 @@ function createBundleStub(overrides?: {
       stop: vi.fn().mockResolvedValue(undefined),
       transferTransaction: overrides?.transferTransaction ?? vi.fn().mockResolvedValue({ type: 'UNPROVEN_TRANSACTION' }),
       signRecipe: overrides?.signRecipe ?? vi.fn().mockResolvedValue({ type: 'SIGNED' }),
-      finalizeRecipe: overrides?.finalizeRecipe ?? vi.fn().mockResolvedValue({ serialize: () => new Uint8Array([0xab, 0xcd]) }),
+      finalizeRecipe: overrides?.finalizeRecipe ?? vi.fn().mockResolvedValue(finalizedTx(0xab, 0xcd)),
       submitTransaction: overrides?.submitTransaction ?? vi.fn().mockResolvedValue('mock-tx-hash'),
       balanceUnboundTransaction: overrides?.balanceUnboundTransaction ?? vi.fn().mockResolvedValue({ type: 'UNBOUND' }),
       balanceFinalizedTransaction: overrides?.balanceFinalizedTransaction ?? vi.fn().mockResolvedValue({ type: 'FINALIZED' }),
       initSwap: overrides?.initSwap ?? vi.fn().mockResolvedValue({ type: 'SWAP' }),
       registerNightUtxosForDustGeneration: vi.fn(),
+      adoptTransaction: vi.fn((bytes: Uint8Array, stage: string) => ({ stage, hex: Buffer.from(bytes).toString('hex') })),
+      getAllFromTxHistory: overrides?.getAllFromTxHistory ?? vi.fn().mockResolvedValue(HISTORY),
     },
     keystore: {
-      signData: vi.fn().mockReturnValue('abcd1234signature'),
-      getPublicKey: vi.fn().mockReturnValue('5678efghpubkey'),
+      signDataAsync: vi.fn().mockResolvedValue({ tag: 'schnorr', value: 'abcd1234signature' }),
+      getPublicKey: vi.fn().mockReturnValue({ tag: 'schnorr', value: '5678efghpubkey' }),
     },
-    zswapSecretKeys: {} as any,
-    dustSecretKey: {} as any,
   } as unknown as FacadeBundle;
 }
 
@@ -253,9 +252,11 @@ describe('dapp-connector', () => {
     it('returns entries with correct TxStatus object shape', async () => {
       connector = createConnector();
       const result = await connector.handlers.getTxHistory({ pageNumber: 0, pageSize: 10 }, ctx()) as any[];
-      expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({ txHash: 'tx-hash-001', txStatus: { status: 'finalized' } });
-      expect(result[1]).toEqual({ txHash: 'tx-hash-002', txStatus: { status: 'pending' } });
+      expect(result).toEqual([
+        { txHash: 'tx-hash-001', txStatus: { status: 'finalized', executionStatus: {} } },
+        { txHash: 'tx-hash-002', txStatus: { status: 'discarded' } },
+        { txHash: 'tx-hash-003', txStatus: { status: 'pending' } },
+      ]);
     });
 
     it('paginates correctly', async () => {
@@ -272,22 +273,17 @@ describe('dapp-connector', () => {
       expect(result[0].txHash).toBe('tx-hash-002');
     });
 
-    it('returns empty array when SDK throws', async () => {
-      const state = mockState();
-      (state.unshielded as any).transactionHistory = {
-        async *getAll() { throw new Error('Not yet implemented'); },
-      };
-      connector = createConnector({
-        bundleOverrides: { stateFn: () => rx.of(state) },
-      });
-      const result = await connector.handlers.getTxHistory({}, ctx());
+    it('returns an empty page past the end of the history', async () => {
+      connector = createConnector();
+      const result = await connector.handlers.getTxHistory({ pageNumber: 5, pageSize: 1 }, ctx());
       expect(result).toEqual([]);
     });
 
     it('defaults to pageNumber 0 and pageSize 20', async () => {
-      connector = createConnector();
+      const many = Array.from({ length: 25 }, (_, i) => ({ ...HISTORY[2], hash: `h${i}` }));
+      connector = createConnector({ bundleOverrides: { getAllFromTxHistory: () => Promise.resolve(many) } });
       const result = await connector.handlers.getTxHistory({}, ctx()) as any[];
-      expect(result).toHaveLength(2);
+      expect(result.map((e) => e.txHash)).toEqual(many.slice(0, 20).map((e) => e.hash));
     });
   });
 
@@ -411,7 +407,7 @@ describe('dapp-connector', () => {
       }, ctx()) as any;
 
       expect(result.data).toBe('cafebabe');
-      expect((bundle.keystore as any).signData).toHaveBeenCalledWith(
+      expect((bundle.keystore as any).signDataAsync).toHaveBeenCalledWith(
         new Uint8Array([0xca, 0xfe, 0xba, 0xbe])
       );
     });
@@ -431,7 +427,7 @@ describe('dapp-connector', () => {
       }, ctx()) as any;
 
       expect(result.data).toBe(b64Data);
-      expect((bundle.keystore as any).signData).toHaveBeenCalledWith(
+      expect((bundle.keystore as any).signDataAsync).toHaveBeenCalledWith(
         new Uint8Array(Buffer.from('hello world'))
       );
     });
@@ -450,7 +446,7 @@ describe('dapp-connector', () => {
       }, ctx()) as any;
 
       expect(result.data).toBe('sign me');
-      expect((bundle.keystore as any).signData).toHaveBeenCalledWith(
+      expect((bundle.keystore as any).signDataAsync).toHaveBeenCalledWith(
         new Uint8Array(Buffer.from('sign me', 'utf-8'))
       );
     });
@@ -486,14 +482,18 @@ describe('dapp-connector', () => {
       }, ctx())).rejects.toThrow('data and options.encoding are required');
     });
 
-    it('returns signature and verifyingKey as strings', async () => {
+    it('returns the hex values and the scheme, not the SDK\'s { tag, value } objects', async () => {
       connector = createConnector();
       const result = await connector.handlers.signData({
         data: 'aabb',
         options: { encoding: 'hex' },
       }, ctx()) as any;
-      expect(typeof result.signature).toBe('string');
-      expect(typeof result.verifyingKey).toBe('string');
+      expect(result).toEqual({
+        data: 'aabb',
+        signature: 'abcd1234signature',
+        verifyingKey: '5678efghpubkey',
+        scheme: 'schnorr_bip340',
+      });
     });
   });
 
@@ -543,6 +543,67 @@ describe('dapp-connector', () => {
         desiredInputs: [],
         desiredOutputs: [],
       }, ctx())).rejects.toThrow('options is required for makeIntent');
+    });
+  });
+
+  // ── Reading the dApp's transaction (the fee-wallet seam) ──
+
+  describe('transaction adoption', () => {
+    it.each([
+      ['balanceUnsealedTransaction', 'Unbound', 'balanceUnboundTransaction'],
+      ['balanceSealedTransaction', 'Finalized', 'balanceFinalizedTransaction'],
+    ] as const)('%s reads the hex at stage %s and balances that handle', async (method, stage, sdkMethod) => {
+      const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+      const bundle = createBundleStub({ [sdkMethod]: balance });
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      await connector.handlers[method]({ tx: 'c0ffee' }, ctx());
+
+      expect(bundle.facade.adoptTransaction).toHaveBeenCalledWith(new Uint8Array([0xc0, 0xff, 0xee]), stage);
+      expect(balance).toHaveBeenCalledWith({ stage, hex: 'c0ffee' }, expect.objectContaining({ ttl: expect.any(Date) }));
+    });
+
+    it('submitTransaction reads the hex as a finalized transaction and submits that handle', async () => {
+      const submit = vi.fn().mockResolvedValue('tx-id');
+      const bundle = createBundleStub({ submitTransaction: submit });
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      const result = await connector.handlers.submitTransaction({ tx: 'beef' }, ctx());
+
+      expect(bundle.facade.adoptTransaction).toHaveBeenCalledWith(new Uint8Array([0xbe, 0xef]), 'Finalized');
+      expect(submit).toHaveBeenCalledWith({ stage: 'Finalized', hex: 'beef' });
+      expect(result).toEqual({ txHash: 'tx-id' });
+    });
+
+    it('reports bytes the wallet cannot read as InvalidRequest, naming the stage, without balancing', async () => {
+      const balance = vi.fn();
+      const bundle = createBundleStub({ balanceUnboundTransaction: balance });
+      (bundle.facade as any).adoptTransaction = () => { throw new Error('unknown tag midnight:transaction[v99]'); };
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toContain('stage Unbound');
+      expect(err.message).toContain('unknown tag midnight:transaction[v99]');
+      expect(balance).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-hex input before it reaches the SDK', async () => {
+      const bundle = createBundleStub();
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: 'not-hex' }, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(bundle.facade.adoptTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('signatureScheme', () => {
+    it('names BIP-340 Schnorr, and refuses any other tag rather than mislabel it', () => {
+      expect(signatureScheme('schnorr')).toBe('schnorr_bip340');
+      expect(() => signatureScheme('ecdsa')).toThrow('mn signs with BIP-340 Schnorr only');
     });
   });
 
@@ -597,12 +658,12 @@ describe('dapp-connector', () => {
       connector = createConnector({
         approvalOptions: { approveAll: true },
         bundleOverrides: {
-          finalizeRecipe: () => Promise.resolve({ type: 'FINALIZED_TX' }),
+          finalizeRecipe: () => Promise.resolve(finalizedTx(0xfe, 0xed)),
         },
       });
 
       const result = await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()) as any;
-      expect(result.tx).toBe('serialized_FINALIZED_TX');
+      expect(result.tx).toBe('feed');
     });
 
     it('propagates signRecipe errors', async () => {
@@ -681,6 +742,39 @@ describe('dapp-connector', () => {
       vi.useRealTimers();
     });
 
+    it('retries on wallet-sdk 2.0\'s tagged dust shortage', async () => {
+      vi.useFakeTimers();
+      process.stderr.write = (() => true) as any;
+      const dustShortage = Object.assign(new Error('Insufficient Funds: could not balance dust'), {
+        _tag: 'Wallet.InsufficientFunds', tokenType: 'dust',
+      });
+      let callCount = 0;
+      connector = createConnector({
+        approvalOptions: { approveAll: true },
+        bundleOverrides: {
+          balanceUnboundTransaction: () => (++callCount === 1 ? Promise.reject(dustShortage) : Promise.resolve({ type: 'UNBOUND' })),
+        },
+      });
+
+      const promise = connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx());
+      await vi.advanceTimersByTimeAsync(3_100);
+      await promise;
+      expect(callCount).toBe(2);
+      vi.useRealTimers();
+    });
+
+    it('does not wait for dust when the wallet is short of NIGHT, which dust cannot fix', async () => {
+      process.stderr.write = (() => true) as any;
+      const nightShortage = Object.assign(new Error('Insufficient Funds: could not balance 00'), {
+        _tag: 'Wallet.InsufficientFunds', tokenType: '00',
+      });
+      const balance = vi.fn().mockRejectedValue(nightShortage);
+      connector = createConnector({ approvalOptions: { approveAll: true }, bundleOverrides: { balanceUnboundTransaction: balance } });
+
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx())).rejects.toBe(nightShortage);
+      expect(balance).toHaveBeenCalledTimes(1);
+    });
+
     it('does not retry on non-dust errors', async () => {
       process.stderr.write = (() => true) as any;
       connector = createConnector({
@@ -723,7 +817,7 @@ describe('dapp-connector', () => {
       process.stderr.write = (() => true) as any;
 
       const bundle = createBundleStub({
-        finalizeRecipe: () => Promise.resolve({ type: 'FINALIZED_TX' }),
+        finalizeRecipe: () => Promise.resolve(finalizedTx(0x01)),
         submitTransaction: () => Promise.resolve('hash-123'),
       });
       (bundle.facade as any).revert = revertFn;
@@ -755,8 +849,9 @@ describe('dapp-connector', () => {
       const revertFn = vi.fn().mockResolvedValue(undefined);
       process.stderr.write = (() => true) as any;
 
+      const finalized = finalizedTx(0x02);
       const bundle = createBundleStub({
-        finalizeRecipe: () => Promise.resolve({ type: 'TRACKED_TX' }),
+        finalizeRecipe: () => Promise.resolve(finalized),
       });
       (bundle.facade as any).revert = revertFn;
 
@@ -769,10 +864,11 @@ describe('dapp-connector', () => {
       const connId = 'conn_revert_test';
       await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx(connId));
 
-      // Simulate disconnect — reverts to release dust coins from pending.
-      // The dust-revert-patch ensures revert doesn't destroy the UTXO.
+      // Disconnect reverts the FINALIZED transaction: that releases its coins in
+      // all three wallets and clears its pending entry (the recipe would not).
       await connector.revertPendingTxs(connId);
       expect(revertFn).toHaveBeenCalledTimes(1);
+      expect(revertFn).toHaveBeenCalledWith(finalized);
     });
 
     it('submitTransaction rejection reverts and untracks', async () => {
@@ -780,8 +876,9 @@ describe('dapp-connector', () => {
       const origIsTTY = process.stdin.isTTY;
       process.stderr.write = (() => true) as any;
 
+      const finalized = finalizedTx(0x03);
       const bundle = createBundleStub({
-        finalizeRecipe: () => Promise.resolve({ type: 'REJECTED_TX' }),
+        finalizeRecipe: () => Promise.resolve(finalized),
       });
       (bundle.facade as any).revert = revertFn;
 
@@ -805,17 +902,33 @@ describe('dapp-connector', () => {
       delete opts.approveAll;
       Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
 
-      // Submit on the SAME connector → rejection → reverts via patched revert
-      // (dust-revert-patch makes revert safe — no UTXO destruction)
-      try {
-        await connector.handlers.submitTransaction({ tx: balanceResult.tx }, ctx(connId));
-      } catch (err: any) {
-        expect(err.code).toBe('Rejected');
-      }
+      // Submit on the SAME connector → rejection → reverts the finalized tx
+      await expect(connector.handlers.submitTransaction({ tx: balanceResult.tx }, ctx(connId)))
+        .rejects.toMatchObject({ code: 'Rejected' });
 
-      expect(revertFn).toHaveBeenCalled();
+      expect(revertFn).toHaveBeenCalledWith(finalized);
+      // Untracked: a later disconnect has nothing left to revert.
+      revertFn.mockClear();
+      await connector.revertPendingTxs(connId);
+      expect(revertFn).not.toHaveBeenCalled();
 
       Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+    });
+  });
+
+  describe('failed proving', () => {
+    it('reverts the recipe so its coins are not held until the TTL', async () => {
+      const recipe = { type: 'RECIPE' };
+      const revertFn = vi.fn().mockResolvedValue(undefined);
+      const bundle = createBundleStub({
+        balanceUnboundTransaction: () => Promise.resolve(recipe),
+        finalizeRecipe: () => Promise.reject(new Error('proof server unreachable')),
+      });
+      (bundle.facade as any).revert = revertFn;
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx())).rejects.toThrow('proof server unreachable');
+      expect(revertFn).toHaveBeenCalledWith(recipe);
     });
   });
 
@@ -828,7 +941,7 @@ describe('dapp-connector', () => {
       process.stderr.write = (() => true) as any;
 
       const bundle = createBundleStub({
-        finalizeRecipe: () => Promise.resolve({ type: 'ABANDON_TX' }),
+        finalizeRecipe: () => Promise.resolve(finalizedTx(0x04)),
       });
       (bundle.facade as any).revert = revertFn;
 
@@ -844,7 +957,7 @@ describe('dapp-connector', () => {
       // Advance past ABANDONED_TX_TIMEOUT_MS (120_000ms)
       await vi.advanceTimersByTimeAsync(121_000);
 
-      // Timer fires and calls revert (safe via dust-revert-patch)
+      // Timer fires and reverts the abandoned tx
       expect(revertFn).toHaveBeenCalledTimes(1);
 
       vi.useRealTimers();
@@ -856,7 +969,7 @@ describe('dapp-connector', () => {
       process.stderr.write = (() => true) as any;
 
       const bundle = createBundleStub({
-        finalizeRecipe: () => Promise.resolve({ type: 'DISPOSE_TX' }),
+        finalizeRecipe: () => Promise.resolve(finalizedTx(0x05)),
       });
       (bundle.facade as any).revert = revertFn;
 

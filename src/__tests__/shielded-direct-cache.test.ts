@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import {
   shieldedCoinPublicKeyHexFromSeed,
   getShieldedCachePath,
@@ -60,6 +60,16 @@ describe('shielded-direct cache round-trip', () => {
     const path = getShieldedCachePath('undeployed', PUBKEY, dir);
     mkdirSync(join(dir, 'undeployed'), { recursive: true });
     const raw = { version: 999, network: 'undeployed', coinPublicKeyHex: PUBKEY, lastAppliedEventId: 1, timestamp: '', zswapState: Buffer.from(freshState().serialize()).toString('hex') };
+    writeFileSync(path, JSON.stringify(raw));
+    expect(loadShieldedCache('undeployed', PUBKEY, dir)).toBeNull();
+  });
+
+  it('rejects a cache written by ledger-8 mn (v1), which shares a dev genesis hash with ledger-9 chains', () => {
+    saveShieldedCache('undeployed', PUBKEY, freshState(), 1, dir);
+    const path = getShieldedCachePath('undeployed', PUBKEY, dir);
+    const raw = JSON.parse(readFileSync(path, 'utf-8'));
+    expect(loadShieldedCache('undeployed', PUBKEY, dir)).not.toBeNull(); // valid as written
+    raw.version = 1;
     writeFileSync(path, JSON.stringify(raw));
     expect(loadShieldedCache('undeployed', PUBKEY, dir)).toBeNull();
   });

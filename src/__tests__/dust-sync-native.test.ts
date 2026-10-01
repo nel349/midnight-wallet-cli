@@ -2,12 +2,13 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import {
   resumeDecision,
   adaptResult,
   resolveSidecarBinary,
   nativeDustSyncAvailable,
+  runDustSyncNative,
   type SidecarCheckpoint,
 } from '../lib/dust-sync-native.ts';
 import { DUST_STATE_OWNED_HEX } from './fixtures/dust-state-owned.ts';
@@ -101,6 +102,18 @@ describe('binary resolution + gating', () => {
     expect(resolveSidecarBinary()).not.toBe('/no/such/dust-sync-binary');
   });
 
+  it('never selects the ledger-8 sidecar on this ledger-9 build, even with a resolvable binary', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mn-dustbin-'));
+    try {
+      const bin = join(dir, 'dust-sync');
+      writeFileSync(bin, '#!/bin/sh\n');
+      process.env.MN_DUST_SYNC_BIN = bin;
+      delete process.env.MN_DISABLE_NATIVE_DUST;
+      expect(resolveSidecarBinary()).toBe(bin);
+      expect(nativeDustSyncAvailable()).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('disables native sync when MN_DISABLE_NATIVE_DUST=1', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mn-dustbin-'));
     try {
@@ -110,6 +123,53 @@ describe('binary resolution + gating', () => {
       process.env.MN_DISABLE_NATIVE_DUST = '1';
       expect(nativeDustSyncAvailable()).toBe(false); // gated off despite a resolvable binary
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('runDustSyncNative exit handling (fake sidecar binary)', () => {
+  // The sidecar is an external process: a shell script stands in for it,
+  // writing a valid checkpoint to --out and exiting with a chosen code.
+  const saved = { ...process.env };
+  let dir: string;
+  afterEach(() => {
+    for (const k of ['MN_DUST_SYNC_BIN', 'HOME']) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function fakeSidecar(exitCode: number): void {
+    dir = mkdtempSync(join(tmpdir(), 'mn-fake-sidecar-'));
+    const cp = JSON.stringify({
+      dust_state: DUST_STATE_OWNED_HEX, last_applied_event_id: 7, owned_generation_indices: [],
+      generation_frontier: 0, balance: '0', available_coins: 0, events_applied: 7, partial: false,
+    });
+    const bin = join(dir, 'dust-sync');
+    writeFileSync(bin, [
+      '#!/bin/sh',
+      'cat > /dev/null',
+      'while [ $# -gt 0 ]; do if [ "$1" = "--out" ]; then OUT="$2"; fi; shift; done',
+      `printf '%s' '${cp}' > "$OUT"`,
+      `exit ${exitCode}`,
+    ].join('\n'), { mode: 0o755 });
+    process.env.MN_DUST_SYNC_BIN = bin;
+    process.env.HOME = dir;
+  }
+
+  const network = { indexer: 'http://x', indexerWS: 'ws://x', node: 'ws://x', proofServer: 'http://x', networkId: 'Undeployed' };
+  const seed = Buffer.alloc(32, 7);
+
+  it('accepts the checkpoint from a clean exit (control: the fake binary works)', async () => {
+    fakeSidecar(0);
+    const r = await runDustSyncNative(seed, network, { startFromId: 0 });
+    expect(r.lastAppliedEventId).toBe(7);
+  });
+
+  it('rejects a failed run even though a checkpoint file exists, so the caller falls back', async () => {
+    // A ledger-8 sidecar on a ledger-9 chain dies like this (exit 2) after a
+    // checkpoint already sits at --out; parsing it as success froze dust.
+    fakeSidecar(2);
+    await expect(runDustSyncNative(seed, network, { startFromId: 0 })).rejects.toThrow('dust-sync exited 2');
   });
 });
 

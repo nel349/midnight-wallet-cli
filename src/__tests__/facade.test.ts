@@ -1,261 +1,136 @@
-import { describe, it, expect, vi } from 'vitest';
-import { isFacadeSynced } from '../lib/facade.ts';
-import type { FacadeState } from '@midnight-ntwrk/wallet-sdk-facade';
+// Sync-completion predicates, tested against the SDK's real progress objects
+// (its own `isStrictlyComplete` rules), not hand-written booleans. Only the
+// FacadeState container is a stand-in: these predicates read nothing else.
 
-/** Create a minimal FacadeState-like object for testing isFacadeSynced. */
-function mockState({
-  shieldedComplete = true,
-  unshieldedComplete = true,
-  dustComplete = true,
-}: {
-  shieldedComplete?: boolean;
-  unshieldedComplete?: boolean;
-  dustComplete?: boolean;
-} = {}): FacadeState {
+import { describe, it, expect } from 'vitest';
+import { SyncProgress } from '@midnightntwrk/wallet-sdk';
+import { SyncProgress as UnshieldedSyncProgress } from '@midnightntwrk/wallet-sdk/unshielded/v2';
+import type { FacadeState } from '@midnightntwrk/wallet-sdk/facade';
+import { isFacadeSynced, detectStaleCache } from '../lib/facade.ts';
+
+type IndexProgress = ReturnType<typeof SyncProgress.createSyncProgress>;
+type TxProgress = ReturnType<typeof UnshieldedSyncProgress.createSyncProgress>;
+
+/** A shielded/dust wallet that has applied `applied` of `highest` events. */
+function indexed(applied: bigint, highest: bigint, isConnected = true): IndexProgress {
+  return SyncProgress.createSyncProgress({
+    appliedIndex: applied,
+    highestRelevantWalletIndex: highest,
+    highestIndex: highest,
+    highestRelevantIndex: highest,
+    isConnected,
+  });
+}
+
+/** An unshielded wallet that has applied `applied` of `highest` transactions. */
+function txs(applied: bigint, highest: bigint, isConnected = true): TxProgress {
+  return UnshieldedSyncProgress.createSyncProgress({
+    appliedId: applied,
+    highestTransactionId: highest,
+    isConnected,
+  });
+}
+
+const SYNCED = indexed(10n, 10n);
+const BEHIND = indexed(4n, 10n);
+
+function state(p: { shielded?: IndexProgress; unshielded?: TxProgress; dust?: IndexProgress } = {}): FacadeState {
   return {
-    shielded: {
-      state: {
-        progress: { isStrictlyComplete: () => shieldedComplete },
-      },
-    },
-    unshielded: {
-      progress: { isStrictlyComplete: () => unshieldedComplete },
-    },
-    dust: {
-      state: {
-        progress: { isStrictlyComplete: () => dustComplete },
-      },
-    },
+    shielded: { progress: p.shielded ?? SYNCED },
+    unshielded: { progress: p.unshielded ?? txs(10n, 10n) },
+    dust: { progress: p.dust ?? SYNCED },
   } as unknown as FacadeState;
 }
 
 describe('isFacadeSynced', () => {
   describe('full mode (default)', () => {
-    it('returns true when all three wallets are synced', () => {
-      expect(isFacadeSynced(mockState())).toBe(true);
+    it('is synced when all three wallets are strictly complete', () => {
+      expect(isFacadeSynced(state())).toBe(true);
+      expect(isFacadeSynced(state(), 'full')).toBe(true);
     });
 
-    it('returns false when shielded is not synced', () => {
-      expect(isFacadeSynced(mockState({ shieldedComplete: false }))).toBe(false);
-    });
-
-    it('returns false when unshielded is not synced', () => {
-      expect(isFacadeSynced(mockState({ unshieldedComplete: false }))).toBe(false);
-    });
-
-    it('returns false when dust is not synced', () => {
-      expect(isFacadeSynced(mockState({ dustComplete: false }))).toBe(false);
-    });
-
-    it('returns false when multiple wallets are not synced', () => {
-      expect(isFacadeSynced(mockState({ unshieldedComplete: false, dustComplete: false }))).toBe(false);
-      expect(isFacadeSynced(mockState({ shieldedComplete: false, dustComplete: false }))).toBe(false);
-      expect(isFacadeSynced(mockState({ shieldedComplete: false, unshieldedComplete: false }))).toBe(false);
-    });
-
-    it('defaults to full mode when syncMode is omitted', () => {
-      // shielded not synced + no syncMode → should be false (full mode)
-      expect(isFacadeSynced(mockState({ shieldedComplete: false }))).toBe(false);
+    it.each([
+      ['shielded', { shielded: BEHIND }],
+      ['unshielded', { unshielded: txs(4n, 10n) }],
+      ['dust', { dust: BEHIND }],
+    ])('is not synced while %s is behind', (_name, p) => {
+      expect(isFacadeSynced(state(p))).toBe(false);
     });
   });
 
-  describe('lite mode', () => {
-    it('returns true when unshielded + dust are synced, even if shielded is not', () => {
-      expect(isFacadeSynced(mockState({ shieldedComplete: false }), 'lite')).toBe(true);
+  describe('lite mode (unshielded + dust)', () => {
+    it('ignores a shielded wallet that is behind', () => {
+      expect(isFacadeSynced(state({ shielded: BEHIND }), 'lite')).toBe(true);
     });
 
-    it('returns true when all three are synced', () => {
-      expect(isFacadeSynced(mockState(), 'lite')).toBe(true);
-    });
-
-    it('returns false when unshielded is not synced', () => {
-      expect(isFacadeSynced(mockState({ unshieldedComplete: false }), 'lite')).toBe(false);
-    });
-
-    it('returns false when dust is not synced', () => {
-      expect(isFacadeSynced(mockState({ dustComplete: false }), 'lite')).toBe(false);
-    });
-
-    it('returns false when both unshielded and dust are not synced', () => {
-      expect(isFacadeSynced(mockState({ unshieldedComplete: false, dustComplete: false }), 'lite')).toBe(false);
-    });
-
-    it('never evaluates shielded progress', () => {
-      const shieldedSpy = vi.fn().mockReturnValue(false);
-      const state = {
-        shielded: { state: { progress: { isStrictlyComplete: shieldedSpy } } },
-        unshielded: { progress: { isStrictlyComplete: () => true } },
-        dust: { state: { progress: { isStrictlyComplete: () => true } } },
-      } as unknown as FacadeState;
-
-      expect(isFacadeSynced(state, 'lite')).toBe(true);
-      expect(shieldedSpy).not.toHaveBeenCalled();
+    it('is not synced while dust or unshielded is behind', () => {
+      expect(isFacadeSynced(state({ dust: BEHIND }), 'lite')).toBe(false);
+      expect(isFacadeSynced(state({ unshielded: txs(4n, 10n) }), 'lite')).toBe(false);
     });
   });
 
-  describe('dust index fallback', () => {
-    it('uses appliedIndex >= highestRelevantWalletIndex when isStrictlyComplete returns false', () => {
-      const state = {
-        shielded: { state: { progress: { isStrictlyComplete: () => true } } },
-        unshielded: { progress: { isStrictlyComplete: () => true } },
-        dust: {
-          state: {
-            progress: {
-              isStrictlyComplete: () => false,
-              appliedIndex: 100,
-              highestRelevantWalletIndex: 50,
-            },
-          },
-        },
-      } as unknown as FacadeState;
-
-      expect(isFacadeSynced(state, 'full')).toBe(true);
-      expect(isFacadeSynced(state, 'lite')).toBe(true);
+  describe('no-dust mode (shielded + unshielded)', () => {
+    it('ignores a dust wallet that is behind', () => {
+      expect(isFacadeSynced(state({ dust: BEHIND }), 'no-dust')).toBe(true);
     });
 
-    it('returns false when appliedIndex < highestRelevantWalletIndex', () => {
-      const state = {
-        shielded: { state: { progress: { isStrictlyComplete: () => true } } },
-        unshielded: { progress: { isStrictlyComplete: () => true } },
-        dust: {
-          state: {
-            progress: {
-              isStrictlyComplete: () => false,
-              appliedIndex: 10,
-              highestRelevantWalletIndex: 50,
-            },
-          },
-        },
-      } as unknown as FacadeState;
-
-      expect(isFacadeSynced(state, 'full')).toBe(false);
-      expect(isFacadeSynced(state, 'lite')).toBe(false);
-    });
-
-    it('treats 0/0 dust as synced when unshielded is complete (unfunded wallet)', () => {
-      const state = {
-        shielded: { state: { progress: { isStrictlyComplete: () => true } } },
-        unshielded: { progress: { isStrictlyComplete: () => true } },
-        dust: {
-          state: {
-            progress: {
-              isStrictlyComplete: () => false,
-              appliedIndex: 0,
-              highestRelevantWalletIndex: 0,
-            },
-          },
-        },
-      } as unknown as FacadeState;
-
-      // Unshielded is synced, dust is 0/0 → unfunded wallet, nothing to sync
-      expect(isFacadeSynced(state, 'full')).toBe(true);
-      expect(isFacadeSynced(state, 'lite')).toBe(true);
-    });
-
-    it('does not use 0/0 fallback when unshielded is not yet synced', () => {
-      const state = {
-        shielded: { state: { progress: { isStrictlyComplete: () => false } } },
-        unshielded: { progress: { isStrictlyComplete: () => false } },
-        dust: {
-          state: {
-            progress: {
-              isStrictlyComplete: () => false,
-              appliedIndex: 0,
-              highestRelevantWalletIndex: 0,
-            },
-          },
-        },
-      } as unknown as FacadeState;
-
-      // Nothing is synced yet — 0/0 on dust could be initial state, not unfunded
-      expect(isFacadeSynced(state, 'full')).toBe(false);
-      expect(isFacadeSynced(state, 'lite')).toBe(false);
-    });
-
-    it('works in lite mode with shielded not synced', () => {
-      const state = {
-        shielded: { state: { progress: { isStrictlyComplete: () => false } } },
-        unshielded: { progress: { isStrictlyComplete: () => true } },
-        dust: {
-          state: {
-            progress: {
-              isStrictlyComplete: () => false,
-              appliedIndex: 100,
-              highestRelevantWalletIndex: 100,
-            },
-          },
-        },
-      } as unknown as FacadeState;
-
-      // lite: should be true (shielded ignored, dust caught up via fallback)
-      expect(isFacadeSynced(state, 'lite')).toBe(true);
-      // full: should be false (shielded not synced)
-      expect(isFacadeSynced(state, 'full')).toBe(false);
+    it('is not synced while shielded is behind', () => {
+      expect(isFacadeSynced(state({ shielded: BEHIND }), 'no-dust')).toBe(false);
     });
   });
 
-  describe('edge cases — null/undefined state fields', () => {
-    it('returns false when unshielded progress is undefined', () => {
-      const state = {
-        shielded: { state: { progress: { isStrictlyComplete: () => true } } },
-        unshielded: {},
-        dust: { state: { progress: { isStrictlyComplete: () => true } } },
-      } as unknown as FacadeState;
-
-      expect(isFacadeSynced(state, 'full')).toBe(false);
-      expect(isFacadeSynced(state, 'lite')).toBe(false);
+  describe('dust isConnected workaround', () => {
+    // The SDK only counts dust as complete once it is connected, and on an idle
+    // chain it never connects. The indices are the reliable signal.
+    it('reproduces the SDK behaviour being worked around', () => {
+      expect(indexed(50n, 50n, false).isStrictlyComplete()).toBe(false);
     });
 
-    it('returns false when dust state is undefined', () => {
-      const state = {
-        shielded: { state: { progress: { isStrictlyComplete: () => true } } },
-        unshielded: { progress: { isStrictlyComplete: () => true } },
-        dust: {},
-      } as unknown as FacadeState;
-
-      expect(isFacadeSynced(state, 'full')).toBe(false);
-      expect(isFacadeSynced(state, 'lite')).toBe(false);
+    it('counts disconnected dust as caught up when its indices are', () => {
+      const s = state({ dust: indexed(50n, 50n, false) });
+      expect(isFacadeSynced(s, 'full')).toBe(true);
+      expect(isFacadeSynced(s, 'lite')).toBe(true);
     });
 
-    it('returns false when shielded state is undefined in full mode', () => {
-      const state = {
-        shielded: {},
-        unshielded: { progress: { isStrictlyComplete: () => true } },
-        dust: { state: { progress: { isStrictlyComplete: () => true } } },
-      } as unknown as FacadeState;
-
-      expect(isFacadeSynced(state, 'full')).toBe(false);
-    });
-
-    it('returns true when shielded state is undefined in lite mode', () => {
-      const state = {
-        shielded: {},
-        unshielded: { progress: { isStrictlyComplete: () => true } },
-        dust: { state: { progress: { isStrictlyComplete: () => true } } },
-      } as unknown as FacadeState;
-
-      expect(isFacadeSynced(state, 'lite')).toBe(true);
+    it('does not count disconnected dust that is genuinely behind', () => {
+      expect(isFacadeSynced(state({ dust: indexed(10n, 50n, false) }), 'lite')).toBe(false);
     });
   });
 
-  describe('edge cases — isStrictlyComplete throws', () => {
-    it('propagates dust isStrictlyComplete throw (not silently caught)', () => {
-      const state = {
-        shielded: { state: { progress: { isStrictlyComplete: () => true } } },
-        unshielded: { progress: { isStrictlyComplete: () => true } },
-        dust: {
-          state: {
-            progress: {
-              isStrictlyComplete: () => { throw new Error('corrupted'); },
-            },
-          },
-        },
-      } as unknown as FacadeState;
+  describe('wallets with no events yet (0/0)', () => {
+    const untouched = indexed(0n, 0n, false);
 
-      // isStrictlyComplete throwing is not caught — it propagates.
-      // Only the fallback index check is wrapped in try-catch.
-      expect(() => isFacadeSynced(state, 'full')).toThrow('corrupted');
-      expect(() => isFacadeSynced(state, 'lite')).toThrow('corrupted');
+    it('treats untouched dust as caught up once unshielded is synced (unfunded wallet)', () => {
+      expect(isFacadeSynced(state({ dust: untouched }), 'lite')).toBe(true);
     });
+
+    it('does not trust untouched dust before unshielded has synced (could be the initial state)', () => {
+      expect(isFacadeSynced(state({ dust: untouched, unshielded: txs(0n, 10n) }), 'lite')).toBe(false);
+    });
+
+    it('treats an untouched shielded wallet as caught up once unshielded is synced', () => {
+      expect(isFacadeSynced(state({ shielded: untouched }), 'full')).toBe(true);
+    });
+
+    it('does not trust an untouched shielded wallet before unshielded has synced', () => {
+      expect(isFacadeSynced(state({ shielded: untouched, unshielded: txs(0n, 10n) }), 'no-dust')).toBe(false);
+    });
+  });
+});
+
+describe('detectStaleCache', () => {
+  it('flags a cache that has applied transactions the chain does not have', () => {
+    expect(detectStaleCache(state({ unshielded: txs(120n, 40n) }))).toBe(
+      'unshielded cache applied=120 but chain highest=40.',
+    );
+  });
+
+  it('accepts a cache that is behind or level with the chain', () => {
+    expect(detectStaleCache(state({ unshielded: txs(40n, 120n) }))).toBeUndefined();
+    expect(detectStaleCache(state({ unshielded: txs(40n, 40n) }))).toBeUndefined();
+  });
+
+  it('makes no judgement before the indexer has reported a highest id', () => {
+    expect(detectStaleCache(state({ unshielded: txs(120n, 0n) }))).toBeUndefined();
   });
 });

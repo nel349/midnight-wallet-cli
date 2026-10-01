@@ -1,24 +1,18 @@
 // Address derivation helper — wraps HD derivation + keystore + PublicKey
 // into a single call returning the bech32m address string.
 
-import { HDWallet, Roles } from '@midnight-ntwrk/wallet-sdk-hd';
-import { createKeystore, PublicKey } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
+import { HDWallet, Roles } from '@midnightntwrk/wallet-sdk/hd';
+import { createKeystore, PublicKey } from '@midnightntwrk/wallet-sdk/unshielded';
 import {
   MidnightBech32m,
   ShieldedAddress,
   ShieldedCoinPublicKey,
   ShieldedEncryptionPublicKey,
-} from '@midnight-ntwrk/wallet-sdk-address-format';
-import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+} from '@midnightntwrk/wallet-sdk/address-format';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import { type NetworkName, getValidNetworkNames } from './network.ts';
 import { deriveShieldedSeed } from './derivation.ts';
-
-const NETWORK_ID_MAP: Record<NetworkName, NetworkId.NetworkId> = {
-  preprod: NetworkId.NetworkId.PreProd,
-  preview: NetworkId.NetworkId.Preview,
-  undeployed: NetworkId.NetworkId.Undeployed,
-};
+import { networkIdForName } from './network-id.ts';
 
 /**
  * Derive an unshielded address from a seed buffer, network, and optional key index.
@@ -31,7 +25,7 @@ export function deriveUnshieldedAddress(
   networkName: NetworkName,
   keyIndex: number = 0,
 ): string {
-  const networkId = NETWORK_ID_MAP[networkName];
+  const networkId = networkIdForName(networkName);
 
   const hdResult = HDWallet.fromSeed(seedBuffer);
   if (hdResult.type !== 'seedOk') {
@@ -47,7 +41,7 @@ export function deriveUnshieldedAddress(
     throw new Error(`Key index ${keyIndex} out of bounds`);
   }
 
-  const keystore = createKeystore(derivation.key, networkId);
+  const keystore = createKeystore({ kind: 'schnorr', secret: derivation.key }, networkId);
   const publicKey = PublicKey.fromKeyStore(keystore);
   return publicKey.address;
 }
@@ -80,7 +74,7 @@ export function deriveAllShieldedAddresses(
   const address = deriveShieldedAddress(seedBuffer);
   const out = {} as Record<NetworkName, string>;
   for (const name of getValidNetworkNames()) {
-    const networkId = NETWORK_ID_MAP[name as NetworkName];
+    const networkId = networkIdForName(name as NetworkName);
     out[name as NetworkName] = MidnightBech32m.encode(networkId, address).asString();
   }
   return out;

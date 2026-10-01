@@ -12,7 +12,7 @@
 // The batched replay keeps the working set bounded (~155MB even on preview),
 // unlike the SDK's cold sync.
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 
 import { subscribeGraphqlWs } from './graphql-ws-subscription.ts';
 

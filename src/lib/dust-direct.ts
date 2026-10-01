@@ -10,7 +10,7 @@
 // the cosmetic `isConnected` flag.
 
 import WebSocket from 'ws';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import { collapseForeignGenerations } from './dust-collapse.ts';
 import {
   INITIAL_NIGHT_DUST_RATIO,

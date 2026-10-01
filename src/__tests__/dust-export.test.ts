@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import { overlayDustDirectSnapshot } from '../lib/facade.ts';
 import type { DustCacheEntry } from '../lib/dust-direct-cache.ts';
 import { DUST_STATE_OWNED_HEX } from './fixtures/dust-state-owned.ts';
@@ -95,6 +95,8 @@ const EXPORT_NETWORK: NetworkConfig = {
   node: 'ws://test/node', proofServer: 'http://test/proof', networkId: 'Undeployed',
 };
 const EXPORT_SEED = Buffer.from('11'.repeat(32), 'hex');
+/** The chain answers as a ledger-9 localnet (keeps the ledger guard off the network). */
+const LEDGER9_PROTOCOL = async () => 2001000n;
 
 let EXPORT_TMP: string;
 beforeEach(() => { EXPORT_TMP = mkdtempSync(join(tmpdir(), 'mn-export-test-')); });
@@ -110,7 +112,7 @@ function fakeDust(state: ledger.DustLocalState, over: Partial<DustDirectResult> 
 }
 
 function fakeRepo(result: DustDirectResult): WalletDataRepository {
-  return new WalletDataRepository({
+  return new WalletDataRepository({ fetchProtocolVersion: LEDGER9_PROTOCOL,
     now: () => 1_000_000,
     fetchTip: async () => 'tip-A',
     fetchChainId: async () => null,           // skip the node RPC (offline)

@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 
 import {
   loadDustCache,
@@ -130,6 +130,19 @@ describe('dust-direct cache: invalidation', () => {
     data.version = 1;
     delete data.ownedGenerationIndices;
     delete data.generationFrontier;
+    fs.writeFileSync(filePath, JSON.stringify(data));
+
+    expect(loadDustCache(NETWORK, pubkey, CACHE_DIR)).toBeNull();
+  });
+
+  it('invalidates a cache written by ledger-8 mn (v2) so a ledger-9 chain re-syncs', () => {
+    // Dev-preset localnets share a genesis hash, so only the version keeps a
+    // ledger-8 cache from being replayed onto a ledger-9 chain.
+    const pubkey = testDustPubkeyHex();
+    saveDustCache(NETWORK, pubkey, freshDustState(), 5, CACHE_DIR);
+    const filePath = getDustCachePath(NETWORK, pubkey, CACHE_DIR);
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    data.version = 2;
     fs.writeFileSync(filePath, JSON.stringify(data));
 
     expect(loadDustCache(NETWORK, pubkey, CACHE_DIR)).toBeNull();

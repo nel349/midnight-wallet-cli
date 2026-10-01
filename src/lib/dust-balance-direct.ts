@@ -16,9 +16,9 @@
 // the initial constants are used. A `ParamChange` on-chain would require a full
 // sync to pick up — acceptable for a fast balance read.
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
-import { DustAddress } from '@midnight-ntwrk/wallet-sdk-address-format';
-import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
+import * as ledger from '@midnightntwrk/ledger-v9';
+import { DustAddress } from '@midnightntwrk/wallet-sdk/address-format';
+import { NetworkId } from '@midnightntwrk/wallet-sdk';
 
 import {
   INITIAL_NIGHT_DUST_RATIO,

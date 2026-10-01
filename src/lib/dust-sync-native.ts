@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 
 import { MIDNIGHT_DIR, CACHE_DIR_NAME, DIR_MODE, FILE_MODE } from './constants.ts';
 import { deriveDustSeed } from './derivation.ts';
@@ -76,7 +76,17 @@ function createRequire(url: string) {
 }
 
 /** True when the native sidecar should be used (binary resolves + not disabled). */
+/**
+ * The ledger the sidecar binary is built against. It replays dust events with
+ * its own copy of the ledger, so it can only serve a chain on the same ledger.
+ * No ledger-9 `midnight-ledger` crate is published yet.
+ */
+const SIDECAR_LEDGER: number = 8;
+/** The ledger this build of mn targets. */
+const MN_LEDGER: number = 9;
+
 export function nativeDustSyncAvailable(): boolean {
+  if (SIDECAR_LEDGER !== MN_LEDGER) return false;
   if (process.env.MN_DISABLE_NATIVE_DUST === '1') return false;
   return resolveSidecarBinary() !== null;
 }
@@ -205,7 +215,10 @@ export function runDustSyncNative(
     child.on('error', (err) => { opts.signal?.removeEventListener('abort', onAbort); reject(err); });
     child.on('close', (code) => {
       opts.signal?.removeEventListener('abort', onAbort);
-      if (code !== 0 && !existsSync(out)) {
+      // The sidecar answers SIGINT itself (checkpoint, then exit 0), so any
+      // other exit is a failure, whatever is left at `out`. That file may be our
+      // own seed checkpoint or one the dead run never finished.
+      if (code !== 0) {
         reject(new Error(`dust-sync exited ${code}: ${stderrTail.trim().slice(-300)}`));
         return;
       }

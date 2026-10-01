@@ -7,7 +7,7 @@ import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
-import { suppressSdkTransientErrors, waitForDustAvailable } from '../lib/facade.ts';
+import { hasDustAvailable, suppressSdkTransientErrors, waitForDustAvailable } from '../lib/facade.ts';
 import { saveWalletCache } from '../lib/wallet-cache.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
@@ -87,7 +87,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     // On preprod this can take 10-30s after sync completes.
     const dustSpinner = startSpinner('Waiting for dust...');
     const dustState = await waitForDustAvailable(bundle);
-    const hasDust = (dustState.dust as any)?.availableCoins?.length > 0;
+    const hasDust = hasDustAvailable(dustState);
     dustSpinner.stop(hasDust ? 'Dust ready' : 'Dust not yet available (writes may fail)');
 
     // Save cache after successful sync (checkpoint before opening RPC).

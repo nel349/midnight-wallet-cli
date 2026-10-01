@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import { computeForeignRanges, collapseForeignGenerations } from '../lib/dust-collapse.ts';
 import { DUST_STATE_OWNED_HEX } from './fixtures/dust-state-owned.ts';
 

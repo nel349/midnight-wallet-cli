@@ -243,6 +243,41 @@ describe('approval', () => {
       Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
     });
 
+    describe('fee-only policy (--approve-fees)', () => {
+      // Every case runs non-interactively: an agent can't answer a prompt,
+      // so anything the policy doesn't approve must be rejected outright.
+      let origIsTTY: boolean | undefined;
+      beforeEach(() => {
+        origIsTTY = process.stdin.isTTY;
+        Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      });
+      afterEach(() => {
+        Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+      });
+
+      it.each(['balanceUnsealedTransaction', 'balanceSealedTransaction', 'submitTransaction'])(
+        'auto-approves a fee-only %s and says why',
+        async (method) => {
+          const result = await promptApproval({ ...baseRequest, method, feeOnly: true }, { approveFees: true });
+          expect(result).toBe('approve');
+          expect(stripAnsi(stderrOutput.join(''))).toContain(`Auto-approved (fee-only): ${method}`);
+        },
+      );
+
+      it.each(['makeTransfer', 'makeIntent', 'signData', 'submitTransaction', 'balanceUnsealedTransaction'])(
+        'rejects %s when it is not fee-only',
+        async (method) => {
+          const result = await promptApproval({ ...baseRequest, method }, { approveFees: true });
+          expect(result).toBe('reject');
+        },
+      );
+
+      it('grants nothing from a fee-only request when the server was not started with --approve-fees', async () => {
+        const result = await promptApproval({ ...baseRequest, method: 'submitTransaction', feeOnly: true }, {});
+        expect(result).toBe('reject');
+      });
+    });
+
     it('rejects when stdin is not a TTY', async () => {
       const origIsTTY = process.stdin.isTTY;
       Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });

@@ -1,4 +1,4 @@
-import { HDWallet, Roles } from '@midnight-ntwrk/wallet-sdk-hd';
+import { HDWallet, Roles } from '@midnightntwrk/wallet-sdk/hd';
 
 /**
  * Derive a key from the HD wallet for a given role.

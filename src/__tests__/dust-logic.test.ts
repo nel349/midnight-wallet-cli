@@ -6,6 +6,17 @@ import * as rx from 'rxjs';
 
 import { isDustRelatedError, ensureDust, registerNightUtxos } from '../lib/transfer.ts';
 import type { FacadeBundle } from '../lib/facade.ts';
+import type { DustAddress } from '@midnightntwrk/wallet-sdk/address-format';
+import type { UtxoWithMeta } from '@midnightntwrk/wallet-sdk/facade';
+
+// Opaque sentinels: the code under test only passes these through to the SDK,
+// so identity is what the assertions check.
+const DUST_ADDRESS = { sentinel: 'dust-address' } as unknown as DustAddress;
+const VERIFYING_KEY = { tag: 'schnorr', value: 'ab'.repeat(32) };
+const NIGHT_UTXO = {
+  utxo: { value: 1_000_000n },
+  meta: { registeredForDustGeneration: false, ctime: new Date(0) },
+} as unknown as UtxoWithMeta;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -37,7 +48,7 @@ function mockState(opts: {
     isSynced: true,
     dust: {
       balance: () => dustBal,
-      address: 'mock-dust-address',
+      address: DUST_ADDRESS,
       availableCoins,
     },
     unshielded: {
@@ -57,9 +68,10 @@ function createBundleStub(overrides?: {
   stateFn?: () => rx.Observable<any>;
   waitForSyncedStateFn?: () => Promise<any>;
   dustWaitForSyncedState?: () => Promise<void>;
-  dustCreateTx?: () => Promise<any>;
-  dustAddSignature?: () => Promise<any>;
-  finalizeTransaction?: () => Promise<any>;
+  registerNightUtxos?: (...args: any[]) => Promise<any>;
+  estimateRegistration?: (...args: any[]) => Promise<any>;
+  waitForGeneratedDust?: (...args: any[]) => Promise<void>;
+  finalizeRecipe?: () => Promise<any>;
   submitTransaction?: () => Promise<string>;
 }): FacadeBundle {
   const defaultStateFn = () => rx.of(mockState({ dustBalance: 0n }));
@@ -77,20 +89,19 @@ function createBundleStub(overrides?: {
       stop: vi.fn().mockResolvedValue(undefined),
       dust: {
         waitForSyncedState: overrides?.dustWaitForSyncedState ?? vi.fn().mockResolvedValue(undefined),
-        createDustGenerationTransaction: overrides?.dustCreateTx ?? vi.fn().mockResolvedValue({
-          intents: new Map([[1, { signatureData: () => new Uint8Array(32) }]]),
-        }),
-        addDustGenerationSignature: overrides?.dustAddSignature ?? vi.fn().mockResolvedValue({ signed: true }),
       },
-      finalizeTransaction: overrides?.finalizeTransaction ?? vi.fn().mockResolvedValue({ finalized: true }),
+      registerNightUtxosForDustGeneration: overrides?.registerNightUtxos
+        ?? vi.fn().mockResolvedValue({ type: 'UNPROVEN_TRANSACTION' }),
+      estimateRegistration: overrides?.estimateRegistration
+        ?? vi.fn().mockResolvedValue({ fee: 0n, dustGenerationEstimations: [] }),
+      waitForGeneratedDust: overrides?.waitForGeneratedDust ?? vi.fn().mockResolvedValue(undefined),
+      finalizeRecipe: overrides?.finalizeRecipe ?? vi.fn().mockResolvedValue({ finalized: true }),
       submitTransaction: overrides?.submitTransaction ?? vi.fn().mockResolvedValue('mock-tx-hash-001'),
     },
     keystore: {
-      signData: vi.fn().mockReturnValue(new Uint8Array(64)),
-      getPublicKey: vi.fn().mockReturnValue(new Uint8Array(32)),
+      signDataAsync: vi.fn().mockResolvedValue({ tag: 'schnorr', value: '00' }),
+      getPublicKey: vi.fn().mockReturnValue(VERIFYING_KEY),
     },
-    zswapSecretKeys: {} as any,
-    dustSecretKey: {} as any,
   } as unknown as FacadeBundle;
 }
 
@@ -103,6 +114,12 @@ describe('isDustRelatedError', () => {
 
   it('detects "dust generated" message', () => {
     expect(isDustRelatedError(new Error('dust generated capacity too low'))).toBe(true);
+  });
+
+  it('detects wallet-sdk 2.0\'s registration-fee shortfall (verbatim from a ledger-9 localnet run)', () => {
+    const sdkMessage = 'Insufficient generated dust to cover registration fee (have 429884000000000, need 510620549476299). '
+      + 'Use WalletFacade.waitForGeneratedDust(utxos, 510620549476299) before retrying.';
+    expect(isDustRelatedError(new Error(sdkMessage))).toBe(true);
   });
 
   it('detects "Insufficient funds" message (case-insensitive)', () => {
@@ -178,23 +195,23 @@ describe('ensureDust', () => {
   });
 
   it('does not call registration when dust is available and all UTXOs registered', async () => {
-    const dustCreateTx = vi.fn();
+    const registerSpy = vi.fn();
     const bundle = createBundleStub({
       stateFn: () => rx.of(mockState({ dustBalance: 500n, registeredUtxos: 2 })),
-      dustCreateTx,
+      registerNightUtxos: registerSpy,
     });
 
     await ensureDust(bundle);
 
     // No unregistered UTXOs and dust available → return immediately
-    expect(dustCreateTx).not.toHaveBeenCalled();
+    expect(registerSpy).not.toHaveBeenCalled();
   });
 
   it('skips registration when dust is available even with unregistered UTXOs', async () => {
-    const dustCreateTx = vi.fn();
+    const registerSpy = vi.fn();
     const bundle = createBundleStub({
       stateFn: () => rx.of(mockState({ dustBalance: 500n, unregisteredUtxos: 2 })),
-      dustCreateTx,
+      registerNightUtxos: registerSpy,
     });
 
     const statuses: string[] = [];
@@ -202,7 +219,7 @@ describe('ensureDust', () => {
 
     // Should skip registration to avoid burning dust on unnecessary registration tx
     expect(result.alreadyAvailable).toBe(true);
-    expect(dustCreateTx).not.toHaveBeenCalled();
+    expect(registerSpy).not.toHaveBeenCalled();
     expect(statuses).toContain('Dust available');
   });
 
@@ -238,7 +255,7 @@ describe('ensureDust', () => {
   });
 
   it('waits for dust when all UTXOs already registered', async () => {
-    const dustCreateTx = vi.fn();
+    const registerSpy = vi.fn();
 
     // First poll: no dust. Second poll (after 5s): dust available.
     let callCount = 0;
@@ -249,7 +266,7 @@ describe('ensureDust', () => {
         if (callCount <= 1) return mockState({ dustBalance: 0n, registeredUtxos: 2 });
         return mockState({ dustBalance: 100n, registeredUtxos: 2 });
       },
-      dustCreateTx,
+      registerNightUtxos: registerSpy,
     });
 
     const statuses: string[] = [];
@@ -264,16 +281,16 @@ describe('ensureDust', () => {
     expect(result.txHash).toBeUndefined();
     expect(statuses).toContain('UTXOs already registered, waiting for dust generation...');
     expect(statuses).toContain('Dust available');
-    expect(dustCreateTx).not.toHaveBeenCalled();
+    expect(registerSpy).not.toHaveBeenCalled();
   });
 
   it('returns immediately when balance positive but no available coins', async () => {
-    const dustCreateTx = vi.fn();
+    const registerSpy = vi.fn();
     // balance > 0 but availableCoins is empty — dust exists (pending),
     // skip registration to avoid burning dust fees
     const bundle = createBundleStub({
       stateFn: () => rx.of(mockState({ dustBalance: 500n, availableDustCoins: 0 })),
-      dustCreateTx,
+      registerNightUtxos: registerSpy,
     });
 
     const statuses: string[] = [];
@@ -282,14 +299,12 @@ describe('ensureDust', () => {
     expect(result.alreadyAvailable).toBe(true);
     expect(result.txHash).toBeUndefined();
     expect(statuses).toContain('Dust available');
-    expect(dustCreateTx).not.toHaveBeenCalled();
+    expect(registerSpy).not.toHaveBeenCalled();
   });
 
   it('skips UTXOs already registered for dust generation', async () => {
     const submitTransaction = vi.fn().mockResolvedValue('only-unreg-tx');
-    const dustCreateTx = vi.fn().mockResolvedValue({
-      intents: new Map([[1, { signatureData: () => new Uint8Array(32) }]]),
-    });
+    const registerSpy = vi.fn().mockResolvedValue({ type: 'UNPROVEN_TRANSACTION' });
 
     // 2 registered + 1 unregistered — first poll: no dust, second: dust available
     let callCount = 0;
@@ -301,7 +316,7 @@ describe('ensureDust', () => {
         return mockState({ dustBalance: 200n, registeredUtxos: 3 });
       },
       submitTransaction,
-      dustCreateTx,
+      registerNightUtxos: registerSpy,
     });
 
     const statuses: string[] = [];
@@ -310,9 +325,18 @@ describe('ensureDust', () => {
     // Let registration complete, then advance past the 5s poll interval
     await vi.advanceTimersByTimeAsync(6_000);
 
-    await promise;
+    const result = await promise;
 
-    // Only 1 unregistered UTXO should be registered
+    // Exactly the one unregistered UTXO goes to the SDK, signed with the
+    // wallet's own key and paid to the wallet's own dust address.
+    expect(registerSpy).toHaveBeenCalledTimes(1);
+    const [utxos, verifyingKey, signer, receiver] = registerSpy.mock.calls[0]!;
+    expect(utxos).toHaveLength(1);
+    expect(utxos[0].meta.registeredForDustGeneration).toBe(false);
+    expect(verifyingKey).toBe(VERIFYING_KEY);
+    expect(signer).toBe(bundle.keystore.signDataAsync);
+    expect(receiver).toBe(DUST_ADDRESS);
+    expect(result.txHash).toBe('only-unreg-tx');
     expect(statuses).toContain('Registering 1 UTXO(s) for dust generation...');
   });
 });
@@ -328,15 +352,41 @@ describe('registerNightUtxos', () => {
     vi.useRealTimers();
   });
 
-  it('succeeds on first attempt', async () => {
-    const bundle = createBundleStub({
-      submitTransaction: vi.fn().mockResolvedValue('reg-tx-hash-001'),
-    });
+  it('succeeds on first attempt: proves the SDK recipe, then submits the proven tx', async () => {
+    const recipe = { type: 'UNPROVEN_TRANSACTION' };
+    const finalized = { finalized: true };
+    const registerSpy = vi.fn().mockResolvedValue(recipe);
+    const finalizeRecipe = vi.fn().mockResolvedValue(finalized);
+    const submitTransaction = vi.fn().mockResolvedValue('reg-tx-hash-001');
+    const bundle = createBundleStub({ registerNightUtxos: registerSpy, finalizeRecipe, submitTransaction });
 
-    const dustUtxos = [{ value: 1000000n, ctime: new Date() }] as any;
-    const result = await registerNightUtxos(bundle, dustUtxos, 'mock-dust-addr');
+    const nightUtxos = [NIGHT_UTXO];
+    const result = await registerNightUtxos(bundle, nightUtxos, DUST_ADDRESS);
 
     expect(result).toBe('reg-tx-hash-001');
+    expect(registerSpy).toHaveBeenCalledWith(nightUtxos, VERIFYING_KEY, bundle.keystore.signDataAsync, DUST_ADDRESS);
+    expect(finalizeRecipe).toHaveBeenCalledWith(recipe);
+    expect(submitTransaction).toHaveBeenCalledWith(finalized);
+  });
+
+  it('waits for the coins to generate the estimated fee before registering them', async () => {
+    const calls: string[] = [];
+    const estimateRegistration = vi.fn(async () => { calls.push('estimate'); return { fee: 777n, dustGenerationEstimations: [] }; });
+    const waitForGeneratedDust = vi.fn(async () => { calls.push('wait'); });
+    const registerSpy = vi.fn(async () => { calls.push('register'); return { type: 'UNPROVEN_TRANSACTION' }; });
+    const bundle = createBundleStub({ estimateRegistration, waitForGeneratedDust, registerNightUtxos: registerSpy });
+
+    const nightUtxos = [NIGHT_UTXO];
+    await registerNightUtxos(bundle, nightUtxos, DUST_ADDRESS);
+
+    expect(calls).toEqual(['estimate', 'wait', 'register']);
+    expect(estimateRegistration).toHaveBeenCalledWith(nightUtxos);
+    const [waitUtxos, required, opts] = waitForGeneratedDust.mock.calls[0] as unknown as [unknown, bigint, { timeoutMs: number }];
+    expect(waitUtxos).toBe(nightUtxos);
+    expect(required).toBe(777n);
+    // Bounded by the registration deadline, never unbounded.
+    expect(opts.timeoutMs).toBeGreaterThan(0);
+    expect(opts.timeoutMs).toBeLessThanOrEqual(10 * 60 * 1000);
   });
 
   it('retries on dust-related error (error 138), then succeeds', async () => {
@@ -346,10 +396,10 @@ describe('registerNightUtxos', () => {
 
     const bundle = createBundleStub({ submitTransaction });
 
-    const dustUtxos = [{ value: 1000000n, ctime: new Date() }] as any;
+    const nightUtxos = [NIGHT_UTXO];
     const statuses: string[] = [];
 
-    const promise = registerNightUtxos(bundle, dustUtxos, 'mock-dust-addr', (s) => statuses.push(s));
+    const promise = registerNightUtxos(bundle, nightUtxos, DUST_ADDRESS, (s) => statuses.push(s));
 
     // Advance past the 15-second retry delay
     await vi.advanceTimersByTimeAsync(15_000);
@@ -367,10 +417,10 @@ describe('registerNightUtxos', () => {
 
     const bundle = createBundleStub({ submitTransaction });
 
-    const dustUtxos = [{ value: 1000000n, ctime: new Date() }] as any;
+    const nightUtxos = [NIGHT_UTXO];
 
     await expect(
-      registerNightUtxos(bundle, dustUtxos, 'mock-dust-addr')
+      registerNightUtxos(bundle, nightUtxos, DUST_ADDRESS)
     ).rejects.toThrow('Network connection refused');
 
     expect(submitTransaction).toHaveBeenCalledTimes(1);
@@ -383,9 +433,9 @@ describe('registerNightUtxos', () => {
 
     const bundle = createBundleStub({ submitTransaction });
 
-    const dustUtxos = [{ value: 1000000n, ctime: new Date() }] as any;
+    const nightUtxos = [NIGHT_UTXO];
 
-    const promise = registerNightUtxos(bundle, dustUtxos, 'mock-dust-addr');
+    const promise = registerNightUtxos(bundle, nightUtxos, DUST_ADDRESS);
     await vi.advanceTimersByTimeAsync(15_000);
 
     const result = await promise;
@@ -400,9 +450,9 @@ describe('registerNightUtxos', () => {
 
     const bundle = createBundleStub({ submitTransaction });
 
-    const dustUtxos = [{ value: 1000000n, ctime: new Date() }] as any;
+    const nightUtxos = [NIGHT_UTXO];
 
-    const promise = registerNightUtxos(bundle, dustUtxos, 'mock-dust-addr');
+    const promise = registerNightUtxos(bundle, nightUtxos, DUST_ADDRESS);
     await vi.advanceTimersByTimeAsync(15_000);
 
     const result = await promise;
@@ -419,9 +469,9 @@ describe('registerNightUtxos', () => {
 
     const bundle = createBundleStub({ submitTransaction });
 
-    const dustUtxos = [{ value: 1000000n, ctime: new Date() }] as any;
+    const nightUtxos = [NIGHT_UTXO];
 
-    const promise = registerNightUtxos(bundle, dustUtxos, 'mock-dust-addr');
+    const promise = registerNightUtxos(bundle, nightUtxos, DUST_ADDRESS);
 
     // Register the rejection handler BEFORE advancing timers so the rejection
     // is caught immediately when it happens (avoids unhandled rejection warning).

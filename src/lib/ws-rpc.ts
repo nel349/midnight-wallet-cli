@@ -2,7 +2,7 @@
 // Transport layer for the DApp Connector — dispatches RPC calls to handler functions
 
 import { WebSocketServer, WebSocket } from 'ws';
-import type { ErrorCode, APIError } from '@midnight-ntwrk/dapp-connector-api';
+import type { ErrorCode, APIError } from '@midnightntwrk/dapp-connector-api';
 
 // ── JSON-RPC 2.0 types ──
 

@@ -29,6 +29,25 @@ export function isTransactionRejectedError(err: any): boolean {
 }
 
 /**
+ * The wallet ran out of dust to pay a fee, which waiting for dust can fix.
+ * wallet-sdk 2.0 raises a tagged `Wallet.InsufficientFunds` with
+ * `tokenType: 'dust'`, possibly wrapped as a cause. A shortage of any other
+ * token is not this. The ledger-8 SDK said "No dust tokens" or "dust ... unavailable".
+ */
+export function isDustShortage(err: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const e = current as { _tag?: unknown; tokenType?: unknown; message?: unknown; cause?: unknown };
+    if (e._tag === 'Wallet.InsufficientFunds' && e.tokenType === 'dust') return true;
+    if (typeof e.message === 'string' && /no dust tokens|dust.*unavailable/i.test(e.message)) return true;
+    current = e.cause;
+  }
+  return false;
+}
+
+/**
  * Dust-related — the SDK throws various messages when dust capacity is too
  * low to pay fees. All of these are retryable by waiting for dust generation
  * capacity to grow.
@@ -37,6 +56,7 @@ export function isDustRelatedError(err: any): boolean {
   const msg = err?.message?.toLowerCase() ?? '';
   return msg.includes('not enough dust') ||
     msg.includes('dust generated') ||
+    msg.includes('insufficient generated dust') ||
     msg.includes('insufficient funds') ||
     msg.includes('no dust tokens') ||
     isTransactionRejectedError(err);
