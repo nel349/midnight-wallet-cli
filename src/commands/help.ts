@@ -82,7 +82,7 @@ const COMMAND_SPECS: CommandSpec[] = [
     jsonFields: {
       address: 'Generated wallet address (bech32m)',
       network: 'Network name',
-      seed: 'Hex-encoded 32-byte seed',
+      seed: 'Hex-encoded seed (32-byte raw, or 64-byte if mnemonic-derived)',
       mnemonic: 'BIP-39 mnemonic (24 words, only if generated or provided)',
       file: 'Path where wallet file was saved',
       createdAt: 'ISO 8601 creation timestamp',
@@ -244,7 +244,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       'status              Check dust registration; if registered, also shows dust balance',
       'export              Fast-sync dust and emit a restorable snapshot (dustSerializedState)',
       '--wallet <name|file> Wallet name or path',
-      '--seed <hex>          32-byte hex seed (export only; or set MN_SEED env to keep it off argv)',
+      '--seed <hex>          32- or 64-byte hex seed (export only; or set MN_SEED env to keep it off argv)',
       '--proof-server <url>  Override proof server URL (register only)',
       '--node <url>          Override substrate node RPC URL (register only)',
       '--indexer-ws <url>    Override indexer WebSocket URL',

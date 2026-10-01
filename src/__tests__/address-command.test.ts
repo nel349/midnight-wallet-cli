@@ -143,18 +143,18 @@ describe('address command — error handling', () => {
   it('throws for an invalid MN_SEED', async () => {
     process.env.MN_SEED = 'aabb';
     const args = parseArgs(['address', '--network', 'undeployed']);
-    await expect(addressCommand(args)).rejects.toThrow('64-character hex string');
+    await expect(addressCommand(args)).rejects.toThrow('64 or 128 hex characters');
     await expect(addressCommand(args)).rejects.toThrow('MN_SEED');
   });
 
   it('throws for non-hex seed', async () => {
     const args = parseArgs(['address', '--seed', 'not-a-hex-string-at-all!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!', '--network', 'undeployed']);
-    await expect(addressCommand(args)).rejects.toThrow('64-character hex string');
+    await expect(addressCommand(args)).rejects.toThrow('64 or 128 hex characters');
   });
 
   it('throws for short seed', async () => {
     const args = parseArgs(['address', '--seed', 'aabb', '--network', 'undeployed']);
-    await expect(addressCommand(args)).rejects.toThrow('64-character hex string');
+    await expect(addressCommand(args)).rejects.toThrow('64 or 128 hex characters');
   });
 
   it('throws for negative key index', async () => {

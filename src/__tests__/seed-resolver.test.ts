@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { parseArgs } from '../lib/argv.ts';
-import { resolveSeedSource, resolveSeed } from '../lib/seed-resolver.ts';
+import { parseSeedHex, resolveSeedSource, resolveSeed } from '../lib/seed-resolver.ts';
 
 const SEED_A = '11'.repeat(32);
 const SEED_B = '22'.repeat(32);
@@ -22,6 +22,38 @@ function walletFile(seedHex: string): string {
   return p;
 }
 const argsFor = (extra: string[]) => parseArgs(['balance', ...extra]);
+
+describe('parseSeedHex', () => {
+  it('parses a 64-hex string to the exact 32 bytes', () => {
+    const b = parseSeedHex('ab'.repeat(32), '--seed');
+    expect(b.length).toBe(32);
+    expect(b.toString('hex')).toBe('ab'.repeat(32));
+  });
+
+  it('parses a 128-hex string to the exact 64 bytes', () => {
+    const b = parseSeedHex('cd'.repeat(64), '--seed');
+    expect(b.length).toBe(64);
+    expect(b.toString('hex')).toBe('cd'.repeat(64));
+  });
+
+  it('strips 0x and surrounding whitespace before the length check', () => {
+    expect(parseSeedHex(`0x${'ee'.repeat(64)}\n`, '--seed').toString('hex')).toBe('ee'.repeat(64));
+  });
+
+  it.each([
+    ['empty', ''],
+    ['too short', 'aabb'],
+    ['between the two sizes', 'ff'.repeat(48)],
+    ['too long', 'ff'.repeat(65)],
+    ['right length, non-hex', 'zz'.repeat(32)],
+  ])('rejects %s with the sizes it does accept', (_name, input) => {
+    expect(() => parseSeedHex(input, '--seed')).toThrow(/64 or 128 hex characters/);
+  });
+
+  it('names the offending source in the error', () => {
+    expect(() => parseSeedHex('aabb', 'MN_SEED')).toThrow(/^MN_SEED /);
+  });
+});
 
 describe('resolveSeedSource', () => {
   it('reads --seed, with no backing wallet file/config', () => {
@@ -51,7 +83,18 @@ describe('resolveSeedSource', () => {
   });
 
   it('rejects a bad-length --seed', () => {
-    expect(() => resolveSeedSource(argsFor(['--seed', 'aabb']))).toThrow(/64-character hex string/);
+    expect(() => resolveSeedSource(argsFor(['--seed', 'aabb']))).toThrow(/64 or 128 hex characters/);
+  });
+
+  it('accepts a 128-hex (64-byte BIP-39) --seed', () => {
+    const seed64 = '33'.repeat(64);
+    const r = resolveSeedSource(argsFor(['--seed', seed64]));
+    expect(r.seed.length).toBe(64);
+    expect(r.seed.toString('hex')).toBe(seed64);
+  });
+
+  it('rejects in-between lengths (only 32- and 64-byte seeds occur)', () => {
+    expect(() => resolveSeedSource(argsFor(['--seed', '44'.repeat(48)]))).toThrow(/64 or 128 hex characters/);
   });
 
   it('names MN_SEED in the error when MN_SEED is the bad source', () => {

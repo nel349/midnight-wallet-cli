@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mnemonicToSeedSync } from '@scure/bip39';
 import generateCommand from '../commands/generate.ts';
 import { loadWalletConfig } from '../lib/wallet-config.ts';
 import { parseArgs } from '../lib/argv.ts';
@@ -92,6 +93,32 @@ describe('generate command — seed mode', () => {
     expect(config1.seed).toBe(config2.seed);
   });
 
+  it('accepts a 64-byte BIP-39 seed and matches the mnemonic-derived wallet', async () => {
+    // Cross-check guarantee: a wallet generated elsewhere from a mnemonic
+    // (64-byte PBKDF2 seed) can be reproduced here from its seed hex alone.
+    // Uses the canonical BIP-39 test vector so the expected seed and the
+    // derived address are pinned — a change in either means derivation drift.
+    const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const seedHex = Buffer.from(mnemonicToSeedSync(mnemonic)).toString('hex');
+    expect(seedHex).toBe(
+      '5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc1' +
+      '9a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4'
+    );
+
+    const fromSeed = path.join(TEST_DIR, 'from-seed.json');
+    const fromMnemonic = path.join(TEST_DIR, 'from-mnemonic.json');
+    await generateCommand(parseArgs(['generate', '--network', 'preview', '--seed', seedHex, '--output', fromSeed]));
+    await generateCommand(parseArgs(['generate', '--network', 'preview', '--mnemonic', mnemonic, '--output', fromMnemonic]));
+
+    // Golden vector (m/44'/2400'/0'/NightExternal/0 from the seed above):
+    // any implementation deriving Midnight addresses from this mnemonic
+    // must land here, so --seed and --mnemonic must both produce it.
+    const golden = 'mn_addr_preview1dwv2rta0a2skyhrvukaw2q9r2sq6yc4jhj63rf7afxpkrrv6g35q4y8xms';
+    expect(loadWalletConfig(fromSeed).addresses.preview).toBe(golden);
+    expect(loadWalletConfig(fromMnemonic).addresses.preview).toBe(golden);
+    expect(loadWalletConfig(fromSeed).seed).toBe(seedHex);
+  });
+
   it('does not include mnemonic in seed mode', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     await generateCommand(parseArgs(['generate', '--network', 'preprod', '--seed', TEST_SEED, '--output', walletFile]));
@@ -161,13 +188,13 @@ describe('generate command — error handling', () => {
   it('throws for invalid seed (wrong length)', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const args = parseArgs(['generate', '--network', 'preprod', '--seed', 'aabb', '--output', walletFile]);
-    await expect(generateCommand(args)).rejects.toThrow('64-character hex string');
+    await expect(generateCommand(args)).rejects.toThrow('64 or 128 hex characters');
   });
 
   it('throws for non-hex seed', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const args = parseArgs(['generate', '--network', 'preprod', '--seed', 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz', '--output', walletFile]);
-    await expect(generateCommand(args)).rejects.toThrow('64-character hex string');
+    await expect(generateCommand(args)).rejects.toThrow('64 or 128 hex characters');
   });
 
   it('throws for invalid mnemonic', async () => {

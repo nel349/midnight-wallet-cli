@@ -12,6 +12,7 @@ import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { deriveAllAddresses } from '../lib/derive-address.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
 import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
+import { parseSeedHex } from '../lib/seed-resolver.ts';
 import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, yellow, dim, green } from '../ui/colors.ts';
@@ -50,11 +51,7 @@ export default async function generateCommand(args: ParsedArgs): Promise<void> {
 
   if (seedHex !== undefined) {
     // Mode: restore from seed
-    const cleaned = seedHex.replace(/^0x/, '');
-    if (cleaned.length !== 64 || !/^[0-9a-fA-F]+$/.test(cleaned)) {
-      throw new Error('Seed must be a 64-character hex string (32 bytes)');
-    }
-    seedBuffer = Buffer.from(cleaned, 'hex');
+    seedBuffer = parseSeedHex(seedHex, seedFlag !== undefined ? '--seed' : 'MN_SEED');
   } else if (mnemonicStr !== undefined) {
     // Mode: restore from mnemonic
     if (!validateMnemonic(mnemonicStr, wordlist)) {

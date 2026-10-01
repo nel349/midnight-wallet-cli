@@ -10,6 +10,7 @@ import { generateMnemonic, mnemonicToSeedSync, mnemonicToEntropy, validateMnemon
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
+import { parseSeedHex } from '../lib/seed-resolver.ts';
 import {
   saveWalletConfig,
   loadWalletConfig,
@@ -89,11 +90,7 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
   let mnemonic: string | undefined;
 
   if (seedHex !== undefined) {
-    const cleaned = seedHex.replace(/^0x/, '');
-    if (cleaned.length !== 64 || !/^[0-9a-fA-F]+$/.test(cleaned)) {
-      throw new Error('Seed must be a 64-character hex string (32 bytes)');
-    }
-    seedBuffer = Buffer.from(cleaned, 'hex');
+    seedBuffer = parseSeedHex(seedHex, '--seed');
   } else if (mnemonicStr !== undefined) {
     if (!validateMnemonic(mnemonicStr, wordlist)) {
       throw new Error('Invalid BIP-39 mnemonic. Expected 12 or 24 words from the English wordlist.');

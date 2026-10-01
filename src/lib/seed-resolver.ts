@@ -8,7 +8,7 @@ import { UsageError } from './errors.ts';
 import { loadWalletConfig, resolveWalletPath, type WalletConfig } from './wallet-config.ts';
 
 export interface ResolvedSeed {
-  /** The 32-byte wallet seed. */
+  /** The wallet seed: 32-byte raw, or 64-byte BIP-39 (mnemonic-derived). */
   seed: Buffer;
   /** The wallet file the seed came from, or null when supplied via `--seed` / `MN_SEED`. */
   walletPath: string | null;
@@ -27,6 +27,26 @@ export interface ResolveSeedOptions {
 }
 
 /**
+ * Parse a hex seed. Accepts the two seed sizes that actually occur:
+ *   - 64 hex chars — a 32-byte raw seed
+ *   - 128 hex chars — a 64-byte BIP-39 seed (mnemonicToSeedSync output), so a
+ *     wallet derived elsewhere from a mnemonic can be cross-checked here
+ * HD derivation (SLIP-10) technically takes 128–512 bits, but gating to the
+ * two real sizes means a typo can't silently derive a different wallet.
+ */
+export function parseSeedHex(input: string, label: string): Buffer {
+  // Trim first — a seed from a file / command substitution (MN_SEED=$(cat seed.hex))
+  // carries a trailing newline that would fail the length check.
+  const hex = input.trim().replace(/^0x/, '');
+  if ((hex.length !== 64 && hex.length !== 128) || !/^[0-9a-fA-F]+$/.test(hex)) {
+    throw new UsageError(
+      `${label} must be 64 or 128 hex characters (a 32-byte seed, or a 64-byte BIP-39 seed)`
+    );
+  }
+  return Buffer.from(hex, 'hex');
+}
+
+/**
  * Resolve a wallet seed with uniform precedence:
  *   `--seed <hex>` → `MN_SEED` (env, kept off the process list) → `--wallet <name>` → active wallet.
  * Returns the seed plus the backing wallet file/config (both null for a `--seed` / `MN_SEED`
@@ -36,20 +56,18 @@ export function resolveSeedSource(args: ParsedArgs, opts: ResolveSeedOptions = {
   const seedFlag = getFlag(args, 'seed');
   const seedSource = seedFlag ?? process.env.MN_SEED;
   if (seedSource) {
-    // Trim first — a seed from a file / command substitution (MN_SEED=$(cat seed.hex))
-    // carries a trailing newline that would fail the length check.
-    const seedHex = seedSource.trim().replace(/^0x/, '');
-    if (seedHex.length !== 64 || !/^[0-9a-fA-F]+$/.test(seedHex)) {
-      throw new UsageError(`${seedFlag ? '--seed' : 'MN_SEED'} must be a 64-character hex string (32 bytes)`);
-    }
-    return { seed: Buffer.from(seedHex, 'hex'), walletPath: null, config: null };
+    return {
+      seed: parseSeedHex(seedSource, seedFlag ? '--seed' : 'MN_SEED'),
+      walletPath: null,
+      config: null,
+    };
   }
 
   const walletName = getFlag(args, 'wallet');
   if (walletName === undefined && opts.requireExplicit) {
     throw new UsageError(
       `${opts.label ?? 'This command'} needs a seed source. Provide one of:\n` +
-      '  --seed <hex>     32-byte seed as 64 hex characters\n' +
+      '  --seed <hex>     seed as 64 hex chars (32-byte) or 128 (64-byte BIP-39)\n' +
       '  MN_SEED=<hex>    same seed via env (kept off the process list)\n' +
       '  --wallet <name>  derive from a saved wallet',
     );
