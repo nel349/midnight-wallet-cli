@@ -223,6 +223,15 @@ export function overlayDustDirectSnapshot(
   direct: Pick<DustCacheEntry, 'state' | 'lastAppliedEventId'>,
 ): string {
   const snapshot: FacadeDustSnapshot = JSON.parse(dustSnapshotJson);
+  // The wallet restores a snapshot onto the variant its protocolVersion names.
+  // A ledger-9 state in a snapshot stamped below the fork would be read by the
+  // ledger-8 variant (e.g. a facade that started on V1 when the probe failed).
+  if (BigInt(snapshot.protocolVersion) < FORK_SCHEDULE.v9) {
+    throw new Error(
+      `Can't put a ledger-9 dust state into a snapshot at protocol version ${snapshot.protocolVersion}: ` +
+      `the wallet would read it as ledger 8 (fork at ${FORK_SCHEDULE.v9}).`,
+    );
+  }
   snapshot.state = Buffer.from(direct.state.serialize()).toString('hex');
   snapshot.offset = direct.lastAppliedEventId.toString();
   return JSON.stringify(snapshot);

@@ -13,12 +13,15 @@ function entry(state: ledger.DustLocalState, lastAppliedEventId: number): DustCa
   return { state, lastAppliedEventId, retention: { ownedGenerationIndices: [], generationFrontier: 0 } };
 }
 
-function baseSnapshot(offset?: string): string {
+/** Protocol version a ledger-9 (V2) dust wallet stamps on its snapshot on the localnet. */
+const V9_PROTOCOL = '2001000';
+
+function baseSnapshot(offset?: string, protocolVersion: string = V9_PROTOCOL): string {
   const snap: Record<string, unknown> = {
     publicKey: { publicKey: '42' },
     state: '00',
-    protocolVersion: '0',
-    networkId: 'preview',
+    protocolVersion,
+    networkId: 'undeployed',
   };
   if (offset !== undefined) snap.offset = offset;
   return JSON.stringify(snap);
@@ -33,8 +36,16 @@ describe('overlayDustDirectSnapshot', () => {
     expect(out.state).toBe(ownedHex);
     expect(out.offset).toBe('100');
     expect(out.publicKey).toEqual({ publicKey: '42' });
-    expect(out.protocolVersion).toBe('0');
-    expect(out.networkId).toBe('preview');
+    expect(out.protocolVersion).toBe(V9_PROTOCOL);
+    expect(out.networkId).toBe('undeployed');
+  });
+
+  it.each([
+    ['0', 'a ledger-8 (V1) snapshot'],
+    ['1000300', 'a snapshot stamped below the ledger-9 fork'],
+  ])('refuses to put a ledger-9 state into %s (%s): the ledger-8 variant would read it', (version) => {
+    expect(() => overlayDustDirectSnapshot(baseSnapshot('5', version), entry(ownedState, 100)))
+      .toThrow(/ledger-9 dust state.*protocol version/);
   });
 
   it('overlays unconditionally — even when the base offset is already higher (the freshness guard lives in the caller)', () => {
@@ -141,7 +152,7 @@ describe('exportDustSnapshot', () => {
     const snap = JSON.parse(res.snapshot);
     expect(snap.offset).toBe('42');
     expect(snap.state).toBe(Buffer.from(ownedState.serialize()).toString('hex'));
-    expect(snap.networkId).toBe('preview');  // base metadata preserved
+    expect(snap.networkId).toBe('undeployed');  // base metadata preserved
   });
 
   it('reports partial: false for a completed sync', async () => {
