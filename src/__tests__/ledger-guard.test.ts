@@ -10,6 +10,7 @@ import {
   fetchProtocolVersion,
   UnsupportedLedgerError,
   LocalStackUnreachableError,
+  walletsBelowLedger9,
 } from '../lib/ledger-guard.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 
@@ -112,5 +113,20 @@ describe('fetchProtocolVersion', () => {
 
   it('returns null when nothing listens', async () => {
     expect(await fetchProtocolVersion('http://127.0.0.1:1/api/v4/graphql')).toBeNull();
+  });
+});
+
+describe('walletsBelowLedger9', () => {
+  it('is empty when all three wallets are at or past the fork', () => {
+    expect(walletsBelowLedger9({ shielded: 2000000n, unshielded: LEDGER9_LOCALNET, dust: LEDGER9_LOCALNET })).toEqual([]);
+  });
+
+  it('names each wallet still below the fork, in shielded, unshielded, dust order', () => {
+    expect(walletsBelowLedger9({ shielded: LEDGER9_LOCALNET, unshielded: LEDGER9_LOCALNET, dust: PREVIEW })).toEqual(['dust']);
+    expect(walletsBelowLedger9({ shielded: PREVIEW, unshielded: PREVIEW, dust: PREVIEW })).toEqual(['shielded', 'unshielded', 'dust']);
+  });
+
+  it('counts one version below the fork as below it', () => {
+    expect(walletsBelowLedger9({ shielded: 1999999n, unshielded: 2000000n, dust: 2000000n })).toEqual(['shielded']);
   });
 });

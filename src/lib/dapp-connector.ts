@@ -8,7 +8,7 @@ import type { FacadeState, WalletEntry } from '@midnightntwrk/wallet-sdk/facade'
 import type { FinalizedTx } from '@midnightntwrk/wallet-sdk';
 
 import { type FacadeBundle, hasDustAvailable } from './facade.ts';
-import type { NetworkConfig } from './network.ts';
+import { FORK_SCHEDULE, type NetworkConfig } from './network.ts';
 import type { ApprovalOptions } from './approval.ts';
 import { promptApproval } from './approval.ts';
 import { createApiError, type RpcHandler, type RpcHandlerContext } from './ws-rpc.ts';
@@ -20,6 +20,7 @@ import { DEFAULT_FEE_LIMITS, feeLimitRefusal, pendingLimitRefusal, type FeeLimit
 import { inspectTxHex } from './tx-inspect.ts';
 import { feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { assertSignable, signRecipe } from './sign-recipe.ts';
+import { walletsBelowLedger9 } from './ledger-guard.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
 import { toDust } from '../ui/format.ts';
@@ -150,10 +151,12 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
   // ── State subscription — cache latest synced state ──
 
   let latestState: FacadeState | undefined;
-  const subscription = facade.state().pipe(
-    rx.filter((s) => s.isSynced),
-  ).subscribe((state) => {
-    latestState = state;
+  // From every state, synced or not: the wallets' protocol versions decide
+  // which ledger the facade reads a dApp's transaction as.
+  let protocolVersions: FacadeState['protocolVersion'] | undefined;
+  const subscription = facade.state().subscribe((state) => {
+    protocolVersions = state.protocolVersion;
+    if (state.isSynced) latestState = state;
   });
 
   function getState(): FacadeState {
@@ -161,6 +164,20 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       throw createApiError('Disconnected', 'Wallet not synced yet');
     }
     return latestState;
+  }
+
+  /** Refuse transaction work until all three wallets are past the ledger-9 fork. */
+  function assertWalletsOnLedger9(): void {
+    if (!protocolVersions) {
+      throw createApiError('Disconnected', 'Wallet not synced yet');
+    }
+    const behind = walletsBelowLedger9(protocolVersions);
+    if (behind.length > 0) {
+      const detail = behind.map((w) => `${w} at ${protocolVersions![w]}`).join(', ');
+      throw createApiError('Disconnected',
+        `This wallet can't take transactions until all three of its wallets are on ledger 9 (fork at ${FORK_SCHEDULE.v9}); `
+        + `still behind: ${detail}. Wait for them to sync past the fork and retry.`);
+    }
   }
 
   // ── Shared helpers ──
@@ -360,6 +377,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     if (!txHex) {
       throw createApiError('InvalidRequest', 'tx is required');
     }
+    assertWalletsOnLedger9();
     const payFees = (params.options as { payFees?: unknown } | undefined)?.payFees;
     const feeOnly = approvalOptions.approveFees === true;
     if (feeOnly) assertFeeOnly(txHex, stage, payFees);
@@ -586,6 +604,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       if (!Array.isArray(outputs) || outputs.length === 0) {
         throw createApiError('InvalidRequest', 'desiredOutputs must be a non-empty array');
       }
+      assertWalletsOnLedger9();
 
       const tracker = makeTracker('makeTransfer', context);
 
@@ -614,6 +633,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       if (!txHex) {
         throw createApiError('InvalidRequest', 'tx is required');
       }
+      assertWalletsOnLedger9();
 
       const tracker = makeTracker('submitTransaction', context);
 
@@ -677,6 +697,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       if (!intentOptions) {
         throw createApiError('InvalidRequest', 'options is required for makeIntent');
       }
+      assertWalletsOnLedger9();
 
       const tracker = makeTracker('makeIntent', context);
 

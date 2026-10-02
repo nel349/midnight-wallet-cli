@@ -25,6 +25,7 @@ import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
 import { PROOF_TIMEOUT_MS } from '../lib/constants.ts';
+import { FORK_SCHEDULE } from '../lib/network.ts';
 import type { FeeLimits } from '../lib/fee-limits.ts';
 import type { ApprovalOptions } from '../lib/approval.ts';
 import {
@@ -52,9 +53,13 @@ function mockState(overrides?: {
   unshieldedBalances?: Record<string, bigint>;
   shieldedBalances?: Record<string, bigint>;
   dustBalance?: bigint;
+  protocolVersion?: { shielded: bigint; unshielded: bigint; dust: bigint };
+  isSynced?: boolean;
 }) {
   return {
-    isSynced: true,
+    isSynced: overrides?.isSynced ?? true,
+    // Each wallet's protocol version, as FacadeState reports it: on ledger 9 unless a test says otherwise.
+    protocolVersion: overrides?.protocolVersion ?? { shielded: FORK_SCHEDULE.v9, unshielded: FORK_SCHEDULE.v9, dust: FORK_SCHEDULE.v9 },
     unshielded: {
       balances: overrides?.unshieldedBalances ?? { '0000000000000000000000000000000000000000000000000000000000000000': 5000000n },
       address: { data: Buffer.alloc(32) },
@@ -325,6 +330,54 @@ describe('dapp-connector', () => {
       connector = createConnector();
       const result = await connector.handlers.getConnectionStatus({}, ctx());
       expect(result).toEqual({ status: 'connected', networkId: 'undeployed' });
+    });
+  });
+
+  // ── Ledger-9 guard on transaction methods ──
+
+  describe('transaction methods wait for all three wallets to reach ledger 9', () => {
+    // The facade reads a dApp's transaction at the lowest of the three
+    // wallets' versions, so one wallet behind the fork would make it read
+    // ledger-9 bytes as ledger 8.
+    const DUST_BEHIND = { shielded: FORK_SCHEDULE.v9, unshielded: FORK_SCHEDULE.v9, dust: 1000300n };
+    const calls = (txHex: () => string) => [
+      ['balanceUnsealedTransaction', () => ({ tx: txHex() })],
+      ['balanceSealedTransaction', () => ({ tx: txHex() })],
+      ['submitTransaction', () => ({ tx: txHex() })],
+      ['makeTransfer', () => ({ desiredOutputs: [{ kind: 'unshielded', type: '00'.repeat(32), value: '1', recipient: 'x' }] })],
+      ['makeIntent', () => ({ options: { intentId: 'random', payFees: true } })],
+    ] as const;
+
+    it.each(calls(() => AGENT_TX))('%s refuses as Disconnected, naming the wallet behind, before touching the facade', async (method, params) => {
+      const bundle = createBundleStub({ stateFn: () => rx.of(mockState({ protocolVersion: DUST_BEHIND })) });
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      const err: any = await (connector.handlers as any)[method](params(), ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('Disconnected');
+      expect(err.message).toContain('still behind: dust at 1000300');
+      expect(bundle.facade.adoptTransaction).not.toHaveBeenCalled();
+      expect(bundle.facade.balanceUnboundTransaction).not.toHaveBeenCalled();
+      expect(bundle.facade.transferTransaction).not.toHaveBeenCalled();
+      expect(bundle.facade.initSwap).not.toHaveBeenCalled();
+    });
+
+    it('accepts transactions once the lagging wallet crosses the fork', async () => {
+      const states = new rx.BehaviorSubject(mockState({ protocolVersion: DUST_BEHIND }));
+      const bundle = createBundleStub({ stateFn: () => states });
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx())).rejects.toMatchObject({ code: 'Disconnected' });
+
+      states.next(mockState());
+
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx())).resolves.toHaveProperty('tx');
+    });
+
+    it('does not require a strictly synced state, which an idle chain\'s dust wallet never reports', async () => {
+      const bundle = createBundleStub({ stateFn: () => rx.of(mockState({ isSynced: false })) });
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx())).resolves.toHaveProperty('tx');
     });
   });
 

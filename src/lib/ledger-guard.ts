@@ -93,3 +93,14 @@ export async function assertLedger9StackReachable(
   const genesis = await (probes.fetchGenesis ?? getChainGenesisHash)(network.node);
   if (genesis === null) throw new LocalStackUnreachableError('node', network.node);
 }
+
+type WalletKind = 'shielded' | 'unshielded' | 'dust';
+
+/**
+ * The wallets (shielded, unshielded, dust) still below the ledger-9 fork. The
+ * facade reads a dApp's transaction at the lowest of the three versions, so
+ * until this is empty it would read ledger-9 bytes as ledger 8 and refuse them.
+ */
+export function walletsBelowLedger9(versions: Readonly<Record<WalletKind, bigint>>): WalletKind[] {
+  return (['shielded', 'unshielded', 'dust'] as const).filter((wallet) => versions[wallet] < FORK_SCHEDULE.v9);
+}
