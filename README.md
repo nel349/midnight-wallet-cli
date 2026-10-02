@@ -50,7 +50,7 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 | `midnight contract deploy` | Deploy a contract to the network (`--secret-key <64-hex>` seeds a caller-chosen initial private-state secret for constructors that derive their owner from `public_key(secret_key())`; passed via env to the deploy subprocess, never written to disk) |
 | `midnight contract call` | Call a circuit on a deployed contract |
 | `midnight contract state` | Read ledger state of a deployed contract |
-| `midnight dev` | Contract dev loop — watcher auto-compiles on save; `[t]` runs tests, `[d]` deploys (needs `localnet up`, so refused on this build) |
+| `midnight dev` | Contract dev loop — watcher auto-compiles on save; `[t]` runs tests, `[d]` deploys (on this build it uses a ledger-9 stack you run, at the configured endpoints) |
 | `midnight test create/run/list/results` | Generate and run E2E tests for Midnight dApps |
 | `midnight config get/set/unset` | Manage persistent config (network, wallet, endpoints) |
 | `midnight cache clear` | Clear wallet state cache |

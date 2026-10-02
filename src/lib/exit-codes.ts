@@ -30,8 +30,24 @@ export const ERROR_CODES = {
   /** Long-running wallet sync exceeded its deadline. On hosted networks this is most common during the first cold sync; retrying usually progresses since the cache resumes from the last applied event. */
   SYNC_TIMEOUT: 'SYNC_TIMEOUT',
   CANCELLED: 'CANCELLED',
+  /** The chain is on ledger 8; this build supports ledger 9 only. Recovery: use midnight-wallet-cli 0.5.x for that network. */
+  UNSUPPORTED_LEDGER: 'UNSUPPORTED_LEDGER',
+  /** `mn localnet up` can't start a ledger-9 stack on this build. Recovery: run one yourself and point mn at it (endpoint flags or `midnight config set`). */
+  LOCALNET_UNAVAILABLE: 'LOCALNET_UNAVAILABLE',
+  /** No ledger-9 stack answers at the configured endpoints. Recovery: start one, or fix the endpoints. */
+  LOCAL_STACK_UNREACHABLE: 'LOCAL_STACK_UNREACHABLE',
+  /** Several local Midnight stacks run and no endpoints were given. Recovery: pass endpoint flags or `midnight config set` them. */
+  AMBIGUOUS_LOCAL_STACKS: 'AMBIGUOUS_LOCAL_STACKS',
   UNKNOWN: 'UNKNOWN',
 } as const;
+
+/** Typed setup errors that carry their own `code`; classified by it, not by message text. */
+const SETUP_ERROR_CODES: ReadonlySet<string> = new Set([
+  ERROR_CODES.UNSUPPORTED_LEDGER,
+  ERROR_CODES.LOCALNET_UNAVAILABLE,
+  ERROR_CODES.LOCAL_STACK_UNREACHABLE,
+  ERROR_CODES.AMBIGUOUS_LOCAL_STACKS,
+]);
 
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
 
@@ -46,6 +62,11 @@ interface ClassifiedError {
  * Order matters: more specific patterns are checked before broader ones.
  */
 export function classifyError(err: Error): ClassifiedError {
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'string' && SETUP_ERROR_CODES.has(code)) {
+    return { exitCode: EXIT_NETWORK_ERROR, errorCode: code as ErrorCode };
+  }
+
   const msg = (err.message ?? '').toLowerCase();
 
   // Cancelled by user (SIGINT / AbortController)

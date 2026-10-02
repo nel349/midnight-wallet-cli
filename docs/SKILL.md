@@ -117,6 +117,10 @@ Every MCP tool error returns `{ error: true, code: <ERROR_CODE>, message: <human
 | `PROOF_TIMEOUT` | ZK proof generation didn't finish within the deadline. | Retry — proofs can be slow under load. |
 | `SYNC_TIMEOUT` | Long-running wallet sync hit its deadline. Common on a hosted-network first-cold-sync. | Retry; the cache resumes from the last applied event so progress is preserved. |
 | `NETWORK_ERROR` | Indexer/node/proof-server connection refused or DNS failure. | Check `midnight_localnet_status()` or the endpoints the user configured; on this build `midnight_localnet_up()` is refused, so ask the user to start their ledger-9 stack. |
+| `UNSUPPORTED_LEDGER` | The network is on ledger 8; this build supports ledger 9 only. | Tell the user: this network needs midnight-wallet-cli 0.5.x. Don't retry. |
+| `LOCALNET_UNAVAILABLE` | `midnight_localnet_up()` can't start a ledger-9 stack on this build. | Ask the user to start their ledger-9 stack and point mn at it (endpoint config). |
+| `LOCAL_STACK_UNREACHABLE` | No ledger-9 stack answers at the configured endpoints. | Ask the user to start their stack or fix the configured node / indexer-ws / proof-server endpoints. |
+| `AMBIGUOUS_LOCAL_STACKS` | Several local Midnight stacks are running and no endpoints are configured, so mn won't guess. | Ask the user which stack to use; they set its endpoints with `midnight config set`. Don't retry blindly. |
 | `WALLET_NOT_FOUND` | Named wallet doesn't exist on disk. | `midnight_wallet_list()` — user may have removed it. |
 | `INVALID_ARGS` | Missing/invalid argument. | Show the message to the user verbatim — it names the missing field. |
 | `TX_REJECTED` | Chain rejected the submitted transaction (catch-all when no more specific code applies). | Read the message; usually a state mismatch resolved by re-sync + retry. |

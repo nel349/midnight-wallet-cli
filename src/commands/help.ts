@@ -402,7 +402,7 @@ const COMMAND_SPECS: CommandSpec[] = [
     flags: [
       '[path]          Project directory (default: cwd)',
       '',
-      'Needs mn localnet, which this ledger-9 build cannot start (see: midnight help localnet).',
+      'Needs a running ledger-9 stack at the configured endpoints; this build cannot start one (see: midnight help localnet).',
       '',
       'Keystrokes (while running):',
       '  d             Deploy the current compiled artifact (dev-alice on undeployed)',
@@ -992,11 +992,11 @@ TYPICAL AGENT WORKFLOWS
   6. midnight_transfer → midnight_confirm_operation → transfer
 
   Contract development (CLI only — not an MCP tool):
-  Run "mn dev" in a Compact project. It auto-starts localnet, provisions
-  3 funded wallets (dev-alice/dev-bob/dev-carol), compiles on save, and
-  accepts a "d" keystroke to deploy the current artifact with dev-alice.
-  See "mn help dev". On this ledger-9 build it can't start localnet, so it
-  refuses until mn localnet can run a ledger-9 stack.
+  Run "mn dev" in a Compact project. It checks the local network is up,
+  provisions 3 funded wallets (dev-alice/dev-bob/dev-carol), compiles on
+  save, and accepts a "d" keystroke to deploy the current artifact with
+  dev-alice. See "mn help dev". On this ledger-9 build it uses a ledger-9
+  stack you run (configured endpoints) instead of starting one.
 
 EXAMPLE CLI COMMANDS
 ────────────────────

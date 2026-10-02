@@ -50,3 +50,23 @@ describe('classifyError usage errors (positional-address balance)', () => {
     expect(errorCode).toBe(ERROR_CODES.INVALID_ARGS);
   });
 });
+
+describe('classifyError: typed setup errors keep their own code', () => {
+  // Agents read errorCode from --json / MCP; these must not collapse to UNKNOWN.
+  it.each([
+    ['UNSUPPORTED_LEDGER', async () => new (await import('../lib/ledger-guard.ts')).UnsupportedLedgerError('preview', 1000300n)],
+    ['LOCAL_STACK_UNREACHABLE', async () => new (await import('../lib/ledger-guard.ts')).LocalStackUnreachableError('indexer', 'http://localhost:8088/api/v4/graphql')],
+    ['LOCALNET_UNAVAILABLE', async () => new (await import('../lib/localnet.ts')).LocalnetUnavailableError()],
+    ['AMBIGUOUS_LOCAL_STACKS', async () => new (await import('../lib/network.ts')).AmbiguousLocalStacksError({ node: [9944, 29944], indexer: [8088, 28088], proofServer: [6300] })],
+  ])('%s', async (code, make) => {
+    const result = classifyError(await make());
+    expect(result.errorCode).toBe(code);
+    expect(result.errorCode).toBe(ERROR_CODES[code as keyof typeof ERROR_CODES]);
+    expect(result.exitCode).toBe(EXIT_NETWORK_ERROR);
+  });
+
+  it('ignores a code that is not a known setup code', () => {
+    const err = Object.assign(new Error('something odd'), { code: 'ENOENT' });
+    expect(classifyError(err).errorCode).toBe(ERROR_CODES.UNKNOWN);
+  });
+});
