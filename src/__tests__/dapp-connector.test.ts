@@ -933,8 +933,11 @@ describe('dapp-connector', () => {
         },
       });
 
-      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()))
-        .rejects.toThrow('No dust tokens');
+      const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()).catch((e: any) => e);
+      expect(err.code).toBe('InternalError');
+      expect(err.message).toContain('No Dust is free to pay the fee (No dust tokens found in the wallet state)');
+      expect(err.message).toContain('Each balanced transaction reserves a whole Dust coin');
+      expect(err.message).toContain('0 balanced transaction(s) are waiting to be submitted on this server');
       expect(callCount).toBe(10); // DUST_RETRY_ATTEMPTS = 10
     });
   });
@@ -1042,6 +1045,37 @@ describe('dapp-connector', () => {
         expect(balance).toHaveBeenCalledTimes(3);
       });
 
+      it('counts balances still in flight: two at the same moment cannot both take the last slot', async () => {
+        let finishEstimate!: () => void;
+        const estimateGate = new Promise<void>((r) => { finishEstimate = r; });
+        const estimate = vi.fn(async () => { await estimateGate; return 1n; });
+        const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+        const { connector } = feeWallet({ balanceUnboundTransaction: balance, estimateTransactionFee: estimate }, undefined,
+          { maxFeeSpecks: ONE_DUST, maxPending: 1 });
+        const agentTx = { tx: hex(await unsealedBytes(agentPaysMerchant())) };
+
+        const first = connector.handlers.balanceUnsealedTransaction(agentTx, ctx('a'));
+        const second = connector.handlers.balanceUnsealedTransaction(agentTx, ctx('b')).catch((e: any) => e);
+        finishEstimate();
+
+        await expect(first).resolves.toHaveProperty('tx');
+        const err: any = await second;
+        expect(err.code).toBe('Rejected');
+        expect(err.message).toContain('(--max-pending 1)');
+        expect(balance).toHaveBeenCalledTimes(1);
+      });
+
+      it('gives the slot back when a balance fails, so the next one can use it', async () => {
+        const estimate = vi.fn().mockResolvedValueOnce(2n * ONE_DUST).mockResolvedValue(1n);
+        const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+        const { connector } = feeWallet({ balanceUnboundTransaction: balance, estimateTransactionFee: estimate }, undefined,
+          { maxFeeSpecks: ONE_DUST, maxPending: 1 });
+        const agentTx = { tx: hex(await unsealedBytes(agentPaysMerchant())) };
+
+        await expect(connector.handlers.balanceUnsealedTransaction(agentTx, ctx())).rejects.toMatchObject({ code: 'Rejected' });
+        await expect(connector.handlers.balanceUnsealedTransaction(agentTx, ctx())).resolves.toHaveProperty('tx');
+      });
+
       it('does not apply outside fee-wallet mode', async () => {
         const estimate = vi.fn().mockResolvedValue(10n * ONE_DUST);
         const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
@@ -1121,6 +1155,9 @@ describe('dapp-connector', () => {
       const err: any = await connector.handlers.submitTransaction({ tx: balanced.tx }, ctx('agent')).catch((e: any) => e);
 
       expect(err.code).toBe('Rejected');
+      // The agent learns why, not just that it was refused.
+      expect(err.message).toBe('User rejected the request: this fee wallet (--approve-fees) approves without the operator only '
+        + "paying the Dust fee for an agent's own transaction and submitting a transaction it balanced that way on the same connection");
       expect(submit).not.toHaveBeenCalled();
     });
 

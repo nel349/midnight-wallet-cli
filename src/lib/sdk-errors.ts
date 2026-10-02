@@ -28,21 +28,29 @@ export function isTransactionRejectedError(err: any): boolean {
   return false;
 }
 
+/** Where an Effect `FiberFailure` (what an SDK promise rejects with) keeps the failure it ran into. */
+const FIBER_FAILURE_CAUSE = Symbol.for('effect/Runtime/FiberFailure/Cause');
+
 /**
  * The wallet ran out of dust to pay a fee, which waiting for dust can fix.
  * wallet-sdk 2.0 raises a tagged `Wallet.InsufficientFunds` with
- * `tokenType: 'dust'`, possibly wrapped as a cause. A shortage of any other
- * token is not this. The ledger-8 SDK said "No dust tokens" or "dust ... unavailable".
+ * `tokenType: 'dust'`. Its promises reject with an Effect `FiberFailure` that
+ * carries the tagged error only inside its cause, possibly also wrapped as a
+ * `cause` by the facade. A shortage of any other token is not this. The
+ * ledger-8 SDK said "No dust tokens" or "dust ... unavailable".
  */
 export function isDustShortage(err: unknown): boolean {
   const seen = new Set<unknown>();
-  let current: unknown = err;
-  while (current && typeof current === 'object' && !seen.has(current)) {
+  const pending: unknown[] = [err];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
     seen.add(current);
-    const e = current as { _tag?: unknown; tokenType?: unknown; message?: unknown; cause?: unknown };
+    const e = current as Record<PropertyKey, unknown>;
     if (e._tag === 'Wallet.InsufficientFunds' && e.tokenType === 'dust') return true;
     if (typeof e.message === 'string' && /no dust tokens|dust.*unavailable/i.test(e.message)) return true;
-    current = e.cause;
+    // Error causes, an Effect Cause's failure or defect, and the halves of a combined Cause.
+    pending.push(e.cause, e[FIBER_FAILURE_CAUSE], e.error, e.defect, e.left, e.right);
   }
   return false;
 }

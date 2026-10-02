@@ -329,7 +329,10 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     const outcome = result === 'reject' ? 'rejected' : 'approved';
     context?.notify('approval:resolved', { method, result: outcome });
     if (result === 'reject') {
-      throw createApiError('Rejected', OPERATOR_REJECTED_MESSAGE);
+      throw createApiError('Rejected', approvalOptions.approveFees
+        ? `${OPERATOR_REJECTED_MESSAGE}: this fee wallet (--approve-fees) approves without the operator only paying the `
+          + 'Dust fee for an agent\'s own transaction and submitting a transaction it balanced that way on the same connection'
+        : OPERATOR_REJECTED_MESSAGE);
     }
   }
 
@@ -372,19 +375,37 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
    * `maxPending` balanced transactions may wait unsubmitted, and the total fee
    * (the dApp's tx plus the wallet's balancing tx) may not exceed `maxFee`.
    */
-  async function assertWithinFeeLimits(dappTx: WalletTransaction<'Unbound'> | WalletTransaction<'Finalized'>, ttl: Date): Promise<void> {
+  function pendingCount(): number {
     let pending = 0;
     for (const [, txMap] of pendingTxsByConnection) pending += txMap.size;
-    const pendingReason = pendingLimitRefusal(pending, feeLimits);
-    let reason = pendingReason;
-    if (!pendingReason) {
-      const fee = await facade.estimateTransactionFee(dappTx, { ttl });
-      process.stderr.write(dim(`  fee-only: estimated fee ${toDust(fee)} DUST (limit ${toDust(feeLimits.maxFeeSpecks)})`) + '\n');
-      reason = feeLimitRefusal(fee, feeLimits);
-    }
-    if (reason) {
-      throw createApiError('Rejected', `This wallet is a fee wallet (--approve-fees) and refuses this transaction: ${reason}`);
-    }
+    return pending;
+  }
+
+  function feeLimitError(reason: string) {
+    return createApiError('Rejected', `This wallet is a fee wallet (--approve-fees) and refuses this transaction: ${reason}`);
+  }
+
+  // Fee-only balances between their limit check and being tracked as pending.
+  // Counted with the pending ones, so simultaneous requests can't all pass
+  // --max-pending while none of them is tracked yet.
+  let feeOnlyInFlight = 0;
+
+  /** Take one of the --max-pending slots, synchronously. Returns the release; throws when none is left. */
+  function reserveFeeOnlySlot(): () => void {
+    const reason = pendingLimitRefusal(pendingCount() + feeOnlyInFlight, feeLimits);
+    if (reason) throw feeLimitError(reason);
+    feeOnlyInFlight++;
+    let released = false;
+    return () => {
+      if (!released) { released = true; feeOnlyInFlight--; }
+    };
+  }
+
+  async function assertFeeWithinLimit(dappTx: WalletTransaction<'Unbound'> | WalletTransaction<'Finalized'>, ttl: Date): Promise<void> {
+    const fee = await withDustRetry(() => facade.estimateTransactionFee(dappTx, { ttl }));
+    process.stderr.write(dim(`  fee-only: estimated fee ${toDust(fee)} DUST (limit ${toDust(feeLimits.maxFeeSpecks)})`) + '\n');
+    const reason = feeLimitRefusal(fee, feeLimits);
+    if (reason) throw feeLimitError(reason);
   }
 
   /**
@@ -416,27 +437,32 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     if (stage === 'unsealed') {
       assertDAppTxSignable(txHex, tokenKindsToBalance === 'all' || tokenKindsToBalance.includes('unshielded'));
     }
-    if (feeOnly) await assertWithinFeeLimits(dappTx, ttl);
+    const releaseSlot = feeOnly ? reserveFeeOnlySlot() : undefined;
+    try {
+      if (feeOnly) await assertFeeWithinLimit(dappTx, ttl);
 
-    const tracker = makeTracker(method, context);
+      const tracker = makeTracker(method, context);
 
-    tracker.start('approve');
-    await requireApproval(method, inspectTxHex(txHex, stage), context, feeOnly);
+      tracker.start('approve');
+      await requireApproval(method, inspectTxHex(txHex, stage), context, feeOnly);
 
-    tracker.start('building');
-    const balanceOptions = { ttl, tokenKindsToBalance };
-    let recipe: any;
-    if (stage === 'unsealed') {
-      const unsealedTx = dappTx as WalletTransaction<'Unbound'>;
-      recipe = await withDustRetry(() => facade.balanceUnboundTransaction(unsealedTx, balanceOptions));
-    } else {
-      const sealedTx = dappTx as WalletTransaction<'Finalized'>;
-      recipe = await withDustRetry(() => facade.balanceFinalizedTransaction(sealedTx, balanceOptions));
+      tracker.start('building');
+      const balanceOptions = { ttl, tokenKindsToBalance };
+      let recipe: any;
+      if (stage === 'unsealed') {
+        const unsealedTx = dappTx as WalletTransaction<'Unbound'>;
+        recipe = await withDustRetry(() => facade.balanceUnboundTransaction(unsealedTx, balanceOptions));
+      } else {
+        const sealedTx = dappTx as WalletTransaction<'Finalized'>;
+        recipe = await withDustRetry(() => facade.balanceFinalizedTransaction(sealedTx, balanceOptions));
+      }
+      const { hex, finalized } = await processRecipe(recipe, tracker);
+      trackPendingTx(context.connectionId, hex, finalized, feeOnly);
+      context.metadata.phases = tracker.getTimings();
+      return { tx: hex };
+    } finally {
+      releaseSlot?.();
     }
-    const { hex, finalized } = await processRecipe(recipe, tracker);
-    trackPendingTx(context.connectionId, hex, finalized, feeOnly);
-    context.metadata.phases = tracker.getTimings();
-    return { tx: hex };
   }
 
   /** Encode an SDK address object to bech32m string. */
@@ -522,6 +548,15 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     });
   }
 
+  /** A Dust shortage that waiting didn't fix, with what is holding the Dust and what to do. */
+  function dustExhaustedError(err: unknown) {
+    return createApiError('InternalError',
+      `No Dust is free to pay the fee (${extractErrorDetail(err)}). Each balanced transaction reserves a whole Dust coin `
+      + `until it is submitted and on chain, or released when its connection closes or it expires; ${pendingCount()} `
+      + 'balanced transaction(s) are waiting to be submitted on this server. Retry once they settle. To pay for more '
+      + 'transactions at once, the wallet needs more Dust coins: one per NIGHT UTXO registered for Dust generation.');
+  }
+
   /** Retry a facade call that fails with "No dust tokens", waiting for dust between attempts. */
   async function withDustRetry<T>(fn: () => Promise<T>): Promise<T> {
     for (let attempt = 1; attempt <= DUST_RETRY_ATTEMPTS; attempt++) {
@@ -529,7 +564,8 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         return await fn();
       } catch (err: any) {
         const msg = String(err?.message ?? err ?? '');
-        if (!isDustShortage(err) || attempt === DUST_RETRY_ATTEMPTS) throw err;
+        if (!isDustShortage(err)) throw err;
+        if (attempt === DUST_RETRY_ATTEMPTS) throw dustExhaustedError(err);
         process.stderr.write(dim(`  dust unavailable, waiting for recovery (${attempt}/${DUST_RETRY_ATTEMPTS})... [${msg.slice(0, 60)}]`) + '\n');
         // Wait for dust to actually appear in state, not just a blind delay
         const recovered = await waitForDust(DUST_RETRY_DELAY_MS);

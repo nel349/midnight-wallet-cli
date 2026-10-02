@@ -265,7 +265,7 @@ Both calls are approved without a terminal only when the transaction spends none
 
 - `Rejected`: the transaction is outside that scope (every reason is listed), or a write other than these needs a terminal and there is none.
 - `InvalidRequest`: a request the wallet can't act on, such as `payFees: false`, bytes it can't read as a proven ledger-9 transaction, or a transaction whose unshielded inputs are partly signed.
-- `Disconnected`: the wallet hasn't synced past the ledger-9 fork yet; retry once it has. `--max-fee <DUST>` and `--max-pending <n>` bound what one agent can cost the wallet.
+- `Disconnected`: the wallet hasn't synced past the ledger-9 fork yet; retry once it has. `--max-fee <DUST>` and `--max-pending <n>` bound what one agent can cost the wallet. Each balanced transaction reserves a whole Dust coin until it is submitted and on chain (about 20 seconds on a 6-second-block localnet) or released, so a fee wallet serves as many agents at once as it has Dust coins: one per NIGHT UTXO registered for Dust generation. A request that finds none free waits for one, then fails with an error saying so.
 
 ## Error Handling
 

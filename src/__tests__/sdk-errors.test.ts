@@ -47,3 +47,44 @@ describe('isDustShortage', () => {
     expect(isDustShortage(a)).toBe(false);
   });
 });
+
+describe('isDustShortage on what the real wallet SDK rejects with', () => {
+  // The shape wallet-sdk 2.0.0-rc.0 rejected with on a ledger-9 localnet
+  // (2026-10-02) when a fee wallet's only Dust coin was reserved by a pending
+  // balance: an Effect FiberFailure named "(FiberFailure)
+  // Wallet.InsufficientFunds", with nothing on the error itself but its
+  // message; the tagged error is only in the Effect cause under this symbol.
+  const FIBER_FAILURE = Symbol.for('effect/Runtime/FiberFailure');
+  const FIBER_FAILURE_CAUSE = Symbol.for('effect/Runtime/FiberFailure/Cause');
+  function fiberFailure(cause: object, message: string): Error {
+    const err = new Error(message);
+    err.name = '(FiberFailure) Wallet.InsufficientFunds';
+    return Object.assign(err, { [FIBER_FAILURE]: FIBER_FAILURE, [FIBER_FAILURE_CAUSE]: cause });
+  }
+
+  it('matches the FiberFailure of a dust shortage, which carries no tag of its own', () => {
+    const err = fiberFailure(
+      { _tag: 'Fail', error: { _tag: 'Wallet.InsufficientFunds', tokenType: 'dust' } },
+      'Insufficient Funds: could not balance dust',
+    );
+    expect(Object.keys(err)).toEqual(['name']); // as on the live error: no _tag, no tokenType
+    expect(isDustShortage(err)).toBe(true);
+  });
+
+  it('does not match a FiberFailure whose cause is another token\'s shortage', () => {
+    const err = fiberFailure(
+      { _tag: 'Fail', error: { _tag: 'Wallet.InsufficientFunds', tokenType: '00'.repeat(32) } },
+      'Insufficient Funds: could not balance 0000',
+    );
+    expect(isDustShortage(err)).toBe(false);
+  });
+
+  it('finds a dust shortage on either side of a combined (Sequential) cause', () => {
+    const err = fiberFailure({
+      _tag: 'Sequential',
+      left: { _tag: 'Fail', error: { _tag: 'Other' } },
+      right: { _tag: 'Fail', error: { _tag: 'Wallet.InsufficientFunds', tokenType: 'dust' } },
+    }, 'several failures');
+    expect(isDustShortage(err)).toBe(true);
+  });
+});
