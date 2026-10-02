@@ -20,10 +20,6 @@ import { inspectTxHex } from './tx-inspect.ts';
 import { feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
-// Patches the ledger-8 dust variant's revert so it doesn't destroy UTXOs. On
-// a ledger-9 chain the dust wallet runs its ledger-9 variant, which this does
-// not patch; whether that variant has the same bug is still open (see plan).
-import './dust-revert-patch.ts';
 
 // ── Types ──
 
