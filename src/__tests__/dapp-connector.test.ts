@@ -22,6 +22,7 @@ vi.mock('@midnightntwrk/wallet-sdk/address-format', () => ({
 
 import { createDAppConnector, signatureScheme, toHistoryEntry, type DAppConnector } from '../lib/dapp-connector.ts';
 import { startLocalIndexer, type LocalIndexer } from './helpers/local-indexer.ts';
+import { PartlySignedTransactionError } from '../lib/sign-recipe.ts';
 import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
@@ -1314,6 +1315,54 @@ describe('dapp-connector', () => {
       } finally {
         Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
       }
+    });
+
+    // Signed by the agent, 40 Night over: unshielded balancing would merge an
+    // output for it into the agent's intent, invalidating the agent's signature.
+    const signedWithSurplus = async () => Buffer.from(await unsealedBytes(buildTx({
+      guaranteed: { inputs: [spend(AGENT_SK, 100n)], outputs: [pay(60n)], signers: [AGENT_SK] },
+    }))).toString('hex');
+
+    it.each([
+      ['every token kind (the default)', undefined],
+      ['all but Dust (payFees: false)', { payFees: false }],
+    ])('a signed transaction that needs unshielded balancing is refused as InvalidRequest when balancing %s', async (_mode, options) => {
+      const balance = vi.fn();
+      connector = createConnector({ bundleOverrides: { balanceUnboundTransaction: balance } });
+
+      const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: await signedWithSurplus(), options }, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toContain('segment 0 is not balanced in unshielded value');
+      expect(balance).not.toHaveBeenCalled();
+    });
+
+    it('the same transaction goes on to a Dust-only balance on a fee wallet, which adds nothing to its intent', async () => {
+      const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+      const bundle = createBundleStub({ balanceUnboundTransaction: balance });
+      (bundle.keystore as any).getPublicKey = () => WALLET_VK;
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveFees: true, autoApproveReads: true } });
+
+      await connector.handlers.balanceUnsealedTransaction({ tx: await signedWithSurplus() }, ctx());
+
+      expect(balance).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ tokenKindsToBalance: ['dust'] }));
+    });
+
+    it('a partly signed transaction found only at signing is still InvalidRequest, with its recipe reverted', async () => {
+      const recipe = { type: 'RECIPE' };
+      const revertFn = vi.fn().mockResolvedValue(undefined);
+      const bundle = createBundleStub({
+        balanceUnboundTransaction: () => Promise.resolve(recipe),
+        signRecipe: () => Promise.reject(new PartlySignedTransactionError()),
+      });
+      (bundle.facade as any).revert = revertFn;
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toContain('both signed and unsigned unshielded inputs');
+      expect(revertFn).toHaveBeenCalledWith(recipe);
     });
   });
 

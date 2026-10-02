@@ -343,7 +343,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '                              Dust fee is higher (default 10 DUST)',
       '--max-pending <n>             With --approve-fees: refuse new balances while n',
       '                              balanced transactions await submission (default 2)',
-      '--no-auto-approve-reads       Prompt for read methods too',
+      '--no-auto-approve-reads       Prompt for balancing too (reads never prompt)',
     ],
     examples: [
       'midnight serve',
@@ -757,9 +757,11 @@ can connect to it — no browser extension needed.
     prompts (rejected without a terminal). --max-fee <DUST> (default 10)
     and --max-pending <n> (default 2) bound what an agent can cost it.
   - --json: the listening line reports the approval policy, e.g.
-    "approval":{"reads":"auto","writes":"fee-only","feeLimits":
+    "approval":{"reads":"auto","balancing":"fee-only","writes":"fee-only","feeLimits":
     {"maxFeeSpecks":"10000000000000000","maxPending":2}}
-  - --no-auto-approve-reads: require approval for everything
+  - --no-auto-approve-reads: prompt for balanceUnsealedTransaction /
+    balanceSealedTransaction too (by default they are auto-approved; read
+    methods never prompt)
 
 DApp developers connect via the midnight-wallet-connector npm package:
 

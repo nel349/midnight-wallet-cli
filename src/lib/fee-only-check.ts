@@ -38,6 +38,15 @@ export function readDAppTransaction(bytes: Uint8Array, stage: DAppTxStage): FeeC
     : Transaction.deserialize<SignatureEnabled, Proof, Binding>('signature', 'proof', 'binding', bytes);
 }
 
+/** Every segment a transaction has: the guaranteed one (0) and each intent's and fallible offer's. */
+export function segmentsOf(tx: FeeCheckTransaction): Set<number> {
+  return new Set<number>([
+    GUARANTEED_SEGMENT,
+    ...(tx.intents?.keys() ?? []),
+    ...(tx.fallibleOffer?.keys() ?? []),
+  ]);
+}
+
 export interface UnshieldedInputRef {
   /** Where the input sits, e.g. "intent 1 guaranteed unshielded input 0". */
   where: string;
@@ -90,12 +99,7 @@ export function feeOnlyRefusals(tx: FeeCheckTransaction, walletKey: SignatureVer
     }
   }
 
-  const segments = new Set<number>([
-    GUARANTEED_SEGMENT,
-    ...(tx.intents?.keys() ?? []),
-    ...(tx.fallibleOffer?.keys() ?? []),
-  ]);
-  for (const segment of segments) {
+  for (const segment of segmentsOf(tx)) {
     let imbalances: Map<{ tag: string; raw?: string }, bigint>;
     try {
       imbalances = tx.imbalances(segment);

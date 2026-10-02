@@ -5,6 +5,7 @@ import {
   isReadOnlyMethod,
   isPrepMethod,
   promptApproval,
+  type ApprovalOptions,
   type ApprovalRequest,
 } from '../lib/approval.ts';
 
@@ -346,25 +347,58 @@ describe('approval', () => {
 describe('describeApprovalPolicy (what mn serve reports, in its header and --json)', () => {
   const limits = { maxFeeSpecks: 10n ** 15n / 2n, maxPending: 3 };
 
-  it('a fee wallet: reads auto, writes fee-only, with its limits exact in specks', () => {
-    expect(describeApprovalPolicy({ approveFees: true, autoApproveReads: true }, limits)).toEqual({
-      reads: 'auto', writes: 'fee-only', feeLimits: { maxFeeSpecks: '500000000000000', maxPending: 3 },
-    });
-  });
-
-  it('--approve-all: everything auto, no fee limits (they only bind a fee wallet)', () => {
-    expect(describeApprovalPolicy({ approveAll: true }, limits)).toEqual({ reads: 'auto', writes: 'all' });
-  });
-
-  it('the default: reads auto, writes prompt', () => {
-    expect(describeApprovalPolicy({ autoApproveReads: true }, limits)).toEqual({ reads: 'auto', writes: 'prompt' });
-  });
-
-  it('--no-auto-approve-reads: everything prompts', () => {
-    expect(describeApprovalPolicy({}, limits)).toEqual({ reads: 'prompt', writes: 'prompt' });
+  it.each([
+    ['--approve-all', { approveAll: true, autoApproveReads: true }, { reads: 'auto', balancing: 'auto', writes: 'auto' }],
+    ['--approve-fees', { approveFees: true, autoApproveReads: true }, {
+      reads: 'auto', balancing: 'fee-only', writes: 'fee-only', feeLimits: { maxFeeSpecks: '500000000000000', maxPending: 3 },
+    }],
+    ['the default', { autoApproveReads: true }, { reads: 'auto', balancing: 'auto', writes: 'prompt' }],
+    ['--no-auto-approve-reads', {}, { reads: 'auto', balancing: 'prompt', writes: 'prompt' }],
+  ] as const)('%s', (_flags, options, expected) => {
+    expect(describeApprovalPolicy(options, limits)).toEqual(expected);
   });
 
   it('is plain JSON (no bigint), so --json can print it', () => {
     expect(() => JSON.stringify(describeApprovalPolicy({ approveFees: true }, limits))).not.toThrow();
+  });
+
+  describe('matches what promptApproval decides without a terminal', () => {
+    let origIsTTY: boolean | undefined;
+    let origWrite: typeof process.stderr.write;
+    beforeEach(() => {
+      origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      origWrite = process.stderr.write;
+      process.stderr.write = (() => true) as any;
+    });
+    afterEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+      process.stderr.write = origWrite;
+    });
+
+    const decide = (method: string, options: ApprovalOptions, feeOnly = false) =>
+      promptApproval({ method, network: 'undeployed', details: [], feeOnly }, options);
+    // What each claim means for a request of that kind: 'auto' approves anything,
+    // 'fee-only' approves only a fee-only request, 'prompt' approves nothing.
+    const expectedFor = (claim: string, feeOnly: boolean) =>
+      claim === 'auto' || (claim === 'fee-only' && feeOnly) ? 'approve' : 'reject';
+
+    it.each([
+      [{ approveAll: true, autoApproveReads: true }],
+      [{ approveFees: true, autoApproveReads: true }],
+      [{ autoApproveReads: true }],
+      [{}],
+    ] as Array<[ApprovalOptions]>)('%j', async (options) => {
+      const policy = describeApprovalPolicy(options, limits);
+      for (const feeOnly of [false, true]) {
+        for (const method of ['balanceUnsealedTransaction', 'balanceSealedTransaction']) {
+          expect(await decide(method, options, feeOnly), `${method} feeOnly=${feeOnly}`).toBe(expectedFor(policy.balancing, feeOnly));
+        }
+        for (const method of ['submitTransaction', 'makeTransfer', 'makeIntent', 'signData']) {
+          const claimed = method === 'submitTransaction' ? expectedFor(policy.writes, feeOnly) : expectedFor(policy.writes, false);
+          expect(await decide(method, options, feeOnly && method === 'submitTransaction'), `${method} feeOnly=${feeOnly}`).toBe(claimed);
+        }
+      }
+    });
   });
 });

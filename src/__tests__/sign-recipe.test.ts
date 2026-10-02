@@ -21,7 +21,9 @@ import {
 } from '@midnightntwrk/ledger-v9';
 import type { BalancingRecipe, WalletFacade } from '@midnightntwrk/wallet-sdk/facade';
 import { feeOnlyRefusals, readDAppTransaction } from '../lib/fee-only-check.ts';
-import { PartlySignedTransactionError, assertSignable, signRecipe, unshieldedSignatures } from '../lib/sign-recipe.ts';
+import {
+  PartlySignedTransactionError, SignedTransactionNeedsUnshieldedError, assertSignable, signRecipe, unshieldedImbalanceSegments, unshieldedSignatures,
+} from '../lib/sign-recipe.ts';
 import {
   AGENT_SK, AGENT_VK, NETWORK, TTL, WALLET_SK, WALLET_VK,
   agentPaysMerchant, buildTx, pay, spend, unsealedBytes,
@@ -108,12 +110,45 @@ describe('unshieldedSignatures', () => {
     expect(unshieldedSignatures(readDAppTransaction(await unsealedBytes(tx), 'unsealed'))).toBe(expected);
   });
 
-  it('assertSignable refuses only the partly signed transaction', async () => {
-    const signed = readDAppTransaction(await unsealedBytes(agentPaysMerchant()), 'unsealed');
-    expect(() => assertSignable(signed)).not.toThrow();
-    const partly = readDAppTransaction(await unsealedBytes(PARTLY_SIGNED), 'unsealed');
-    expect(() => assertSignable(partly)).toThrow(PartlySignedTransactionError);
-    expect(() => assertSignable(partly)).toThrow('both signed and unsigned unshielded inputs');
+});
+
+describe('assertSignable', () => {
+  // The agent signs a 100 Night input but pays the merchant only 60: segment 0
+  // has 40 Night over, which unshielded balancing would return to the wallet
+  // with an output merged into the agent's signed intent.
+  const SIGNED_WITH_SURPLUS = () => buildTx({ guaranteed: { inputs: [spend(AGENT_SK, 100n)], outputs: [pay(60n)], signers: [AGENT_SK] } });
+  const read = async (tx: Parameters<typeof unsealedBytes>[0]) => readDAppTransaction(await unsealedBytes(tx), 'unsealed');
+
+  it('finds the segment whose unshielded value does not balance, and none in a balanced transaction', async () => {
+    expect(unshieldedImbalanceSegments(await read(SIGNED_WITH_SURPLUS()))).toEqual([0]);
+    expect(unshieldedImbalanceSegments(await read(agentPaysMerchant()))).toEqual([]);
+  });
+
+  it('refuses a partly signed transaction whatever is balanced', async () => {
+    const partly = await read(PARTLY_SIGNED);
+    for (const balancesUnshielded of [true, false]) {
+      expect(() => assertSignable(partly, balancesUnshielded)).toThrow(PartlySignedTransactionError);
+    }
+    expect(() => assertSignable(partly, false)).toThrow('both signed and unsigned unshielded inputs');
+  });
+
+  it('refuses a signed transaction that unshielded balancing would add to, naming the segment', async () => {
+    const tx = await read(SIGNED_WITH_SURPLUS());
+    expect(() => assertSignable(tx, true)).toThrow(SignedTransactionNeedsUnshieldedError);
+    expect(() => assertSignable(tx, true)).toThrow('segment 0 is not balanced in unshielded value');
+  });
+
+  it('accepts the same signed transaction when only Dust is balanced, and a balanced signed one either way', async () => {
+    const surplus = await read(SIGNED_WITH_SURPLUS());
+    expect(() => assertSignable(surplus, false)).not.toThrow();
+    const balanced = await read(agentPaysMerchant());
+    expect(() => assertSignable(balanced, true)).not.toThrow();
+    expect(() => assertSignable(balanced, false)).not.toThrow();
+  });
+
+  it('accepts an unsigned transaction that needs unshielded value: the wallet signs after balancing', async () => {
+    const tx = await read(buildTx({ guaranteed: { inputs: [spend(WALLET_SK, 100n)], outputs: [pay(60n)], signers: [] } }));
+    expect(() => assertSignable(tx, true)).not.toThrow();
   });
 });
 

@@ -12,10 +12,15 @@
 // nothing to sign in it, so mn signs only its own balancing transaction. One
 // with no signed inputs signs correctly through the facade. One that mixes
 // signed and unsigned inputs can't be signed correctly, so it is refused.
+//
+// Balancing unshielded value in an unbound transaction merges the wallet's
+// inputs and outputs into the dApp's own intent, which changes the data the
+// dApp signed. So a transaction whose unshielded inputs are signed can only be
+// balanced for Dust; one that also needs unshielded value is refused.
 
 import type { Signature } from '@midnightntwrk/ledger-v9';
 import type { BalancingRecipe, WalletFacade } from '@midnightntwrk/wallet-sdk/facade';
-import { readDAppTransaction, unshieldedInputs, type FeeCheckTransaction } from './fee-only-check.ts';
+import { readDAppTransaction, segmentsOf, unshieldedInputs, type FeeCheckTransaction } from './fee-only-check.ts';
 
 export type SignSegment = (data: Uint8Array) => Promise<Signature>;
 
@@ -42,9 +47,38 @@ export class PartlySignedTransactionError extends Error {
   }
 }
 
-/** The wallet SDK can sign a dApp transaction in this state without breaking it. Throws when it can't. */
-export function assertSignable(tx: FeeCheckTransaction): void {
-  if (unshieldedSignatures(tx) === 'some') throw new PartlySignedTransactionError();
+/** A dApp transaction with signed unshielded inputs that also needs unshielded value from the wallet. */
+export class SignedTransactionNeedsUnshieldedError extends Error {
+  constructor(segments: number[]) {
+    super(
+      `The transaction's unshielded inputs are already signed, but segment ${segments.join(', ')} is not balanced in `
+      + 'unshielded value. This wallet balances it by adding inputs and outputs to the same intent, which invalidates '
+      + 'those signatures. Leave the unshielded inputs unsigned so they are signed after balancing, or balance the '
+      + 'sealed transaction with balanceSealedTransaction, which adds a separate intent.',
+    );
+    this.name = 'SignedTransactionNeedsUnshieldedError';
+    Object.setPrototypeOf(this, SignedTransactionNeedsUnshieldedError.prototype);
+  }
+}
+
+/** The segments whose unshielded value doesn't balance: what the wallet would add inputs or outputs for. */
+export function unshieldedImbalanceSegments(tx: FeeCheckTransaction): number[] {
+  return [...segmentsOf(tx)].filter((segment) =>
+    [...tx.imbalances(segment)].some(([token, value]) => token.tag === 'unshielded' && value !== 0n));
+}
+
+/**
+ * The dApp's unsealed transaction can be balanced and signed without breaking
+ * it. Throws when it can't: some unshielded inputs signed and some not, or all
+ * signed while `balancesUnshielded` would add unshielded value to it.
+ */
+export function assertSignable(tx: FeeCheckTransaction, balancesUnshielded: boolean): void {
+  const state = unshieldedSignatures(tx);
+  if (state === 'some') throw new PartlySignedTransactionError();
+  if (state === 'all' && balancesUnshielded) {
+    const segments = unshieldedImbalanceSegments(tx);
+    if (segments.length > 0) throw new SignedTransactionNeedsUnshieldedError(segments);
+  }
 }
 
 /** Sign a balancing recipe as the facade does, without re-signing a dApp transaction that is already signed. */

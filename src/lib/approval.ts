@@ -47,23 +47,31 @@ export interface ApprovalOptions {
 
 /** What a server approves without asking, as `mn serve` reports it. */
 export interface ApprovalPolicy {
-  /** Read-only requests answered without a prompt. */
-  reads: 'auto' | 'prompt';
-  /** Writes: all approved, only the fee-wallet ones (Dust fee + its submit), or none without a prompt. */
-  writes: 'all' | 'fee-only' | 'prompt';
+  /** Read-only methods never prompt. */
+  reads: 'auto';
+  /**
+   * balanceUnsealedTransaction / balanceSealedTransaction, which reserve the
+   * wallet's coins and sign: approved without a prompt, only fee-only ones, or
+   * each prompted.
+   */
+  balancing: 'auto' | 'fee-only' | 'prompt';
+  /** submitTransaction, makeTransfer, makeIntent and signData: approved, only the submit of a fee-only balance, or each prompted. */
+  writes: 'auto' | 'fee-only' | 'prompt';
   /** Under fee-only: the most Dust one transaction may cost (specks, as a string) and how many may wait unsubmitted. */
   feeLimits?: { maxFeeSpecks: string; maxPending: number };
 }
 
 export function describeApprovalPolicy(options: ApprovalOptions, feeLimits: FeeLimits): ApprovalPolicy {
-  const writes = options.approveAll ? 'all' : options.approveFees ? 'fee-only' : 'prompt';
-  return {
-    reads: options.approveAll || options.autoApproveReads ? 'auto' : 'prompt',
-    writes,
-    ...(writes === 'fee-only'
-      ? { feeLimits: { maxFeeSpecks: feeLimits.maxFeeSpecks.toString(), maxPending: feeLimits.maxPending } }
-      : {}),
-  };
+  if (options.approveAll) return { reads: 'auto', balancing: 'auto', writes: 'auto' };
+  if (options.approveFees) {
+    return {
+      reads: 'auto',
+      balancing: 'fee-only',
+      writes: 'fee-only',
+      feeLimits: { maxFeeSpecks: feeLimits.maxFeeSpecks.toString(), maxPending: feeLimits.maxPending },
+    };
+  }
+  return { reads: 'auto', balancing: options.autoApproveReads ? 'auto' : 'prompt', writes: 'prompt' };
 }
 
 // ── Read-only method set ──
@@ -168,7 +176,8 @@ export async function promptApproval(
     return 'approve';
   }
 
-  if (options.autoApproveReads && isPrepMethod(request.method)) {
+  // A fee wallet balances only fee-only (approved above); anything else it is asked to balance prompts.
+  if (options.autoApproveReads && !options.approveFees && isPrepMethod(request.method)) {
     process.stderr.write(dim(`  Auto-approved (prep): ${request.method}`) + '\n');
     return 'approve';
   }

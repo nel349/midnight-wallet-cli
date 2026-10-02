@@ -19,8 +19,8 @@ import { isDustShortage } from './sdk-errors.ts';
 import { DEFAULT_FEE_LIMITS, feeLimitRefusal, pendingLimitRefusal, type FeeLimits } from './fee-limits.ts';
 import { inspectTxHex } from './tx-inspect.ts';
 import { feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
-import { assertSignable, signRecipe } from './sign-recipe.ts';
-import { fetchSegmentResults, type SegmentResult } from './tx-segments.ts';
+import { PartlySignedTransactionError, assertSignable, signRecipe } from './sign-recipe.ts';
+import { fetchPartialSuccessSegments, type SegmentResult } from './tx-segments.ts';
 import { walletsBelowLedger9 } from './ledger-guard.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
@@ -268,6 +268,8 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     } catch (err) {
       // Release what balancing booked; nothing will be tracked for this recipe.
       try { await facade.revert(recipe); } catch { /* best-effort */ }
+      // The transaction's own shape, not the wallet, is what can't be signed.
+      if (err instanceof PartlySignedTransactionError) throw createApiError('InvalidRequest', err.message);
       throw err;
     }
     tracker?.start('proving');
@@ -357,9 +359,9 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
   }
 
   /** Refuse an unsealed dApp transaction the wallet can't sign without breaking it. */
-  function assertDAppTxSignable(txHex: string): void {
+  function assertDAppTxSignable(txHex: string, balancesUnshielded: boolean): void {
     try {
-      assertSignable(readDAppTransaction(fromHex(txHex), 'unsealed'));
+      assertSignable(readDAppTransaction(fromHex(txHex), 'unsealed'), balancesUnshielded);
     } catch (err) {
       throw createApiError('InvalidRequest', extractErrorDetail(err));
     }
@@ -411,7 +413,9 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     const ttl = createTtl();
     const dappTx = stage === 'unsealed' ? adopt(txHex, 'Unbound') : adopt(txHex, 'Finalized');
     // Signing an unsealed transaction signs the dApp's part too; refuse one that can't be signed before booking anything.
-    if (stage === 'unsealed') assertDAppTxSignable(txHex);
+    if (stage === 'unsealed') {
+      assertDAppTxSignable(txHex, tokenKindsToBalance === 'all' || tokenKindsToBalance.includes('unshielded'));
+    }
     if (feeOnly) await assertWithinFeeLimits(dappTx, ttl);
 
     const tracker = makeTracker(method, context);
@@ -598,14 +602,20 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       const pageSize = Number(params.pageSize ?? 20);
       const start = pageNumber * pageSize;
       const entries = await facade.getAllFromTxHistory();
-      return Promise.all(entries.slice(start, start + pageSize).map(async (entry) => {
-        if (entry.lifecycle.status !== 'finalized' || entry.status !== 'PARTIAL_SUCCESS') return toHistoryEntry(entry);
+      const page: HistoryEntry[] = [];
+      // One at a time: a page can be large, and each partial success is an indexer query.
+      for (const entry of entries.slice(start, start + pageSize)) {
+        if (entry.lifecycle.status !== 'finalized' || entry.status !== 'PARTIAL_SUCCESS') {
+          page.push(toHistoryEntry(entry));
+          continue;
+        }
         try {
-          return toHistoryEntry(entry, await fetchSegmentResults(networkConfig.indexer, entry.hash));
+          page.push(toHistoryEntry(entry, await fetchPartialSuccessSegments(networkConfig.indexer, entry.hash)));
         } catch (err) {
           throw createApiError('InternalError', extractErrorDetail(err));
         }
-      }));
+      }
+      return page;
     },
 
     getConfiguration: async () => {

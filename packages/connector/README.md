@@ -261,7 +261,11 @@ const { tx } = await wallet.balanceUnsealedTransaction(agentTxHex); // adds only
 await wallet.submitTransaction(tx);
 ```
 
-Both calls are approved without a terminal only when the transaction spends none of the wallet's funds, has no unsigned unshielded input and needs no value but Dust, and the submit is for a transaction the same connection had balanced. A transaction outside that is refused as `Rejected`, listing every reason; any other write needs a terminal, so without one it is rejected too. `--max-fee <DUST>` and `--max-pending <n>` bound what one agent can cost the wallet.
+Both calls are approved without a terminal only when the transaction spends none of the wallet's funds, has no unsigned unshielded input, needs no value but Dust and is not a rewards claim, and the submit is for a transaction the same connection had balanced. What comes back otherwise:
+
+- `Rejected`: the transaction is outside that scope (every reason is listed), or a write other than these needs a terminal and there is none.
+- `InvalidRequest`: a request the wallet can't act on, such as `payFees: false`, bytes it can't read as a proven ledger-9 transaction, or a transaction whose unshielded inputs are partly signed.
+- `Disconnected`: the wallet hasn't synced past the ledger-9 fork yet; retry once it has. `--max-fee <DUST>` and `--max-pending <n>` bound what one agent can cost the wallet.
 
 ## Error Handling
 

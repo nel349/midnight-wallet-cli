@@ -3,6 +3,8 @@
 // segments of a partially successful one (segment 0 is the guaranteed section,
 // each intent's fallible section is its own segment).
 
+import { queryIndexer } from './indexer-graphql.ts';
+
 export interface SegmentResult {
   id: number;
   success: boolean;
@@ -26,24 +28,23 @@ export class SegmentResultsUnavailableError extends Error {
   }
 }
 
-/** The segment results the indexer lists for a transaction (only a partial success has any). */
-export async function fetchSegmentResults(indexerHttpUrl: string, txHash: string): Promise<SegmentResult[]> {
-  let body: { data?: { transactions?: Array<{ __typename: string; transactionResult?: { segments?: SegmentResult[] | null } }> }; errors?: Array<{ message: string }> };
+/**
+ * The segment results the indexer lists for a partially successful
+ * transaction. Throws when the indexer can't answer, has no such transaction,
+ * or doesn't report it as a partial success.
+ */
+export async function fetchPartialSuccessSegments(indexerHttpUrl: string, txHash: string): Promise<SegmentResult[]> {
+  let data: { transactions?: Array<{ __typename: string; transactionResult?: { status?: string; segments?: SegmentResult[] | null } }> };
   try {
-    const res = await fetch(indexerHttpUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query: SEGMENTS_QUERY, variables: { hash: txHash } }),
-      signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
-    });
-    body = await res.json() as typeof body;
+    data = await queryIndexer(indexerHttpUrl, SEGMENTS_QUERY, { hash: txHash }, QUERY_TIMEOUT_MS);
   } catch (err) {
     throw new SegmentResultsUnavailableError(txHash, (err as Error).message);
   }
-  if (body.errors?.length) {
-    throw new SegmentResultsUnavailableError(txHash, body.errors.map((e) => e.message).join('; '));
-  }
-  const tx = body.data?.transactions?.find((t) => t.__typename === 'RegularTransaction');
+  const tx = data.transactions?.find((t) => t.__typename === 'RegularTransaction');
   if (!tx) throw new SegmentResultsUnavailableError(txHash, 'the indexer has no such transaction');
+  const status = tx.transactionResult?.status;
+  if (status !== 'PARTIAL_SUCCESS') {
+    throw new SegmentResultsUnavailableError(txHash, `the indexer reports it as ${status ?? 'having no result'}, not a partial success`);
+  }
   return tx.transactionResult?.segments ?? [];
 }

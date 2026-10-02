@@ -5,6 +5,7 @@
 
 import { FORK_SCHEDULE, type NetworkConfig } from './network.ts';
 import { getChainGenesisHash } from './chain-id.ts';
+import { queryIndexer } from './indexer-graphql.ts';
 
 export class UnsupportedLedgerError extends Error {
   readonly code = 'UNSUPPORTED_LEDGER';
@@ -32,14 +33,9 @@ const PROBE_TIMEOUT_MS = 5_000;
 /** The chain tip's protocol version from the indexer, or null if it can't be read. */
 export async function fetchProtocolVersion(indexerHttpUrl: string): Promise<bigint | null> {
   try {
-    const res = await fetch(indexerHttpUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query: '{ block { protocolVersion } }' }),
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    const body = await res.json() as { data?: { block?: { protocolVersion?: number } } };
-    const version = body.data?.block?.protocolVersion;
+    const data = await queryIndexer<{ block?: { protocolVersion?: number } }>(
+      indexerHttpUrl, '{ block { protocolVersion } }', undefined, PROBE_TIMEOUT_MS);
+    const version = data.block?.protocolVersion;
     return typeof version === 'number' ? BigInt(version) : null;
   } catch {
     return null;
