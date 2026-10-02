@@ -78,12 +78,5 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
-  },
-  "optionalDependencies": {
-    "@nel349/dust-sync-darwin-arm64": "0.5.2",
-    "@nel349/dust-sync-darwin-x64": "0.5.2",
-    "@nel349/dust-sync-linux-x64": "0.5.2",
-    "@nel349/dust-sync-linux-arm64": "0.5.2",
-    "@nel349/dust-sync-win32-x64": "0.5.2"
   }
 }

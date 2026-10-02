@@ -5,6 +5,7 @@
 
 import { parseArgs, hasFlag } from './lib/argv.ts';
 import { errorMessage, usageMessage } from './ui/format.ts';
+import { assertKnownFlags } from './lib/command-flags.ts';
 import { classifyError, humanizeNetworkError, EXIT_INVALID_ARGS } from './lib/exit-codes.ts';
 import { UsageError, isUsageError } from './lib/errors.ts';
 import { writeJsonError } from './lib/json-output.ts';
@@ -36,8 +37,10 @@ if (hasFlag(args, 'version') || hasFlag(args, 'v')) {
   process.exit(0);
 }
 
-// Global --help / -h handling
-if (hasFlag(args, 'help') || hasFlag(args, 'h')) {
+// Global --help / -h handling. `mn <cmd> --help` shows help whatever other
+// flags are present, so flag checking is skipped for it.
+const helpRequested = hasFlag(args, 'help') || hasFlag(args, 'h');
+if (helpRequested) {
   args.command = 'help';
 }
 
@@ -66,6 +69,9 @@ process.on('SIGINT', handleShutdown);
 process.on('SIGTERM', handleShutdown);
 
 async function run(): Promise<void> {
+  // An unrecognised flag is refused before anything runs, instead of being
+  // ignored and the command falling back to defaults.
+  if (!helpRequested) assertKnownFlags(args);
   switch (command) {
     case 'help': {
       const { default: handler } = await import('./commands/help.ts');

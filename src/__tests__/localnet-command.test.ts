@@ -5,9 +5,13 @@ import { tmpdir } from 'os';
 import localnetCommand from '../commands/localnet.ts';
 import { parseArgs } from '../lib/argv.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
+import { existsSync, statSync } from 'fs';
 import {
   COMPOSE_YAML,
   COMPOSE_VERSION,
+  ensureComposeFile,
+  getComposePath,
+  LocalnetUnavailableError,
 } from '../lib/localnet.ts';
 import helpCommand, { COMMAND_SPECS } from '../commands/help.ts';
 import { COMMAND_BRIEFS } from '../ui/art.ts';
@@ -126,6 +130,30 @@ describe('COMPOSE_YAML content', () => {
 describe('COMPOSE_VERSION', () => {
   it('is a semver-like string', () => {
     expect(COMPOSE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+});
+
+describe('ledger-9 build: mn localnet cannot start a network', () => {
+  // The compose stack is ledger 8, which wallet-sdk 2.0 can't sync with, and
+  // no published indexer image runs ledger 9 yet. Every start path goes
+  // through ensureComposeFile, so it refuses there, before writing anything.
+  const composeFingerprint = () => {
+    const path = getComposePath();
+    return existsSync(path) ? `${statSync(path).mtimeMs}:${readFileSync(path, 'utf-8').length}` : 'absent';
+  };
+
+  it('ensureComposeFile refuses, says what to run instead, and writes nothing', () => {
+    const before = composeFingerprint();
+    let err: unknown;
+    try { ensureComposeFile(); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(LocalnetUnavailableError);
+    const msg = (err as Error).message;
+    expect(msg).toContain('ledger 9');
+    expect(msg).toContain('--node');
+    expect(msg).toContain('--indexer-ws');
+    expect(msg).toContain('--proof-server');
+    expect(msg).toContain('midnight config set');
+    expect(composeFingerprint()).toBe(before);
   });
 });
 

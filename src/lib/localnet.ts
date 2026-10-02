@@ -123,10 +123,35 @@ export function checkDockerAvailable(): string {
 }
 
 /**
+ * This build of mn targets ledger 9, and the stack below is ledger 8 (which
+ * wallet-sdk 2.0 can't sync with). No published indexer image runs ledger 9
+ * yet, so mn can't start a localnet for now. stop/down/status/logs still
+ * manage an existing stack; only starting is refused.
+ */
+const LOCALNET_CAN_START: boolean = false;
+
+export class LocalnetUnavailableError extends Error {
+  readonly code = 'LOCALNET_UNAVAILABLE';
+  constructor() {
+    super(
+      'mn localnet can\'t start a ledger-9 network yet: no published indexer image runs ledger 9.\n' +
+      'Run a ledger-9 stack yourself (node 2.1.0-rc.2, proof-server 9.0.0-rc.8, a 4.4 indexer) and point mn at it:\n' +
+      '  per command:  --node ws://localhost:9944 --indexer-ws ws://localhost:8088/api/v4/graphql/ws --proof-server http://localhost:6300\n' +
+      '  or once:      midnight config set node <url>; midnight config set indexer-ws <url>; midnight config set proof-server <url>',
+    );
+    this.name = 'LocalnetUnavailableError';
+  }
+}
+
+/**
  * Write compose.yml to LOCALNET_DIR if it doesn't exist or the version has changed.
  * Returns true if the file was written, false if it was already up to date.
+ *
+ * Every path that starts the localnet calls this first, so it is where a
+ * ledger-9 build refuses, before anything is written or started.
  */
 export function ensureComposeFile(): boolean {
+  if (!LOCALNET_CAN_START) throw new LocalnetUnavailableError();
   const versionMatches =
     existsSync(VERSION_PATH) &&
     existsSync(COMPOSE_PATH) &&
