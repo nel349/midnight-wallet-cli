@@ -20,6 +20,7 @@ import { DEFAULT_FEE_LIMITS, feeLimitRefusal, pendingLimitRefusal, type FeeLimit
 import { inspectTxHex } from './tx-inspect.ts';
 import { feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { assertSignable, signRecipe } from './sign-recipe.ts';
+import { fetchSegmentResults, type SegmentResult } from './tx-segments.ts';
 import { walletsBelowLedger9 } from './ledger-guard.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
@@ -116,18 +117,40 @@ export type HistoryEntry = {
 };
 
 /**
- * Map a wallet history entry onto the connector API's shape. The wallet
- * records one outcome per transaction, not one per segment, so a finalized
- * entry reports no per-segment execution status rather than inventing one.
+ * Map a wallet history entry onto the connector API's shape. The wallet keeps
+ * one outcome per transaction; segment 0 is the guaranteed section, which
+ * every transaction has.
+ * - SUCCESS: every segment succeeded, so segment 0 did.
+ * - FAILURE: the ledger reports any fallible failure as a partial success,
+ *   so a failure is the guaranteed section's.
+ * - PARTIAL_SUCCESS: the per-segment results, which only the indexer has, are
+ *   required as `segments`.
+ * An entry with no recorded outcome reports none.
  */
-export function toHistoryEntry(entry: WalletEntry): HistoryEntry {
+export function toHistoryEntry(entry: WalletEntry, segments?: readonly SegmentResult[]): HistoryEntry {
   switch (entry.lifecycle.status) {
     case 'finalized':
-      return { txHash: entry.hash, txStatus: { status: 'finalized', executionStatus: {} } };
+      return { txHash: entry.hash, txStatus: { status: 'finalized', executionStatus: executionStatusOf(entry, segments) } };
     case 'rejected':
       return { txHash: entry.hash, txStatus: { status: 'discarded' } };
     case 'pending':
       return { txHash: entry.hash, txStatus: { status: 'pending' } };
+  }
+}
+
+function executionStatusOf(entry: WalletEntry, segments?: readonly SegmentResult[]): Record<number, 'Success' | 'Failure'> {
+  switch (entry.status) {
+    case 'SUCCESS':
+      return { 0: 'Success' };
+    case 'FAILURE':
+      return { 0: 'Failure' };
+    case 'PARTIAL_SUCCESS':
+      if (!segments || segments.length === 0) {
+        throw new Error(`Transaction ${entry.hash} partly succeeded, but its segment results are missing`);
+      }
+      return Object.fromEntries(segments.map((s) => [s.id, s.success ? 'Success' : 'Failure']));
+    case undefined:
+      return {};
   }
 }
 
@@ -575,7 +598,14 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       const pageSize = Number(params.pageSize ?? 20);
       const start = pageNumber * pageSize;
       const entries = await facade.getAllFromTxHistory();
-      return entries.slice(start, start + pageSize).map(toHistoryEntry);
+      return Promise.all(entries.slice(start, start + pageSize).map(async (entry) => {
+        if (entry.lifecycle.status !== 'finalized' || entry.status !== 'PARTIAL_SUCCESS') return toHistoryEntry(entry);
+        try {
+          return toHistoryEntry(entry, await fetchSegmentResults(networkConfig.indexer, entry.hash));
+        } catch (err) {
+          throw createApiError('InternalError', extractErrorDetail(err));
+        }
+      }));
     },
 
     getConfiguration: async () => {

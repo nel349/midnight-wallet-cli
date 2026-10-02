@@ -20,7 +20,8 @@ vi.mock('@midnightntwrk/wallet-sdk/address-format', () => ({
   ShieldedAddress: {},
 }));
 
-import { createDAppConnector, signatureScheme, type DAppConnector } from '../lib/dapp-connector.ts';
+import { createDAppConnector, signatureScheme, toHistoryEntry, type DAppConnector } from '../lib/dapp-connector.ts';
+import { startLocalIndexer, type LocalIndexer } from './helpers/local-indexer.ts';
 import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
@@ -82,7 +83,7 @@ function mockState(overrides?: {
 
 /** Wallet history as the SDK records it: one finalized, one rejected, one pending. */
 const HISTORY = [
-  { hash: 'tx-hash-001', identifiers: [], lifecycle: { status: 'finalized', finalizedBlock: { hash: 'b1', height: 1, timestamp: new Date(0) } } },
+  { hash: 'tx-hash-001', identifiers: [], status: 'SUCCESS', lifecycle: { status: 'finalized', finalizedBlock: { hash: 'b1', height: 1, timestamp: new Date(0) } } },
   { hash: 'tx-hash-002', identifiers: [], lifecycle: { status: 'rejected', rejectedAt: new Date(0) } },
   { hash: 'tx-hash-003', identifiers: [], lifecycle: { status: 'pending', submittedAt: new Date(0) } },
 ];
@@ -273,7 +274,7 @@ describe('dapp-connector', () => {
       connector = createConnector();
       const result = await connector.handlers.getTxHistory({ pageNumber: 0, pageSize: 10 }, ctx()) as any[];
       expect(result).toEqual([
-        { txHash: 'tx-hash-001', txStatus: { status: 'finalized', executionStatus: {} } },
+        { txHash: 'tx-hash-001', txStatus: { status: 'finalized', executionStatus: { 0: 'Success' } } },
         { txHash: 'tx-hash-002', txStatus: { status: 'discarded' } },
         { txHash: 'tx-hash-003', txStatus: { status: 'pending' } },
       ]);
@@ -297,6 +298,68 @@ describe('dapp-connector', () => {
       connector = createConnector();
       const result = await connector.handlers.getTxHistory({ pageNumber: 5, pageSize: 1 }, ctx());
       expect(result).toEqual([]);
+    });
+
+    describe('execution status of finalized transactions', () => {
+      const finalized = (hash: string, status?: string) => ({
+        hash, identifiers: [], ...(status ? { status } : {}),
+        lifecycle: { status: 'finalized', finalizedBlock: { hash: 'b', height: 1, timestamp: new Date(0) } },
+      });
+      let indexer: LocalIndexer | undefined;
+      afterEach(async () => { await indexer?.close(); indexer = undefined; });
+
+      function connectorWith(history: unknown[], indexerUrl = TEST_NETWORK_CONFIG.indexer): DAppConnector {
+        return createDAppConnector({
+          bundle: createBundleStub({ getAllFromTxHistory: () => Promise.resolve(history as any[]) }),
+          networkConfig: { ...TEST_NETWORK_CONFIG, indexer: indexerUrl },
+          approvalOptions: { approveAll: true },
+        });
+      }
+
+      it('reports a success as segment 0 succeeding and a failure as segment 0 failing, without asking the indexer', async () => {
+        indexer = await startLocalIndexer(() => '{}');
+        connector = connectorWith([finalized('ok', 'SUCCESS'), finalized('bad', 'FAILURE'), finalized('unknown')], indexer.url);
+
+        const result = await connector.handlers.getTxHistory({}, ctx());
+
+        expect(result).toEqual([
+          { txHash: 'ok', txStatus: { status: 'finalized', executionStatus: { 0: 'Success' } } },
+          { txHash: 'bad', txStatus: { status: 'finalized', executionStatus: { 0: 'Failure' } } },
+          // No recorded outcome: none is claimed.
+          { txHash: 'unknown', txStatus: { status: 'finalized', executionStatus: {} } },
+        ]);
+        expect(indexer.requests).toEqual([]);
+      });
+
+      it('reads a partial success\'s segments from the indexer, by the entry\'s hash', async () => {
+        indexer = await startLocalIndexer(() => JSON.stringify({ data: { transactions: [{
+          __typename: 'RegularTransaction',
+          transactionResult: { status: 'PARTIAL_SUCCESS', segments: [{ id: 0, success: true }, { id: 1, success: true }, { id: 2, success: false }] },
+        }] } }));
+        connector = connectorWith([finalized('ok', 'SUCCESS'), finalized('partly', 'PARTIAL_SUCCESS')], indexer.url);
+
+        const result = await connector.handlers.getTxHistory({}, ctx());
+
+        expect(result).toEqual([
+          { txHash: 'ok', txStatus: { status: 'finalized', executionStatus: { 0: 'Success' } } },
+          { txHash: 'partly', txStatus: { status: 'finalized', executionStatus: { 0: 'Success', 1: 'Success', 2: 'Failure' } } },
+        ]);
+        expect(indexer.requests.map((r) => r.variables)).toEqual([{ hash: 'partly' }]);
+      });
+
+      it('fails as InternalError, naming the transaction, when the indexer cannot give a partial success\'s segments', async () => {
+        connector = connectorWith([finalized('partly', 'PARTIAL_SUCCESS')], 'http://127.0.0.1:9/api/v4/graphql');
+
+        const err: any = await connector.handlers.getTxHistory({}, ctx()).catch((e: any) => e);
+
+        expect(err.code).toBe('InternalError');
+        expect(err.message).toContain('segment results of transaction partly');
+      });
+
+      it('toHistoryEntry refuses a partial success without its segments rather than report it as anything else', () => {
+        expect(() => toHistoryEntry(finalized('partly', 'PARTIAL_SUCCESS') as any)).toThrow('segment results are missing');
+        expect(() => toHistoryEntry(finalized('partly', 'PARTIAL_SUCCESS') as any, [])).toThrow('segment results are missing');
+      });
     });
 
     it('defaults to pageNumber 0 and pageSize 20', async () => {
