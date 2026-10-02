@@ -43,7 +43,10 @@ Start the wallet server first:
 ```bash
 mn serve                # interactive terminal approval
 mn serve --approve-all  # auto-approve all requests (dev only)
+mn serve --approve-fees # fee wallet for an agent: pays only the Dust fee (see below)
 ```
+
+The types follow `@midnightntwrk/dapp-connector-api` 4.1: `signData` returns a `scheme` (`mn serve` signs with `schnorr_bip340`), and a history entry's status can be `confirmed`.
 
 ## API Reference
 
@@ -247,6 +250,18 @@ const wallet = await createWalletClient({
 ```
 
 These callbacks are optional and only relevant during development with `mn serve` in interactive mode.
+
+## Fee Wallet for an Agent
+
+`mn serve --approve-fees` (midnight-wallet-cli 0.6, ledger 9) is for an agent that builds, proves and signs its own transaction, with its own value already balanced, and only needs the Dust fee paid:
+
+```typescript
+const wallet = await createWalletClient({ url: 'ws://localhost:9932', networkId: 'Undeployed' });
+const { tx } = await wallet.balanceUnsealedTransaction(agentTxHex); // adds only Dust
+await wallet.submitTransaction(tx);
+```
+
+Both calls are approved without a terminal only when the transaction spends none of the wallet's funds, has no unsigned unshielded input and needs no value but Dust, and the submit is for a transaction the same connection had balanced. A transaction outside that is refused as `Rejected`, listing every reason; any other write needs a terminal, so without one it is rejected too. `--max-fee <DUST>` and `--max-pending <n>` bound what one agent can cost the wallet.
 
 ## Error Handling
 
