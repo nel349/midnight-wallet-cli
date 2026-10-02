@@ -20,12 +20,12 @@ const SPAWN_TIMEOUT_MS = 15_000;
 describe('--version flag', () => {
   it('prints version with --version', () => {
     const output = run(['--version']);
-    expect(output).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(output).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
   }, SPAWN_TIMEOUT_MS);
 
   it('prints version with -v', () => {
     const output = run(['-v']);
-    expect(output).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(output).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
   }, SPAWN_TIMEOUT_MS);
 
   it('prints the version from package.json', () => {

@@ -33,10 +33,12 @@ The main tarball ships only `dist/`, `docs/SKILL.md`, and `NOTICE` (see `files` 
    ```bash
    git tag vX.Y.Z && git push origin vX.Y.Z
    ```
-4. The `release` workflow then, on native runners per platform:
+4. The `release` workflow first checks that the tag (without the leading `v`) equals `package.json`'s `version`, and fails before publishing anything if they differ. Then, on native runners per platform:
    - builds `dust-sync` with `cargo build --release --locked` (the `--locked` keeps the `ledger-v8 =8.1.0` pins so the serialized `DustLocalState` round-trips byte-identically);
    - publishes the five `@nel349/dust-sync-<os>-<arch>` packages **before** the main package (so its optional deps resolve);
    - publishes `midnight-wallet-cli`.
+
+**Prereleases.** A tag with a prerelease suffix (e.g. `v0.6.0-rc.0`) skips the sidecar entirely: no build, no platform packages, no `sync-sidecar-versions` run. Only the main package is published, under the npm `next` dist-tag, so it never becomes `latest`. Bump `package.json` to the same prerelease version before tagging; the tag check above applies here too.
 
 Dry-run the build without publishing via the workflow's `workflow_dispatch` (`dry_run: true`) — it builds all five targets and skips the publish job.
 

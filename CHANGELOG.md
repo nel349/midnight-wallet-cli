@@ -2,6 +2,41 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [0.6.0-rc.0] - unreleased
+
+> **Ledger 9 only.** This prerelease targets the ledger-9 stack: wallet-sdk 2.0.0-rc.0, ledger-v9 1.0.0-rc.5, midnight-js 5.0.0-rc.1, compact-runtime 0.20.0 (contracts compiled with Compact 0.35 / language 0.27), dapp-connector-api 4.1.0-beta.1. It is published under the npm `next` tag (`npm install -g midnight-wallet-cli@next`). Networks still on ledger 8 (preview and preprod today) stay on 0.5.x.
+
+### Breaking
+
+- **Ledger-8 networks are refused.** mn checks the chain's protocol version up front and stops with an error naming the network and pointing at 0.5.x, instead of retrying a sync that can never finish.
+- **`mn localnet up` is refused.** mn's compose stack is ledger 8 and no published indexer image runs ledger 9 yet. Every start path (`localnet up`, the `midnight_localnet_up` MCP tool, `mn dev`, and the localnet step of `mn test`) refuses before writing or starting anything, with instructions for pointing mn at a ledger-9 stack you run (`--node` / `--indexer-ws` / `--proof-server` or `midnight config set`). `stop`, `down`, `status`, `logs` and `clean` still manage an existing stack.
+- **No native dust sidecar on this build.** The sidecar is built against ledger 8, so its `@nel349/dust-sync-*` optional dependencies are gone and it is never run. Dust sync always uses the WASM reader; `MN_DUST_SYNC_BIN` and `MN_DISABLE_NATIVE_DUST` are ignored.
+- **Unknown flags are rejected.** mn used to ignore flags it didn't recognise, so a malformed argument (an unsplit `"--network x --node y"` string) was dropped and the command fell back to default endpoints, which can be a different chain. Each command now has a registry of accepted flags, checked before dispatch; unknown ones fail with a usage error naming them. `--help` is exempt.
+- **Caches re-sync once.** The wallet, dust and shielded cache formats are bumped, so the first run on this build re-syncs from scratch. Ledger-8 state bytes read without error under ledger 9 and dev chains share a genesis hash, so only the version keeps old caches off a new chain.
+- **`mn dust export` snapshots are ledger-9 only.** The snapshot restores onto wallet-sdk 2.x's ledger-9 (V2) dust wallet; wallet-sdk 1.x consumers can't restore it. mn also refuses to overlay a ledger-9 dust state onto a base snapshot stamped below the ledger-9 fork.
+
+### Added
+
+- **`mn serve --approve-fees`: fee-wallet mode for agents.** For an agent that sends a proven ledger-9 transaction whose own value is already balanced. Balancing adds only Dust, and is auto-approved only when the transaction spends none of mn's unshielded funds, has no unsigned unshielded input, is short of no non-Dust token, and is not a rewards claim; otherwise it is refused with every reason listed. `submitTransaction` is auto-approved only for a transaction balanced that way on the same connection. Everything else still prompts (rejected without a terminal). Can't be combined with `--approve-all`.
+- **`mn contract` takes `--node`, `--indexer-ws` and `--proof-server`.** They apply to every subcommand and to the `mn serve` it starts. Before reusing a running serve, mn compares the node and indexer it reports with the requested ones and refuses on a mismatch (two local stacks share the network name).
+- **64-byte BIP-39 seeds accepted everywhere a seed is taken.** `--seed` and `MN_SEED` take 64 or 128 hex chars (a 32-byte raw seed, or the 64-byte `mnemonicToSeedSync` output that mn itself stores for mnemonic wallets). Other lengths are still rejected, and errors name the source (`--seed` or `MN_SEED`).
+- **`mn airdrop` infers `--shielded` from a shielded address.** `mn airdrop --wallet mn_shield-addr_...` now routes to the shielded airdrop instead of asking for `--shielded`. `--shielded` with an `mn_addr_...` address is still an error.
+- **`MN_NO_LOCAL_DETECT=1` turns off local stack detection** (see Fixed).
+
+### Changed
+
+- **Ported to ledger 9.** The wallet facade starts from seeds with an explicit fork schedule, uses the async signer and versioned transaction handles, and the indexer-direct readers decode ledger-9 events.
+- **`mn dust register` waits for the registration fee.** Registration goes through the facade and waits until the coins have generated the dust wallet-sdk 2.0 requires for the fee.
+- **dApp connector (`mn serve`) follows API 4.1.** Transactions are read with the facade (unreadable bytes return `InvalidRequest` naming the stage); `signData` returns hex values and the new `scheme` field; history comes from the facade's wallet history. A rejected, abandoned or disconnected transaction is reverted, and a failed proof reverts its recipe instead of holding coins until the TTL.
+- **`mn contract` generates midnight-js 5 providers.** Wallet and midnight providers declare ledger-9 support (midnight-js 5 refuses providers that don't), and `@midnightntwrk/onchain-runtime-v4` is pinned to `4.0.0-rc.3` so a single runtime copy is installed (two copies made `mn contract call` fail with "expected instance of StateValue").
+- **Errors and usage hints are flat messages.** The bordered boxes broke on narrow terminals when a long address couldn't wrap; errors are now plain red/yellow text. The box remains only for the dApp approval prompt, which now hard-breaks over-long tokens.
+- **Removed the dust revert workaround.** It patched a ledger-8 SDK bug; on ledger 9 reverting an unsubmitted transaction keeps its dust, verified on a ledger-9 localnet.
+- **Prerelease tags publish under `next`.** A tag with a prerelease suffix skips the sidecar build and publishes only the main package, under the `next` dist-tag. The release workflow fails if the tag and `package.json` version differ.
+
+### Fixed
+
+- **mn no longer guesses between several local Midnight stacks.** On `undeployed` without endpoints, auto-detection kept whichever container `docker ps` listed last and could mix components of two stacks. It now refuses when a component runs on more than one port, listing them and how to choose. Detection is skipped when endpoints are explicit, and `MN_NO_LOCAL_DETECT=1` disables it.
+
 ## [0.5.2] - 2026-09-01
 
 ### Added

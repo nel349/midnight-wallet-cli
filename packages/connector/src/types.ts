@@ -1,6 +1,6 @@
 // ConnectedAPI-compatible type definitions
-// Structurally compatible with @midnightntwrk/dapp-connector-api@4.0.1
-// Own definitions because the official package is on GitHub Package Registry, not public npm
+// Structurally compatible with @midnightntwrk/dapp-connector-api@4.1.0-beta.1
+// Own definitions so this package has no dependency on the official API package
 
 // ── Token & Balance ──
 
@@ -46,6 +46,8 @@ export interface SignDataOptions {
 }
 
 export interface Signature {
+  /** Signature scheme. Omitted means 'schnorr_bip340' (the API's default). */
+  scheme?: 'ecdsa_secp256k1_sha256' | 'schnorr_bip340';
   data: string;
   signature: string;
   verifyingKey: string;

@@ -12,21 +12,21 @@ import { UsageError } from '../lib/errors.ts';
 import { COMMAND_FLAGS, GLOBAL_FLAGS, findUnknownFlags, assertKnownFlags } from '../lib/command-flags.ts';
 
 describe('assertKnownFlags', () => {
-  it('rejects the exact malformed argument from the wrong-chain incident, before anything runs', () => {
+  it('rejects an unsplit multi-flag argument (one token containing spaces), before anything runs', () => {
     const args = parseArgs([
-      'airdrop', '100', '--shielded', '--wallet', 'g2',
-      '--network undeployed --node ws://localhost:29944 --indexer-ws ws://localhost:28088/api/v4/graphql/ws',
+      'airdrop', '100', '--shielded', '--wallet', 'alice',
+      '--network undeployed --node ws://localhost:9944 --indexer-ws ws://localhost:8088/api/v4/graphql/ws',
     ]);
     let err: unknown;
     try { assertKnownFlags(args); } catch (e) { err = e; }
     expect(err).toBeInstanceOf(UsageError);
-    expect((err as Error).message).toContain('--network undeployed --node ws://localhost:29944');
+    expect((err as Error).message).toContain('--network undeployed --node ws://localhost:9944');
     expect((err as Error).message).toContain('midnight help airdrop');
   });
 
   it('accepts every flag a command really reads', () => {
     const args = parseArgs([
-      'airdrop', '100', '--shielded', '--wallet', 'g2', '--network', 'undeployed',
+      'airdrop', '100', '--shielded', '--wallet', 'alice', '--network', 'undeployed',
       '--node', 'ws://n', '--indexer-ws', 'ws://i', '--proof-server', 'http://p', '--verbose', '--json',
     ]);
     expect(() => assertKnownFlags(args)).not.toThrow();

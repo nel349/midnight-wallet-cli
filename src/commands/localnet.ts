@@ -219,7 +219,7 @@ async function handleStatus(jsonMode: boolean): Promise<void> {
   if (services.length === 0) {
     process.stderr.write('\n' + header('Localnet Status') + '\n\n');
     process.stderr.write(dim('  No services running.') + '\n');
-    process.stderr.write(dim('  Run ') + bold('midnight localnet up') + dim(' to start.') + '\n\n');
+    process.stderr.write(dim('  ') + bold('midnight localnet up') + dim(' is refused on this ledger-9 build; see ') + bold('midnight help localnet') + dim('.') + '\n\n');
     return;
   }
 
@@ -317,13 +317,13 @@ export default async function localnetCommand(args: ParsedArgs): Promise<void> {
     throw new UsageError(
       `Usage: midnight localnet <${VALID_SUBCOMMANDS.join('|')}>\n\n` +
       `Subcommands:\n` +
-      `  up        Start the local network\n` +
+      `  up        Start the local network (refused on this ledger-9 build)\n` +
       `  stop      Stop containers (preserves state)\n` +
       `  down      Remove containers, networks, volumes\n` +
       `  status    Show service status\n` +
       `  logs      Stream service logs\n` +
       `  clean     Remove conflicting containers\n\n` +
-      `Example: midnight localnet up`
+      `Example: midnight localnet status`
     );
   }
 

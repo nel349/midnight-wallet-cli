@@ -132,7 +132,7 @@ const TOOLS: ToolDef[] = [
       properties: {
         name: { type: 'string' },
         network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
-        seed: { type: 'string', description: '64-char hex' },
+        seed: { type: 'string', description: '64 or 128 hex chars (32-byte raw or 64-byte BIP-39)' },
         mnemonic: { type: 'string', description: 'BIP-39 24 words' },
         force: { type: 'string' },
       },
@@ -298,7 +298,7 @@ const TOOLS: ToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        seed: { type: 'string', description: '64-char hex' },
+        seed: { type: 'string', description: '64 or 128 hex chars (32-byte raw or 64-byte BIP-39)' },
         network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
         index: { type: 'string' },
       },
@@ -515,7 +515,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_localnet_up',
-    description: 'Start localnet (Docker).',
+    description: 'Refused on this ledger-9 build: mn\'s localnet is ledger 8 and no ledger-9 indexer image is published. Run a ledger-9 stack yourself and point mn at it (config_set node / indexer-ws / proof-server).',
     annotations: { openWorldHint: true },
     inputSchema: {
       type: 'object',

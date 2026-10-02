@@ -20,7 +20,8 @@ You also need:
   against 1.3.x; upgrade with `bun upgrade` if `npm run build` misbehaves.
 - **Docker** — for `mn localnet` integration testing
 - **A proof server** at `localhost:6300` if you're testing transactions
-  (`mn localnet up` provides one)
+  (`mn localnet up` provides one on 0.5.x; on the ledger-9 build it is
+  refused, so run a ledger-9 node, indexer and proof server yourself)
 
 ## The dev loop
 

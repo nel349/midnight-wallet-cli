@@ -77,19 +77,26 @@ export function buildManual(): string {
   out.push(`    JSON via --json for use with AI agents and scripts. An MCP`);
   out.push(`    server ships with the package.`);
   out.push('');
+  out.push(`    ${bold('Ledger 9 only.')} This build refuses a chain still on ledger 8`);
+  out.push(`    (preview and preprod today); use midnight-wallet-cli 0.5.x there.`);
+  out.push(`    ${dim('mn localnet up')} is refused too: no published indexer image runs`);
+  out.push(`    ledger 9 yet. Run a ledger-9 stack yourself and point mn at it with`);
+  out.push(`    --node / --indexer-ws / --proof-server or ${dim('mn config set')}.`);
+  out.push('');
   out.push(`${bold('INSTALLATION')}`);
-  out.push(`    ${dim('$')} ${dim('npm install -g midnight-wallet-cli')}`);
+  out.push(`    ${dim('$')} ${dim('npm install -g midnight-wallet-cli@next')}   ${dim('# this ledger-9 prerelease')}`);
+  out.push(`    ${dim('$')} ${dim('npm install -g midnight-wallet-cli')}        ${dim('# stable 0.5.x, ledger 8')}`);
   out.push('');
   out.push(`    Optional dependencies:`);
   out.push(`      Compact toolchain: https://docs.midnight.network/develop`);
-  out.push(`      Docker:            for the local development network`);
+  out.push(`      Docker:            for mn localnet (up is refused on this build)`);
 
   // ── Concepts ──────────────────────────────────────────────
   out.push(subhead('CONCEPTS'));
   out.push(`  ${bold('Networks')}`);
-  out.push(`    ${teal('undeployed')}   Local Docker network. Free dev tokens, fast iteration.`);
-  out.push(`    ${teal('preprod')}      Public testnet. Persistent, real ZK proofs.`);
-  out.push(`    ${teal('preview')}      Public testnet, smaller scale.`);
+  out.push(`    ${teal('undeployed')}   Local network. Free dev tokens, fast iteration.`);
+  out.push(`    ${teal('preprod')}      Public testnet. Persistent, real ZK proofs. (Ledger 8 today: refused.)`);
+  out.push(`    ${teal('preview')}      Public testnet, smaller scale. (Ledger 8 today: refused.)`);
   out.push('');
   out.push(`  ${bold('Tokens')}`);
   out.push(`    ${yellow('NIGHT')}        Native asset. Used for transfers and contract value.`);
@@ -114,13 +121,15 @@ export function buildManual(): string {
   // ── Common flows ──────────────────────────────────────────
   out.push(subhead('COMMON FLOWS'));
   out.push(`  ${bold('First wallet on undeployed')}`);
-  out.push(`    ${dim('$')} ${dim('mn localnet up')}`);
+  out.push(`    ${dim('# needs a ledger-9 stack you run (localnet up is refused). On the')}`);
+  out.push(`    ${dim('# default ports (node 9944, indexer 8088, proof server 6300) mn finds')}`);
+  out.push(`    ${dim('# it; otherwise pass --node/--indexer-ws/--proof-server or mn config set.')}`);
   out.push(`    ${dim('$')} ${dim('mn wallet generate alice')}`);
   out.push(`    ${dim('$')} ${dim('mn airdrop 1000 --wallet alice')}`);
   out.push(`    ${dim('$')} ${dim('mn dust register --wallet alice')}`);
   out.push(`    ${dim('$')} ${dim('mn balance --wallet alice')}`);
   out.push('');
-  out.push(`  ${bold('First wallet on preprod')}`);
+  out.push(`  ${bold('First wallet on preprod')} ${dim('(once preprod runs ledger 9)')}`);
   out.push(`    ${dim('$')} ${dim('mn wallet generate alice --network preprod')}`);
   out.push(`    ${dim('# fund from the preprod faucet:')}`);
   out.push(`    ${dim('# https://faucet.preprod.midnight.network/')}`);
@@ -183,7 +192,7 @@ export function buildManual(): string {
   out.push(subhead('EXIT CODES'));
   out.push(`  ${green('0')}  Success`);
   out.push(`  ${dim('1')}  Unknown error`);
-  out.push(`  ${yellowText('2')}  Invalid arguments (usage error, see yellow box on stderr)`);
+  out.push(`  ${yellowText('2')}  Invalid arguments (usage error, see yellow message on stderr)`);
   out.push(`  ${dim('3')}  Wallet not found`);
   out.push(`  ${dim('4')}  Network error`);
   out.push(`  ${dim('5')}  Insufficient balance / DUST_REQUIRED`);

@@ -38,7 +38,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '',
       'generate flags:',
       '--network <name>    Network: preprod, preview, undeployed',
-      '--seed <hex>        Restore from existing seed (64-char hex)',
+      '--seed <hex>        Restore from a seed: 64 or 128 hex chars (32-byte raw or 64-byte BIP-39)',
       '--mnemonic "..."    Restore from BIP-39 mnemonic (24 words)',
       '--force             Overwrite existing wallet file',
       '',
@@ -71,7 +71,7 @@ const COMMAND_SPECS: CommandSpec[] = [
     usage: 'midnight generate [--network <name>] [--seed <hex>] [--mnemonic "..."] [--output <file>] [--force]',
     flags: [
       '--network <name>    Network: preprod, preview, undeployed',
-      '--seed <hex>        Restore from existing seed (64-char hex)',
+      '--seed <hex>        Restore from a seed: 64 or 128 hex chars (32-byte raw or 64-byte BIP-39)',
       '--mnemonic "..."    Restore from BIP-39 mnemonic (24 words)',
       '--output <file>     Custom output path (default: ~/.midnight/wallet.json)',
       '--force             Overwrite existing wallet file',
@@ -138,7 +138,7 @@ const COMMAND_SPECS: CommandSpec[] = [
     description: 'Derive and display an unshielded address from a seed',
     usage: 'midnight address --seed <hex> [--network <name>] [--index <n>]',
     flags: [
-      '--seed <hex>        Seed to derive from (required, 64-char hex)',
+      '--seed <hex>        Seed to derive from (required): 64 or 128 hex chars (32-byte raw or 64-byte BIP-39)',
       '--network <name>    Network for address prefix (default: resolved)',
       '--index <n>         Key derivation index (default: 0)',
     ],
@@ -244,19 +244,20 @@ const COMMAND_SPECS: CommandSpec[] = [
       'status              Check dust registration; if registered, also shows dust balance',
       'export              Fast-sync dust and emit a restorable snapshot (dustSerializedState)',
       '--wallet <name|file> Wallet name or path',
-      '--seed <hex>          32- or 64-byte hex seed (export only; or set MN_SEED env to keep it off argv)',
+      '--seed <hex>          64 or 128 hex chars, 32-byte raw or 64-byte BIP-39 (export only; or set MN_SEED env to keep it off argv)',
       '--proof-server <url>  Override proof server URL (register only)',
       '--node <url>          Override substrate node RPC URL (register only)',
       '--indexer-ws <url>    Override indexer WebSocket URL',
       '--no-cache            Bypass wallet state cache (status only)',
-      'MN_DUST_SYNC_BIN=<path>   (env) Use this native dust-sync sidecar binary instead of auto-detecting it',
-      'MN_DISABLE_NATIVE_DUST=1  (env) Disable the native sidecar; fall back to the WASM dust sync',
+      '',
+      'Native dust sidecar: not used on this ledger-9 build (it is built for ledger 8);',
+      '  MN_DUST_SYNC_BIN and MN_DISABLE_NATIVE_DUST are ignored. Dust sync runs in WASM.',
     ],
     examples: [
       'midnight dust register',
       'midnight dust status',
-      'midnight dust export --network preview --json',
-      'midnight dust export --seed <64-hex> --network preview --json',
+      'midnight dust export --json',
+      'midnight dust export --seed <hex> --json',
     ],
     jsonFields: {
       subcommand: 'register, status, or export',
@@ -401,6 +402,8 @@ const COMMAND_SPECS: CommandSpec[] = [
     flags: [
       '[path]          Project directory (default: cwd)',
       '',
+      'Needs mn localnet, which this ledger-9 build cannot start (see: midnight help localnet).',
+      '',
       'Keystrokes (while running):',
       '  d             Deploy the current compiled artifact (dev-alice on undeployed)',
       '  t             Run the project\'s npm test script (test:dev preferred, then test)',
@@ -454,10 +457,13 @@ const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'localnet',
-    description: 'Manage a local Midnight network via Docker Compose',
+    description: 'Manage a local Midnight network via Docker Compose (up is refused on this ledger-9 build)',
     usage: 'midnight localnet <up|stop|down|status|logs|clean>',
     flags: [
-      'up              Start the local network (node, indexer, proof server)',
+      'up              Refused on this build: mn\'s compose stack is ledger 8, and no',
+      '                published indexer image runs ledger 9 yet. Run a ledger-9 stack',
+      '                yourself and point mn at it with --node/--indexer-ws/--proof-server',
+      '                or midnight config set node|indexer-ws|proof-server <url>',
       'stop            Stop containers (preserves state for fast restart)',
       'down            Full teardown: containers, networks, volumes, + undeployed wallet cache',
       'status          Show service status and ports',
@@ -465,9 +471,8 @@ const COMMAND_SPECS: CommandSpec[] = [
       'clean           Remove conflicting containers from other setups',
     ],
     examples: [
-      'midnight localnet up',
-      'midnight localnet stop',
       'midnight localnet status',
+      'midnight localnet stop',
       'midnight localnet down',
       'midnight localnet clean',
     ],
@@ -641,6 +646,13 @@ E2E testing, and a local devnet — all from the terminal.
 Wallets are network-agnostic: one seed derives addresses for all three
 networks (undeployed, preprod, preview). Network is chosen at runtime.
 
+LEDGER 9 ONLY: this build of mn speaks ledger 9 only. A chain still on
+ledger 8 (preview and preprod today) is refused up front with an
+error saying so; use midnight-wallet-cli 0.5.x for those. localnet up
+is refused too (no published ledger-9 indexer image yet): run a ledger-9
+stack yourself and point mn at it with --node / --indexer-ws /
+--proof-server, or once with midnight config set node|indexer-ws|proof-server.
+
 STRUCTURED JSON OUTPUT
 ──────────────────────
 
@@ -759,6 +771,8 @@ SMART CONTRACTS
 
 Run these commands from the root of a dApp project that contains a
 compiled Compact contract (managed/ directory with .js and .d.ts files).
+Compile with Compact 0.35 (language 0.27): mn bundles compact-runtime
+0.20.0, and code compiled for another runtime is rejected at deploy/call.
 
   Inspect — show circuits, witnesses, types:
     midnight contract inspect [--path <dir>] [--json]
@@ -871,7 +885,7 @@ AVAILABLE MCP TOOLS (30)
   midnight_cache_clear         Clear cached wallet sync state                       —
 
   Local Network
-  midnight_localnet_up         Start local network (Docker)                         —
+  midnight_localnet_up         Refused on this ledger-9 build (see OVERVIEW)        —
   midnight_localnet_stop       Stop local network (preserves state)                 —
   midnight_localnet_down       Full teardown (volumes + undeployed cache)           —
   midnight_localnet_status     Show service status and ports                        —
@@ -949,10 +963,11 @@ resources/list. Ground responses in these instead of training-data guesses.
 TYPICAL AGENT WORKFLOWS
 ───────────────────────
 
-  Local development (undeployed):
-  1. midnight_localnet_up          → Start node, indexer, proof server
+  Local development (undeployed, against a ledger-9 stack you run):
+  1. midnight_config_set           → Set network (key: "network", value: "undeployed")
+     midnight_config_set           → node / indexer-ws / proof-server URLs of that stack
   2. midnight_wallet_generate      → Create wallet (name: "alice")
-  3. midnight_config_set           → Set network (key: "network", value: "undeployed")
+  3. (midnight_localnet_up is refused on this build; see OVERVIEW)
   4. midnight_airdrop              → Fund wallet (amount: "1000")
   5. midnight_dust_register        → Register for fee tokens
   6. midnight_balance              → Check unshielded + shielded balance
@@ -967,7 +982,8 @@ TYPICAL AGENT WORKFLOWS
   3. midnight_transfer             → Returns pending token for shielded send
   4. (show + consent) → midnight_confirm_operation
 
-  Testnet (preprod/preview):
+  Testnet (preprod/preview, once the network runs ledger 9; refused
+  while it is still on ledger 8):
   1. midnight_wallet_generate      → Create wallet
   2. midnight_config_set           → Set network (key: "network", value: "preview")
   3. (fund via faucet: https://faucet.preview.midnight.network/)
@@ -979,7 +995,8 @@ TYPICAL AGENT WORKFLOWS
   Run "mn dev" in a Compact project. It auto-starts localnet, provisions
   3 funded wallets (dev-alice/dev-bob/dev-carol), compiles on save, and
   accepts a "d" keystroke to deploy the current artifact with dev-alice.
-  See "mn help dev".
+  See "mn help dev". On this ledger-9 build it can't start localnet, so it
+  refuses until mn localnet can run a ledger-9 stack.
 
 EXAMPLE CLI COMMANDS
 ────────────────────
@@ -1006,7 +1023,7 @@ EXAMPLE CLI COMMANDS
 
   # Contract inspection
   midnight contract inspect --json
-  # → {"name":"bboard","compilerVersion":"0.30.0","circuits":[{"name":"post",...}],"witnesses":[...]}
+  # → {"name":"bboard","compilerVersion":"0.35.0","circuits":[{"name":"post",...}],"witnesses":[...]}
 
   # Deploy contract (from dApp root directory)
   midnight contract deploy --json
@@ -1020,8 +1037,8 @@ EXAMPLE CLI COMMANDS
   midnight contract state --address 6cc5... --json
   # → {"subcommand":"state","fields":{"state":"1","message":"...","owner":"..."}}
 
-  # Start DApp connector
-  midnight serve --network preview --approve-all
+  # Start DApp connector (fee-wallet mode for an agent's own transactions)
+  midnight serve --approve-fees
   # DApps connect at ws://localhost:9932
 `;
 

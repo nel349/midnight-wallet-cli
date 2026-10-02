@@ -192,9 +192,9 @@ async function startFacade(bundle: FacadeBundle): Promise<void> {
  *   - parsing fails
  */
 // Shape of the facade's serialized dust-wallet snapshot. See
-// dust-wallet/src/v1/Serialization.ts `SnapshotSchema` — JSON on disk with
+// dust-wallet/src/v2/Serialization.ts `SnapshotSchema` — JSON on disk with
 // BigInts rendered as decimal strings. The `state` field is a hex-encoded
-// `DustLocalState.serialize()` (ledger-v8) — the same blob the dust-direct
+// `DustLocalState.serialize()` (ledger-v9) — the same blob the dust-direct
 // cache stores, which is why the two are interchangeable via the overlay below.
 export interface FacadeDustSnapshot {
   publicKey: { publicKey: string };

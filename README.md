@@ -8,14 +8,20 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript)](https://www.typescriptlang.org/)
 
 
-A standalone CLI wallet for the Midnight blockchain. Manage wallets, check balances, transfer NIGHT tokens, and run a local network — all from the terminal.
+A standalone CLI wallet for the Midnight blockchain. Manage wallets, check balances, transfer NIGHT tokens, and manage a local network — all from the terminal.
 
-Built for two audiences: **beginners** starting their first Midnight project (localnet + funded wallets + contract deploy in under 5 minutes), and **AI agents** (Cursor, Claude Code, any MCP client) using the same primitives via a built-in MCP server.
+Built for two audiences: **beginners** starting their first Midnight project (a local chain + funded wallets + contract deploy in minutes), and **AI agents** (Cursor, Claude Code, any MCP client) using the same primitives via a built-in MCP server.
+
+> [!IMPORTANT]
+> **0.6.0-rc.0 is a ledger-9-only prerelease.** It is built on wallet-sdk 2.0.0-rc.0, ledger-v9 1.0.0-rc.5, midnight-js 5.0.0-rc.1 and compact-runtime 0.20.0 (contracts compiled with Compact 0.35 / language 0.27). It refuses any chain still on ledger 8, which today includes `preview` and `preprod`: stay on 0.5.x (`npm install -g midnight-wallet-cli@latest`) for those.
+>
+> `midnight localnet up` is refused on this build, because no published indexer image runs ledger 9 yet. Run a ledger-9 stack yourself (node 2.1.0-rc.2, proof-server 9.0.0-rc.8, a 4.4 indexer) and point mn at it. On the default ports (node 9944, indexer 8088, proof server 6300) `--network undeployed` reaches it with no configuration. On other ports pass `--node`, `--indexer-ws` and `--proof-server` per command, or save them once with `midnight config set node <url>`, `midnight config set indexer-ws <url>` and `midnight config set proof-server <url>`.
 
 ## Install
 
 ```bash
-npm install -g midnight-wallet-cli
+npm install -g midnight-wallet-cli        # stable 0.5.x (ledger 8)
+npm install -g midnight-wallet-cli@next   # this ledger-9 prerelease
 ```
 
 This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-mcp`.
@@ -35,20 +41,20 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 | `midnight airdrop <amount>` | Fund a wallet or raw address from genesis (`--shielded` for shielded, undeployed only) |
 | `midnight dust register` | Register NIGHT UTXOs for dust (fee token) generation |
 | `midnight dust status` | Check dust registration status and balance |
-| `midnight dust export` | Emit a restorable dust snapshot for fast warm-restore |
+| `midnight dust export` | Emit a restorable dust snapshot for fast warm-restore (ledger-9 snapshot on this build) |
 | `midnight address --seed <hex>` | Derive an address from a seed |
 | `midnight genesis-address` | Show the genesis wallet address |
 | `midnight inspect-cost` | Display current block cost limits |
-| `midnight serve` | Start DApp Connector server (WebSocket JSON-RPC) |
+| `midnight serve` | Start DApp Connector server (WebSocket JSON-RPC); `--approve-fees` runs it as a fee wallet for an agent |
 | `midnight contract inspect` | Show circuits, witnesses, and types for a compiled contract |
 | `midnight contract deploy` | Deploy a contract to the network (`--secret-key <64-hex>` seeds a caller-chosen initial private-state secret for constructors that derive their owner from `public_key(secret_key())`; passed via env to the deploy subprocess, never written to disk) |
 | `midnight contract call` | Call a circuit on a deployed contract |
 | `midnight contract state` | Read ledger state of a deployed contract |
-| `midnight dev` | Contract dev loop — watcher auto-compiles on save; `[t]` runs tests, `[d]` deploys |
+| `midnight dev` | Contract dev loop — watcher auto-compiles on save; `[t]` runs tests, `[d]` deploys (needs `localnet up`, so refused on this build) |
 | `midnight test create/run/list/results` | Generate and run E2E tests for Midnight dApps |
 | `midnight config get/set/unset` | Manage persistent config (network, wallet, endpoints) |
 | `midnight cache clear` | Clear wallet state cache |
-| `midnight localnet up/stop/down/status/logs/clean` | Manage a local Midnight network via Docker |
+| `midnight localnet up/stop/down/status/logs/clean` | Manage a local Midnight network via Docker (`up` is refused on this ledger-9 build) |
 | `midnight help [command]` | Show usage for all or a specific command |
 | `midnight manual` | Full reference manual (every command, every flag) |
 
@@ -57,8 +63,8 @@ This installs two commands: `midnight` (or `mn` for short) and `midnight-wallet-
 ### Local development (undeployed)
 
 ```bash
-# 1. Start local network (node, indexer, proof server)
-midnight localnet up
+# 1. Start a ledger-9 node, indexer and proof server yourself (see the note at the top).
+#    `midnight localnet up` is refused on this build.
 
 # 2. Create a wallet and set the network
 midnight wallet generate alice
@@ -74,6 +80,8 @@ midnight transfer mn_addr_undeployed1... 100
 ```
 
 ### Preprod / Preview (testnet)
+
+Both run ledger 8 today, so this build refuses them; use 0.5.x there. Once a network moves to ledger 9 the flow is:
 
 ```bash
 # 1. Create a wallet and set the network
@@ -97,20 +105,17 @@ midnight transfer mn_addr_preprod1... 100
 
 | Network | Description |
 |---------|-------------|
-| `undeployed` | Local network via Docker (`midnight localnet up`) |
-| `preprod` | Midnight pre-production testnet |
-| `preview` | Midnight preview testnet |
+| `undeployed` | Local network. On this build: a ledger-9 stack you run yourself (`midnight localnet up` is refused) |
+| `preprod` | Midnight pre-production testnet (ledger 8 today: refused by this build, use 0.5.x) |
+| `preview` | Midnight preview testnet (ledger 8 today: refused by this build, use 0.5.x) |
 
 Wallets are network-agnostic — one seed derives addresses for all three networks. Use `--network <name>` on any command, or persist it with `midnight config set network preview`.
 
 ## Native dust acceleration
 
-The first dust sync for a wallet on a hosted network (`preprod`/`preview`) replays the chain's full dust event history — the slow part of a cold start. The CLI bundles a native (Rust) accelerator that does this ~5× faster than the WASM fallback: a ~1.45M-event preprod prime drops from ~22 min to ~4.5 min.
+The first dust sync for a wallet on a hosted network replays the chain's full dust event history, the slow part of a cold start. On 0.5.x a native (Rust) accelerator does this about 5× faster than the WASM reader (a ~1.45M-event preprod prime drops from ~22 min to ~4.5 min), installed as a per-platform `optionalDependency` (`@nel349/dust-sync-<os>-<arch>`).
 
-It installs automatically — a per-platform `optionalDependency` (`@nel349/dust-sync-<os>-<arch>`) for macOS (arm64/x64), Linux (x64/arm64), and Windows (x64). No configuration, no install scripts. On any other platform the CLI falls back to the WASM reader, so dust priming still works, just slower.
-
-- `MN_DISABLE_NATIVE_DUST=1` — force the WASM path (to compare, or if a binary misbehaves).
-- `MN_DUST_SYNC_BIN=/path/to/dust-sync` — use your own build instead of the installed binary.
+**Not on this ledger-9 build.** The accelerator is built against ledger 8, so this prerelease does not ship it (no `@nel349/dust-sync-*` dependencies) and never runs it: dust sync always uses the WASM reader, and `MN_DUST_SYNC_BIN` and `MN_DISABLE_NATIVE_DUST` are ignored.
 
 ## DApp Connector
 
@@ -118,11 +123,16 @@ It installs automatically — a per-platform `optionalDependency` (`@nel349/dust
 
 ```bash
 # Start the connector server
-midnight serve --network preview
+midnight serve
 
 # Or auto-approve all requests (dev only)
-midnight serve --network preview --approve-all
+midnight serve --approve-all
+
+# Or act as a fee wallet for an agent (see below)
+midnight serve --approve-fees
 ```
+
+`--approve-fees` is for an agent that builds and proves its own ledger-9 transaction (its own value already balanced) and only needs the Dust fee paid. `balanceUnsealedTransaction` / `balanceSealedTransaction` then add only Dust, and are auto-approved only when the transaction spends none of this wallet's funds, has no unsigned unshielded input, needs no non-Dust value and is not a rewards claim; otherwise they are refused, listing every reason. `submitTransaction` is auto-approved only for a transaction this server balanced that way on the same connection. Everything else still prompts in the terminal (and is rejected without one). It cannot be combined with `--approve-all`.
 
 To connect from your DApp, install the connector package:
 
@@ -135,7 +145,7 @@ import { createWalletClient } from 'midnight-wallet-connector';
 
 const wallet = await createWalletClient({
   url: 'ws://localhost:9932',
-  networkId: 'Preview',
+  networkId: 'undeployed',
 });
 
 const balances = await wallet.getUnshieldedBalances();
@@ -237,7 +247,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 }
 ```
 
-> **Tip:** If you haven't installed globally, use `"command": "npx"` with `"args": ["-y", "midnight-wallet-cli@latest", "--mcp"]` instead.
+> **Tip:** If you haven't installed globally, use `"command": "npx"` with `"args": ["-y", "midnight-wallet-cli@latest", "--mcp"]` instead (`midnight-wallet-cli@next` for this ledger-9 prerelease).
 
 ### Available MCP Tools
 
@@ -264,7 +274,7 @@ Once connected, your AI agent gets access to 30 tools:
 | `midnight_config_set` | Write config value |
 | `midnight_config_unset` | Remove config value |
 | `midnight_cache_clear` | Clear wallet state cache |
-| `midnight_localnet_up` | Start local network |
+| `midnight_localnet_up` | Start local network (refused on this ledger-9 build) |
 | `midnight_localnet_stop` | Stop local network |
 | `midnight_localnet_down` | Remove local network |
 | `midnight_localnet_status` | Show service status |
@@ -309,8 +319,8 @@ Found a bug or have a feature request? [Open an issue](https://github.com/nel349
 ## Requirements
 
 - Node.js >= 20
-- Docker (for `midnight localnet` commands)
-- A running proof server on `localhost:6300` (for transactions — required on all networks)
+- Docker (for `midnight localnet` commands; `up` is refused on this build)
+- A ledger-9 chain to talk to: node, indexer (4.4) and proof server. The proof server defaults to `localhost:6300` and is required for transactions on every network
 
 ## Development
 

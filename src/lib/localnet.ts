@@ -10,10 +10,11 @@ import { MIDNIGHT_DIR, LOCALNET_DIR_NAME, DIR_MODE } from './constants.ts';
 // Version tag — bump when compose content changes so stale files get overwritten
 export const COMPOSE_VERSION = '3.0.6';
 
-// Docker image versions — update together per Midnight support matrix.
-// Tracks the Preview/Preprod generation (the row our SDK stack targets:
-// midnight-js 4.1.1, ledger-v8 8.x, compact-runtime 0.16.0), NOT the older
-// Mainnet row (node 0.22.5). See https://docs.midnight.network/relnotes/support-matrix
+// Docker image versions: the ledger-8 stack (Preview/Preprod row of the
+// Midnight support matrix: midnight-js 4.1.1, ledger-v8 8.x, compact-runtime
+// 0.16.0). This ledger-9 build refuses to start it (see LOCALNET_CAN_START);
+// stop/down/status/logs still manage an existing one.
+// See https://docs.midnight.network/relnotes/support-matrix
 const NODE_IMAGE = 'midnightntwrk/midnight-node:1.0.0';
 const INDEXER_IMAGE = 'midnightntwrk/indexer-standalone:4.3.3';
 const PROOF_SERVER_IMAGE = 'midnightntwrk/proof-server:8.1.0';
@@ -22,8 +23,8 @@ export const LOCALNET_DIR = join(homedir(), MIDNIGHT_DIR, LOCALNET_DIR_NAME);
 const COMPOSE_PATH = join(LOCALNET_DIR, 'compose.yml');
 const VERSION_PATH = join(LOCALNET_DIR, '.version');
 
-// Full compose.yml for midnight-local-network — Preview/Preprod matrix generation
-// (midnight-js 4.1.1 / ledger-v8 8.x / compact-runtime 0.16.0)
+// Full compose.yml for midnight-local-network: the ledger-8 stack above, which
+// this ledger-9 build does not start.
 export const COMPOSE_YAML = `services:
   proof-server:
     image: '${PROOF_SERVER_IMAGE}'

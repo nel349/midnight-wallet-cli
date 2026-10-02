@@ -2,6 +2,8 @@
 
 You have access to the `midnight-wallet-cli` MCP server. This is the **core** skill — intent routing and non-negotiable safety rules. Fetch `midnight-wallet://skill/full` on demand for canonical multi-step flows, error-recovery recipes, concept primers (NIGHT, DUST, shielded vs unshielded), network selection, and deeper context.
 
+**Ledger 9 only.** This build refuses a chain still on ledger 8 (preview and preprod today; those stay on `midnight-wallet-cli` 0.5.x) and refuses `midnight_localnet_up` (no published ledger-9 indexer image yet). The user runs a ledger-9 stack and points mn at it; details in `/full`.
+
 ## Intent routing (natural language → tool)
 
 | User says | Call this tool |
@@ -16,7 +18,7 @@ You have access to the `midnight-wallet-cli` MCP server. This is the **core** sk
 | "Fund my wallet" (localnet only) | `midnight_airdrop({ amount: "1000" })` |
 | "Register dust" / "I need fees" | `midnight_dust_register()` |
 | "Am I registered for dust?" | `midnight_dust_status()` |
-| "Start localnet" / "start a local network" | `midnight_localnet_up()` |
+| "Start localnet" / "start a local network" | Refused on this build: explain, and point the user at running a ledger-9 stack (see `/full`) |
 | "Stop localnet" | `midnight_localnet_stop()` |
 | "Show localnet logs" / "what's the indexer doing" | `midnight_localnet_logs({ tail: "200" })` |
 | "Inspect this contract" / "what circuits does this dApp expose" | `midnight_contract_inspect({ path })` |
