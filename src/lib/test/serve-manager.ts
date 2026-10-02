@@ -5,6 +5,7 @@
 import { Socket } from 'node:net';
 import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
+import { assertLedgerSupported } from '../ledger-guard.ts';
 import { applyEndpointOverrides, endpointFlags, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
 import { loadWalletCache, saveWalletCache } from '../wallet-cache.ts';
@@ -180,6 +181,8 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   const { networkName, networkConfig } = resolveServeTarget(options);
+  // On a ledger-8 chain the SDK's sync would retry forever.
+  await assertLedgerSupported(networkName, networkConfig);
   const address = config.addresses[networkName];
 
   // Suppress SDK noise

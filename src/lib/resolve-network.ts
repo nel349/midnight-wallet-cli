@@ -10,6 +10,7 @@ import {
   isValidNetworkName,
   getValidNetworkNames,
   resolveNetworkConfig,
+  type EndpointOverrides,
 } from './network.ts';
 import { loadCliConfig, getEndpointOverridesForNetwork } from './cli-config.ts';
 
@@ -46,9 +47,11 @@ export function resolveNetworkName(ctx: NetworkResolutionContext): NetworkName {
 }
 
 /**
- * Resolve network name + full config in one call. On undeployed, local stack
- * detection runs only when no endpoint is given by flag or config: explicit
- * endpoints win anyway, and detection refuses when several stacks run.
+ * Resolve network name + full config in one call. Endpoints come from the
+ * command's flags, then the saved config for this network, and only the
+ * components given by neither are auto-detected on undeployed (detection
+ * refuses when a needed component is ambiguous). Every caller gets the same
+ * fully resolved endpoints.
  */
 export function resolveNetwork(ctx: NetworkResolutionContext): {
   name: NetworkName;
@@ -56,9 +59,11 @@ export function resolveNetwork(ctx: NetworkResolutionContext): {
 } {
   const name = resolveNetworkName(ctx);
   const configured = getEndpointOverridesForNetwork(loadCliConfig(ctx.configDir), name);
-  const explicitEndpoints = ENDPOINT_FLAGS.some((flag) => getFlag(ctx.args, flag) !== undefined || configured[flag] !== undefined);
-  const config = resolveNetworkConfig(name, { explicitEndpoints });
+  const given: EndpointOverrides = {
+    node: getFlag(ctx.args, 'node') ?? configured.node,
+    indexerWS: getFlag(ctx.args, 'indexer-ws') ?? configured['indexer-ws'],
+    proofServer: getFlag(ctx.args, 'proof-server') ?? configured['proof-server'],
+  };
+  const config = resolveNetworkConfig(name, { given });
   return { name, config };
 }
-
-const ENDPOINT_FLAGS = ['node', 'indexer-ws', 'proof-server'] as const;

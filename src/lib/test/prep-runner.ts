@@ -1,18 +1,17 @@
 // Prep runner — execute prep steps defined in dapp.test.json by calling existing lib functions.
 
 import * as ledger from '@midnightntwrk/ledger-v9';
-import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import { clearWalletCache } from '../wallet-cache.ts';
 import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
 import type { NetworkConfig, NetworkName } from '../network.ts';
-import { checkDockerAvailable, ensureComposeFile, dockerCompose, getServiceStatus, waitForHealthy } from '../localnet.ts';
+import { assertLedger9StackReachable, assertLedgerSupported } from '../ledger-guard.ts';
 import { buildFacade, hasDustAvailable, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
 import { loadWalletCache, saveWalletCache } from '../wallet-cache.ts';
 import { executeTransfer, ensureDust, suppressRpcNoise } from '../transfer.ts';
-import { GENESIS_SEED, INDEXER_GRAPHQL_PATH } from '../constants.ts';
+import { GENESIS_SEED } from '../constants.ts';
 import { deriveUnshieldedAddress } from '../derive-address.ts';
 
 import type { DappTestConfig, PrepStepId, PrepStepResult, PrepContext, PrepCallbacks } from './types.ts';
@@ -65,7 +64,7 @@ async function runStep(
     return stepCacheClear(config);
   }
   if (step === 'localnet-up') {
-    return stepLocalnetUp(callbacks);
+    return stepLocalnetUp(config, callbacks);
   }
   if (step.startsWith('balance:')) {
     const amount = parseInt(step.split(':')[1], 10);
@@ -93,100 +92,15 @@ async function stepCacheClear(config: DappTestConfig): Promise<void> {
   clearWalletCache(undefined, network);
 }
 
-const LOCALNET_TIMEOUT_MS = 30_000; // 30s for Docker health
-const LOCALNET_MAX_RETRIES = 2;
-const INDEXER_PROBE_TIMEOUT_MS = 30_000; // 30s for indexer to start responding after Docker healthy
-
-/**
- * Probe the indexer HTTP endpoint to verify it's actually responding.
- * Drops curl's `-f` flag — any response, including 4xx, means the server
- * is alive; we only need TCP + HTTP framing, not a 2xx body. Connection
- * refused / DNS failure / timeout still throws, which is what we want
- * to treat as "not ready".
- */
-function probeIndexer(): boolean {
-  try {
-    execSync(
-      `curl -s -o /dev/null http://localhost:8088${INDEXER_GRAPHQL_PATH} --max-time 3`,
-      { timeout: 5_000, stdio: ['pipe', 'pipe', 'pipe'] },
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Poll the indexer until it responds or timeout. */
-function waitForIndexer(timeoutMs: number, onMessage?: (msg: string) => void): boolean {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (probeIndexer()) return true;
-    onMessage?.('Waiting for indexer...');
-    const { execSync } = require('node:child_process') as typeof import('node:child_process');
-    try { execSync('sleep 2', { timeout: 3_000 }); } catch {}
-  }
-  return false;
-}
-
-async function stepLocalnetUp(callbacks: PrepCallbacks): Promise<void> {
-  checkDockerAvailable();
-  ensureComposeFile();
-
-  const expected = ['node', 'indexer', 'proof-server'];
-
-  // Check Docker says all 3 are running and healthy
-  const services = getServiceStatus();
-  const allHealthy = services.length >= 3 &&
-    expected.every(name => services.some(s => s.name === name && s.state === 'running')) &&
-    services.every(s => !s.health || s.health === 'healthy');
-
-  if (allHealthy) {
-    // Docker thinks they're healthy — verify the indexer is actually responding
-    if (waitForIndexer(10_000, (msg) => callbacks.onMessage(msg))) {
-      callbacks.onMessage(`Localnet OK (3 services healthy, indexer responding)`);
-      return;
-    }
-    callbacks.onMessage('Localnet containers running but indexer not responding. Restarting...');
-  }
-
-  // Something is wrong — tear down and start fresh
-  const running = services.filter(s => s.state === 'running').map(s => s.name);
-  const missing = expected.filter(name => !running.includes(name));
-  if (missing.length > 0) {
-    callbacks.onMessage(`Localnet missing: ${missing.join(', ')}. Restarting clean...`);
-  } else {
-    callbacks.onMessage(`Localnet unhealthy. Restarting clean...`);
-  }
-
-  for (let attempt = 1; attempt <= LOCALNET_MAX_RETRIES; attempt++) {
-    callbacks.onMessage(`Attempt ${attempt}/${LOCALNET_MAX_RETRIES}: tearing down...`);
-    dockerCompose('down');
-
-    callbacks.onMessage(`Attempt ${attempt}/${LOCALNET_MAX_RETRIES}: starting...`);
-    dockerCompose('up -d');
-
-    const healthy = waitForHealthy(LOCALNET_TIMEOUT_MS);
-    if (healthy && waitForIndexer(INDEXER_PROBE_TIMEOUT_MS, (msg) => callbacks.onMessage(msg))) {
-      callbacks.onMessage('Localnet running (indexer verified)');
-      return;
-    }
-    if (healthy) {
-      callbacks.onMessage(`Attempt ${attempt}: Docker healthy but indexer not responding after ${INDEXER_PROBE_TIMEOUT_MS / 1000}s`);
-      continue;
-    }
-
-    // Report what went wrong on this attempt
-    const postServices = getServiceStatus();
-    const stillMissing = expected.filter(name => !postServices.some(s => s.name === name && s.state === 'running'));
-    const stillUnhealthy = postServices.filter(s => s.state === 'running' && s.health && s.health !== 'healthy');
-
-    const issues: string[] = [];
-    if (stillMissing.length > 0) issues.push(`not running: ${stillMissing.join(', ')}`);
-    if (stillUnhealthy.length > 0) issues.push(`unhealthy: ${stillUnhealthy.map(s => s.name).join(', ')}`);
-    callbacks.onMessage(`Attempt ${attempt} failed: ${issues.join('; ') || 'timeout'}`);
-  }
-
-  throw new Error(`Localnet failed to start after ${LOCALNET_MAX_RETRIES} attempts`);
+async function stepLocalnetUp(config: DappTestConfig, callbacks: PrepCallbacks): Promise<void> {
+  // This build can't start a localnet (no published ledger-9 indexer image),
+  // so the step requires a running ledger-9 stack at the resolved endpoints.
+  const network = config.network ?? 'undeployed';
+  const { config: networkConfig } = resolveNetwork({
+    args: { command: 'test', subcommand: undefined, positionals: [], flags: { network } },
+  });
+  await assertLedger9StackReachable(network, networkConfig);
+  callbacks.onMessage(`Using the ledger-9 stack at ${networkConfig.node} (indexer ${networkConfig.indexer})`);
 }
 
 async function stepBalance(amount: number, config: DappTestConfig, callbacks: PrepCallbacks): Promise<void> {
@@ -194,6 +108,8 @@ async function stepBalance(amount: number, config: DappTestConfig, callbacks: Pr
   const { config: networkConfig } = resolveNetwork({
     args: { command: 'test', subcommand: undefined, positionals: [], flags: { network } },
   });
+  // On a ledger-8 chain the SDK's sync would retry forever.
+  await assertLedgerSupported(network, networkConfig);
 
   const walletConfig = loadWalletConfig(resolveWalletPath());
   const seedBuffer = Buffer.from(walletConfig.seed, 'hex');
@@ -271,6 +187,7 @@ async function stepDust(config: DappTestConfig, callbacks: PrepCallbacks): Promi
   const { config: networkConfig } = resolveNetwork({
     args: { command: 'test', subcommand: undefined, positionals: [], flags: { network } },
   });
+  await assertLedgerSupported(network, networkConfig);
 
   const walletConfig = loadWalletConfig(resolveWalletPath());
   const seedBuffer = Buffer.from(walletConfig.seed, 'hex');

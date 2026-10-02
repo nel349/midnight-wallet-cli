@@ -4,6 +4,7 @@
 // clear message instead of hanging or failing on a deserialize error.
 
 import { FORK_SCHEDULE, type NetworkConfig } from './network.ts';
+import { getChainGenesisHash } from './chain-id.ts';
 
 export class UnsupportedLedgerError extends Error {
   readonly code = 'UNSUPPORTED_LEDGER';
@@ -52,4 +53,43 @@ export async function assertLedgerSupported(
   fetchVersion: (indexerHttpUrl: string) => Promise<bigint | null> = fetchProtocolVersion,
 ): Promise<void> {
   checkLedgerSupported(networkName, await fetchVersion(network.indexer));
+}
+
+/**
+ * No ledger-9 stack answers at the configured endpoints. This build can't
+ * start one (`mn localnet` refuses), so the user has to run it and point mn
+ * at it.
+ */
+export class LocalStackUnreachableError extends Error {
+  readonly code = 'LOCAL_STACK_UNREACHABLE';
+  constructor(component: 'indexer' | 'node', url: string) {
+    super(
+      `No ledger-9 stack is reachable: the ${component} at ${url} did not answer.\n` +
+      `This build of mn can't start a localnet (no published indexer image runs ledger 9 yet).\n` +
+      `Start a ledger-9 stack (node 2.1.0-rc.2, proof-server 9.0.0-rc.8, a 4.4 indexer) and point mn at it:\n` +
+      `  midnight config set network undeployed, then midnight config set node / indexer-ws / proof-server <url>`,
+    );
+    this.name = 'LocalStackUnreachableError';
+  }
+}
+
+export interface StackProbes {
+  fetchVersion?: (indexerHttpUrl: string) => Promise<bigint | null>;
+  fetchGenesis?: (nodeWsUrl: string) => Promise<string | null>;
+}
+
+/**
+ * Require a running ledger-9 stack at the network's endpoints: the indexer
+ * answers with a ledger-9 protocol version, and the node answers.
+ */
+export async function assertLedger9StackReachable(
+  networkName: string,
+  network: NetworkConfig,
+  probes: StackProbes = {},
+): Promise<void> {
+  const version = await (probes.fetchVersion ?? fetchProtocolVersion)(network.indexer);
+  if (version === null) throw new LocalStackUnreachableError('indexer', network.indexer);
+  checkLedgerSupported(networkName, version);
+  const genesis = await (probes.fetchGenesis ?? getChainGenesisHash)(network.node);
+  if (genesis === null) throw new LocalStackUnreachableError('node', network.node);
 }

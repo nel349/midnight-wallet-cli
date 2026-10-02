@@ -72,11 +72,44 @@ describe('resolveNetworkConfig on undeployed', () => {
     expect(() => resolveNetworkConfig('undeployed', { detect: twoStacks })).toThrow(AmbiguousLocalStacksError);
   });
 
-  it('does not detect at all when endpoints are explicit, so several stacks are fine', () => {
+  it('does not detect at all when every endpoint is given, so several stacks are fine', () => {
     let detected = false;
-    const cfg = resolveNetworkConfig('undeployed', { explicitEndpoints: true, detect: () => { detected = true; return twoStacks(); } });
+    const cfg = resolveNetworkConfig('undeployed', {
+      given: { node: 'ws://localhost:29944', indexerWS: 'ws://localhost:28088/api/v4/graphql/ws', proofServer: 'http://localhost:26300' },
+      detect: () => { detected = true; return twoStacks(); },
+    });
     expect(detected).toBe(false);
-    expect(cfg.node).toBe('ws://localhost:9944'); // the default, which the caller's overrides then replace
+    expect(cfg.node).toBe('ws://localhost:29944');
+    expect(cfg.indexerWS).toBe('ws://localhost:28088/api/v4/graphql/ws');
+    expect(cfg.indexer).toBe('http://localhost:28088/api/v4/graphql');
+    expect(cfg.proofServer).toBe('http://localhost:26300');
+  });
+
+  it('detects only the components not given (one stack, only --proof-server given)', () => {
+    const cfg = resolveNetworkConfig('undeployed', {
+      given: { proofServer: 'http://localhost:6301' },
+      detect: () => parseLocalStacks(ps(SCRATCH)),
+    });
+    expect(cfg.proofServer).toBe('http://localhost:6301');
+    expect(cfg.node).toBe('ws://localhost:29944');
+    expect(cfg.indexerWS).toBe('ws://localhost:28088/api/v4/graphql/ws');
+  });
+
+  it('refuses when a component it must detect is ambiguous, even if others are given', () => {
+    expect(() => resolveNetworkConfig('undeployed', {
+      given: { proofServer: 'http://localhost:26300' },
+      detect: twoStacks,
+    })).toThrow(AmbiguousLocalStacksError);
+  });
+
+  it('does not refuse over an ambiguous component that was given', () => {
+    // Two proof servers run, but the proof server is given; node and indexer have one stack each.
+    const cfg = resolveNetworkConfig('undeployed', {
+      given: { proofServer: 'http://localhost:26300' },
+      detect: () => parseLocalStacks(ps(SCRATCH, [BENCH[2]!])),
+    });
+    expect(cfg.node).toBe('ws://localhost:29944');
+    expect(cfg.proofServer).toBe('http://localhost:26300');
   });
 
   it('uses the single detected stack', () => {
@@ -94,24 +127,66 @@ describe('resolveNetworkConfig on undeployed', () => {
 });
 
 describe('resolveNetwork', () => {
-  it('skips local detection when an endpoint flag is given, so it works with any number of stacks', async () => {
-    const { mkdtempSync, rmSync } = await import('node:fs');
+  // A temp config dir per test: the real ~/.midnight config must not leak in.
+  async function withConfig(config: object | null, fn: (configDir: string) => Promise<void> | void): Promise<void> {
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
-    const { resolveNetwork } = await import('../lib/resolve-network.ts');
-    const { parseArgs } = await import('../lib/argv.ts');
-    const configDir = mkdtempSync(join(tmpdir(), 'mn-resolve-')); // empty config: no saved endpoints
+    const configDir = mkdtempSync(join(tmpdir(), 'mn-resolve-'));
     try {
-      const { name, config } = resolveNetwork({
-        args: parseArgs(['balance', '--network', 'undeployed', '--node', 'ws://localhost:29944']),
-        configDir,
-      });
-      expect(name).toBe('undeployed');
-      // Defaults, untouched by detection; the command's applyEndpointOverrides sets the flag's URL next.
-      expect(config.node).toBe('ws://localhost:9944');
-      expect(config.indexer).toBe('http://localhost:8088/api/v4/graphql');
+      if (config) writeFileSync(join(configDir, 'config.json'), JSON.stringify(config));
+      await fn(configDir);
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
+  }
+
+  it('applies endpoints saved with `midnight config set`, for commands with no endpoint flags', async () => {
+    const { resolveNetwork } = await import('../lib/resolve-network.ts');
+    const { parseArgs } = await import('../lib/argv.ts');
+    await withConfig({
+      network: 'undeployed',
+      networks: { undeployed: { node: 'ws://localhost:29944', 'indexer-ws': 'ws://localhost:28088/api/v4/graphql/ws', 'proof-server': 'http://localhost:26300' } },
+    }, (configDir) => {
+      const { config } = resolveNetwork({ args: parseArgs(['test']), configDir });
+      expect(config.node).toBe('ws://localhost:29944');
+      expect(config.indexer).toBe('http://localhost:28088/api/v4/graphql');
+      expect(config.indexerWS).toBe('ws://localhost:28088/api/v4/graphql/ws');
+      expect(config.proofServer).toBe('http://localhost:26300');
+    });
+  });
+
+  it('lets a flag win over the saved config', async () => {
+    const { resolveNetwork } = await import('../lib/resolve-network.ts');
+    const { parseArgs } = await import('../lib/argv.ts');
+    await withConfig({ network: 'undeployed', networks: { undeployed: { node: 'ws://localhost:29944' } } }, (configDir) => {
+      const { config } = resolveNetwork({ args: parseArgs(['balance', '--node', 'ws://localhost:39944']), configDir });
+      expect(config.node).toBe('ws://localhost:39944');
+    });
+  });
+
+  it('with every endpoint given by flag, works whatever docker runs', async () => {
+    const { resolveNetwork } = await import('../lib/resolve-network.ts');
+    const { parseArgs } = await import('../lib/argv.ts');
+    await withConfig(null, (configDir) => {
+      const { name, config } = resolveNetwork({
+        args: parseArgs(['balance', '--network', 'undeployed', '--node', 'ws://localhost:29944',
+          '--indexer-ws', 'ws://localhost:28088/api/v4/graphql/ws', '--proof-server', 'http://localhost:26300']),
+        configDir,
+      });
+      expect(name).toBe('undeployed');
+      expect(config.node).toBe('ws://localhost:29944');
+      expect(config.indexer).toBe('http://localhost:28088/api/v4/graphql');
+    });
+  });
+});
+
+describe('mn cache clear with several local stacks', () => {
+  it('needs only the network name, so it never runs detection', async () => {
+    const src = (await import('node:fs')).readFileSync(new URL('../commands/cache.ts', import.meta.url), 'utf-8');
+    // Full resolution would detect local stacks and refuse when several run,
+    // yet cache takes no endpoint flags to settle it.
+    expect(src).toContain('resolveNetworkName(');
+    expect(src).not.toMatch(/\bresolveNetwork\(/);
   });
 });

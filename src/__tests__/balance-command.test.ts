@@ -5,14 +5,14 @@ import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
 import { deriveUnshieldedAddress, deriveAllAddresses } from '../lib/derive-address.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
-import { detectTestcontainerPorts } from '../lib/network.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-// Tests that connect to the local indexer require Docker (midnight localnet up).
-// Check for an actual running indexer instead of just CI env var.
-const HAS_INDEXER = detectTestcontainerPorts().indexerPort !== undefined;
+// Live tests against a running ledger-9 indexer. Opt in with MN_LIVE_TESTS=1;
+// they use undeployed's saved endpoints (`midnight config set ...`) or the
+// defaults, never docker auto-detection (MN_NO_LOCAL_DETECT is set for tests).
+const HAS_INDEXER = process.env.MN_LIVE_TESTS === '1';
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-balance-cmd-test-${process.pid}`);
 

@@ -53,9 +53,7 @@ export default async function devCommand(args: ParsedArgs, signal?: AbortSignal)
   try {
     const result = await ensureLocalnetRunning((msg) => localnetSpinner.update(msg));
     const stateLabel = {
-      'already-running': 'Localnet already running',
-      'started': 'Localnet started',
-      'started-unhealthy': 'Localnet started (some services not yet healthy)',
+      'already-running': 'Ledger-9 stack reachable',
     }[result.state];
     localnetSpinner.stop(stateLabel);
   } catch (err) {

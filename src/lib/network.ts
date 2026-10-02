@@ -117,22 +117,38 @@ export class AmbiguousLocalStacksError extends Error {
       `indexer ${found.indexer.join(', ')}; proof-server ${found.proofServer.join(', ')}), ` +
       `and mn won't guess which one to use.\n` +
       `Pick one per command:  --node ws://localhost:<port> --indexer-ws ws://localhost:<port>${INDEXER_GRAPHQL_WS_PATH} --proof-server http://localhost:<port>\n` +
-      `or once:               midnight config set node <url>; midnight config set indexer-ws <url>; midnight config set proof-server <url>`,
+      `or once:               midnight config set network undeployed, then midnight config set node / indexer-ws / proof-server <url>\n` +
+      `Commands without endpoint flags (cache, test, dev) use the saved config. MN_NO_LOCAL_DETECT=1 turns detection off.`,
     );
     this.name = 'AmbiguousLocalStacksError';
   }
 }
 
+/** Which components still need a port from detection. */
+export interface NeededComponents {
+  node: boolean;
+  indexer: boolean;
+  proofServer: boolean;
+}
+
+const ALL_COMPONENTS: NeededComponents = { node: true, indexer: true, proofServer: true };
+
 /**
- * The single local stack's ports. Throws AmbiguousLocalStacksError when any
- * component runs on more than one port: picking would be a guess, and could
- * even mix two stacks.
+ * The single local stack's ports for the components still needed. Throws
+ * AmbiguousLocalStacksError when a needed component runs on more than one
+ * port: picking would be a guess, and could mix two stacks. A component the
+ * caller already has an endpoint for can't be ambiguous.
  */
-export function pickLocalStack(found: LocalStackPorts): TestcontainerPorts {
-  if (found.node.length > 1 || found.indexer.length > 1 || found.proofServer.length > 1) {
+export function pickLocalStack(found: LocalStackPorts, need: NeededComponents = ALL_COMPONENTS): TestcontainerPorts {
+  if ((need.node && found.node.length > 1) || (need.indexer && found.indexer.length > 1)
+      || (need.proofServer && found.proofServer.length > 1)) {
     throw new AmbiguousLocalStacksError(found);
   }
-  return { nodePort: found.node[0], indexerPort: found.indexer[0], proofServerPort: found.proofServer[0] };
+  return {
+    nodePort: need.node ? found.node[0] : undefined,
+    indexerPort: need.indexer ? found.indexer[0] : undefined,
+    proofServerPort: need.proofServer ? found.proofServer[0] : undefined,
+  };
 }
 
 /**
@@ -149,31 +165,29 @@ export function detectLocalStacks(): LocalStackPorts {
   }
 }
 
-/** Ports of the single local stack, or {} when there is none or more than one. */
-export function detectTestcontainerPorts(): TestcontainerPorts {
-  try {
-    return pickLocalStack(detectLocalStacks());
-  } catch {
-    return {};
-  }
-}
-
 export interface ResolveNetworkConfigOptions {
-  /** Endpoints come from flags or config, so local auto-detection is skipped. */
-  explicitEndpoints?: boolean;
+  /** Endpoints given by flag or config. They win; only the rest are auto-detected. */
+  given?: EndpointOverrides;
   /** Local stack detection (tests inject docker output). */
   detect?: () => LocalStackPorts;
 }
 
 /**
- * Resolve a full network config. On undeployed without explicit endpoints,
- * use the single running local stack's ports; refuse if several run.
+ * Resolve a full network config: given endpoints first, then (on undeployed)
+ * the single running local stack's ports for the components not given, then
+ * the network defaults. Refuses when a component it must detect is ambiguous.
  */
 export function resolveNetworkConfig(name: NetworkName, options: ResolveNetworkConfigOptions = {}): NetworkConfig {
   const config = getNetworkConfig(name);
+  const given = options.given ?? {};
 
-  if (name === 'undeployed' && !options.explicitEndpoints) {
-    const detected = pickLocalStack((options.detect ?? detectLocalStacks)());
+  const need: NeededComponents = {
+    node: given.node === undefined,
+    indexer: given.indexerWS === undefined,
+    proofServer: given.proofServer === undefined,
+  };
+  if (name === 'undeployed' && (need.node || need.indexer || need.proofServer)) {
+    const detected = pickLocalStack((options.detect ?? detectLocalStacks)(), need);
 
     if (detected.indexerPort) {
       config.indexer = `http://localhost:${detected.indexerPort}${INDEXER_GRAPHQL_PATH}`;
@@ -187,7 +201,18 @@ export function resolveNetworkConfig(name: NetworkName, options: ResolveNetworkC
     }
   }
 
+  if (given.node !== undefined) config.node = given.node;
+  if (given.proofServer !== undefined) config.proofServer = given.proofServer;
+  if (given.indexerWS !== undefined) {
+    config.indexerWS = given.indexerWS;
+    config.indexer = indexerHttpFromWs(given.indexerWS);
+  }
   return config;
+}
+
+/** The indexer's HTTP GraphQL URL for its WebSocket URL. */
+export function indexerHttpFromWs(wsUrl: string): string {
+  return wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/ws$/, '');
 }
 
 export interface EndpointOverrides {
@@ -228,13 +253,8 @@ export function applyEndpointOverrides(
   config.indexerWS = flagOverrides.indexerWS ?? scoped['indexer-ws'] ?? config.indexerWS;
 
   // Keep indexer HTTP in sync if indexer WS was overridden
-  // (derive HTTP URL from WS URL by stripping /ws suffix and adjusting protocol)
   if (flagOverrides.indexerWS ?? scoped['indexer-ws']) {
-    const wsUrl = config.indexerWS;
-    config.indexer = wsUrl
-      .replace(/^wss:/, 'https:')
-      .replace(/^ws:/, 'http:')
-      .replace(/\/ws$/, '');
+    config.indexer = indexerHttpFromWs(config.indexerWS);
   }
 
   return config;

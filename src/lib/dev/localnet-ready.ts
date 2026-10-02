@@ -1,58 +1,23 @@
-// Ensures the local Midnight network is running for `mn dev`.
-// Idempotent: skip fast when all services are already healthy.
+// Ensures a ledger-9 network is reachable for `mn dev`. This build can't
+// start a localnet (no published ledger-9 indexer image), so it requires a
+// running stack at the endpoints `undeployed` resolves to (saved config, or
+// the single local stack docker shows).
 
-import { CONTAINER_NAMES, dockerCompose, ensureComposeFile, getServiceStatus, waitForHealthy } from '../localnet.ts';
+import { resolveNetwork } from '../resolve-network.ts';
+import { assertLedger9StackReachable } from '../ledger-guard.ts';
 
-export type LocalnetState = 'already-running' | 'started' | 'started-unhealthy';
+export type LocalnetState = 'already-running';
 
 export interface EnsureLocalnetResult {
   state: LocalnetState;
 }
 
-/**
- * Make sure localnet is up. Returns quickly if the core services
- * (node, indexer, proof-server) are already healthy.
- */
+/** Require a running ledger-9 stack; throws with setup instructions if none answers. */
 export async function ensureLocalnetRunning(onProgress?: (msg: string) => void): Promise<EnsureLocalnetResult> {
-  if (allExpectedServicesHealthy()) {
-    onProgress?.('Localnet already running');
-    return { state: 'already-running' };
-  }
-
-  onProgress?.('Writing compose file');
-  ensureComposeFile();
-
-  onProgress?.('Starting localnet containers');
-  dockerCompose('up -d');
-
-  onProgress?.('Waiting for services to be healthy');
-  const healthy = waitForHealthy(120_000);
-
-  return { state: healthy ? 'started' : 'started-unhealthy' };
-}
-
-function safeServiceStatus(): ReturnType<typeof getServiceStatus> {
-  try {
-    return getServiceStatus();
-  } catch {
-    return [];
-  }
-}
-
-/**
- * True when every expected container (node, indexer, proof-server) is running
- * AND reports healthy (or has no health check configured).
- */
-function allExpectedServicesHealthy(): boolean {
-  const services = safeServiceStatus();
-  const byName = new Map(services.map((s) => [s.name, s]));
-  for (const name of CONTAINER_NAMES) {
-    const svc = byName.get(name);
-    if (!svc) return false;
-    if (svc.state !== 'running') return false;
-    // Containers without a health check report health as "" — treat that as OK.
-    // Only fail when a health check is configured AND reporting non-healthy.
-    if (svc.health && svc.health !== 'healthy') return false;
-  }
-  return true;
+  const { name, config } = resolveNetwork({
+    args: { command: 'dev', subcommand: undefined, positionals: [], flags: { network: 'undeployed' } },
+  });
+  onProgress?.(`Checking the ledger-9 stack at ${config.node}`);
+  await assertLedger9StackReachable(name, config);
+  return { state: 'already-running' };
 }

@@ -24,6 +24,7 @@ import { createDAppConnector, signatureScheme, type DAppConnector } from '../lib
 import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
+import { PROOF_TIMEOUT_MS } from '../lib/constants.ts';
 import type { ApprovalOptions } from '../lib/approval.ts';
 import {
   AGENT_SK, NIGHT, WALLET_SK, WALLET_VK, agentPaysMerchant, buildTx, pay, sealedBytes, spend, unsealedBytes,
@@ -1114,6 +1115,35 @@ describe('dapp-connector', () => {
 
       await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx())).rejects.toThrow('proof server unreachable');
       expect(revertFn).toHaveBeenCalledWith(recipe);
+    });
+
+    it('also reverts a proof that finishes after the timeout, so no stale pending tx is left', async () => {
+      vi.useFakeTimers();
+      try {
+        const recipe = { type: 'RECIPE' };
+        const late = finalizedTx(0x09);
+        let finishProof!: (tx: unknown) => void;
+        const revertFn = vi.fn().mockResolvedValue(undefined);
+        const bundle = createBundleStub({
+          balanceUnboundTransaction: () => Promise.resolve(recipe),
+          finalizeRecipe: () => new Promise((resolve) => { finishProof = resolve; }),
+        });
+        (bundle.facade as any).revert = revertFn;
+        connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+        const call = connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx());
+        const outcome = expect(call).rejects.toThrow('ZK proof generation timed out');
+        await vi.advanceTimersByTimeAsync(PROOF_TIMEOUT_MS + 1);
+        await outcome;
+        expect(revertFn).toHaveBeenCalledWith(recipe);
+
+        // The SDK registers the finalized tx as pending when the proof lands.
+        finishProof(late);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(revertFn).toHaveBeenCalledWith(late);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

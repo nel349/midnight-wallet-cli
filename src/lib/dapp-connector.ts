@@ -217,9 +217,10 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     tracker?.start('proving');
     let timer: ReturnType<typeof setTimeout> | undefined;
     let finalized: FinalizedTx;
+    const finalizing = facade.finalizeRecipe(signed);
     try {
       finalized = await Promise.race([
-        facade.finalizeRecipe(signed),
+        finalizing,
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error('ZK proof generation timed out')), PROOF_TIMEOUT_MS);
         }),
@@ -228,6 +229,9 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       // No finalized transaction to track: release what balancing booked now,
       // rather than leaving the coins held until the TTL.
       try { await facade.revert(recipe); } catch { /* best-effort */ }
+      // A timed-out proof keeps running, and the SDK registers its finalized tx
+      // as pending when it lands; nobody will submit it, so revert that too.
+      finalizing.then((late) => facade.revert(late)).catch(() => { /* best-effort */ });
       throw err;
     } finally {
       clearTimeout(timer);

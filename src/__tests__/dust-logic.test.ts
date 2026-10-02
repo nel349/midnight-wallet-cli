@@ -369,6 +369,20 @@ describe('registerNightUtxos', () => {
     expect(submitTransaction).toHaveBeenCalledWith(finalized);
   });
 
+  it('releases the booked NIGHT UTXOs when proving the registration fails', async () => {
+    const recipe = { type: 'UNPROVEN_TRANSACTION' };
+    const revert = vi.fn().mockResolvedValue(undefined);
+    const bundle = createBundleStub({
+      registerNightUtxos: vi.fn().mockResolvedValue(recipe),
+      finalizeRecipe: vi.fn().mockRejectedValue(new Error('proof server unreachable')),
+    });
+    (bundle.facade as any).revert = revert;
+
+    await expect(registerNightUtxos(bundle, [NIGHT_UTXO], DUST_ADDRESS)).rejects.toThrow('proof server unreachable');
+    // Registration books the UTXOs; without the revert a retry can't book them again.
+    expect(revert).toHaveBeenCalledWith(recipe);
+  });
+
   it('waits for the coins to generate the estimated fee before registering them', async () => {
     const calls: string[] = [];
     const estimateRegistration = vi.fn(async () => { calls.push('estimate'); return { fee: 777n, dustGenerationEstimations: [] }; });

@@ -188,7 +188,14 @@ async function submitDustRegistration(
     bundle.keystore.signDataAsync,
     dustReceiverAddress,
   );
-  const finalized = await bundle.facade.finalizeRecipe(recipe);
+  let finalized;
+  try {
+    finalized = await bundle.facade.finalizeRecipe(recipe);
+  } catch (err) {
+    // Registering books the NIGHT UTXOs; release them so a retry can book them again.
+    try { await bundle.facade.revert(recipe); } catch { /* best-effort */ }
+    throw err;
+  }
   return await bundle.facade.submitTransaction(finalized);
 }
 

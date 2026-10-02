@@ -6,7 +6,7 @@ import { MidnightBech32m, ShieldedAddress } from '@midnightntwrk/wallet-sdk/addr
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
-import { resolveNetwork } from '../lib/resolve-network.ts';
+import { resolveNetwork, resolveNetworkName } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { shieldedSyncEnabled, shieldedDisabledReason } from '../lib/shielded-policy.ts';
 import { getNetworkId } from '../lib/network-id.ts';
@@ -64,7 +64,7 @@ function resolveRecipient(input: string, args: ParsedArgs, shielded: boolean): s
   const recipientPath = resolveWalletPath(input);
   const recipientConfig = loadWalletConfig(recipientPath);
 
-  const { name: networkName } = resolveNetwork({ args });
+  const networkName = resolveNetworkName({ args });
 
   if (shielded) {
     const shieldedAddr = recipientConfig.shieldedAddresses?.[networkName];
