@@ -47,6 +47,13 @@ export function segmentsOf(tx: FeeCheckTransaction): Set<number> {
   ]);
 }
 
+/** The intents whose TTL is at or before `now`: the chain refuses a transaction carrying one. */
+export function expiredIntents(tx: FeeCheckTransaction, now: Date): Array<{ segment: number; ttl: Date }> {
+  return [...(tx.intents ?? new Map())]
+    .filter(([, intent]) => intent.ttl.getTime() <= now.getTime())
+    .map(([segment, intent]) => ({ segment, ttl: intent.ttl }));
+}
+
 export interface UnshieldedInputRef {
   /** Where the input sits, e.g. "intent 1 guaranteed unshielded input 0". */
   where: string;

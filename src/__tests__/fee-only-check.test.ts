@@ -14,7 +14,7 @@ import {
   shieldedToken,
   signData,
 } from '@midnightntwrk/ledger-v9';
-import { feeOnlyRefusals, readDAppTransaction } from '../lib/fee-only-check.ts';
+import { expiredIntents, feeOnlyRefusals, readDAppTransaction } from '../lib/fee-only-check.ts';
 import {
   AGENT_SK, AGENT_VK, NETWORK, NIGHT, TTL, WALLET_SK, WALLET_VK,
   agentPaysMerchant, buildTx, pay, sealedBytes, spend, unsealedBytes,
@@ -127,5 +127,24 @@ describe('feeOnlyRefusals', () => {
     expect(feeOnlyRefusals(readDAppTransaction(await unsealedBytes(tx), 'unsealed'), AGENT_VK)).toEqual([
       "intent 1 guaranteed unshielded input 0 spends this wallet's own funds",
     ]);
+  });
+});
+
+describe('expiredIntents', () => {
+  // Whole seconds: the ledger keeps an intent's TTL to the second.
+  const at = (iso: string) => new Date(iso);
+  const tx = async (ttl: Date) => readDAppTransaction(await unsealedBytes(buildTx({
+    guaranteed: { inputs: [spend(AGENT_SK, 100n)], outputs: [pay(100n)], signers: [AGENT_SK] },
+  }, ttl)), 'unsealed');
+
+  it('names an intent whose TTL has passed, with its TTL', async () => {
+    expect(expiredIntents(await tx(at('2026-10-02T10:00:00Z')), at('2026-10-02T10:00:01Z')))
+      .toEqual([{ segment: 1, ttl: at('2026-10-02T10:00:00Z') }]);
+  });
+
+  it('counts a TTL equal to now as expired, and a later one as not', async () => {
+    const t = await tx(at('2026-10-02T10:00:00Z'));
+    expect(expiredIntents(t, at('2026-10-02T10:00:00Z'))).toHaveLength(1);
+    expect(expiredIntents(t, at('2026-10-02T09:59:59Z'))).toEqual([]);
   });
 });

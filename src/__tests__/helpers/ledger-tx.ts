@@ -52,8 +52,8 @@ export interface OfferSpec {
   signers: SigningKey[];
 }
 
-export function buildTx(offers: { guaranteed?: OfferSpec; fallible?: OfferSpec }): UnprovenTransaction {
-  const intent = Intent.new(TTL);
+export function buildTx(offers: { guaranteed?: OfferSpec; fallible?: OfferSpec }, ttl: Date = TTL): UnprovenTransaction {
+  const intent = Intent.new(ttl);
   if (offers.guaranteed) intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(offers.guaranteed.inputs, offers.guaranteed.outputs, []);
   if (offers.fallible) intent.fallibleUnshieldedOffer = UnshieldedOffer.new(offers.fallible.inputs, offers.fallible.outputs, []);
   const data = intent.signatureData(1);

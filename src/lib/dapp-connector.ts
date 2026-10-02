@@ -18,7 +18,7 @@ import { getNetworkId } from './network-id.ts';
 import { isDustShortage } from './sdk-errors.ts';
 import { DEFAULT_FEE_LIMITS, feeLimitRefusal, pendingLimitRefusal, type FeeLimits } from './fee-limits.ts';
 import { inspectTxHex } from './tx-inspect.ts';
-import { feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
+import { expiredIntents, feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { PartlySignedTransactionError, assertSignable, signRecipe } from './sign-recipe.ts';
 import { fetchPartialSuccessSegments, type SegmentResult } from './tx-segments.ts';
 import { walletsBelowLedger9 } from './ledger-guard.ts';
@@ -361,6 +361,20 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     }
   }
 
+  /** Refuse a dApp transaction the chain would refuse for its TTL, before anything is reserved for it. */
+  function assertNotExpired(txHex: string, stage: DAppTxStage): void {
+    let expired: Array<{ segment: number; ttl: Date }>;
+    try {
+      expired = expiredIntents(readDAppTransaction(fromHex(txHex), stage), new Date());
+    } catch (err) {
+      throw createApiError('InvalidRequest', extractErrorDetail(err));
+    }
+    if (expired.length > 0) {
+      const which = expired.map(({ segment, ttl }) => `intent ${segment}'s TTL (${ttl.toISOString()})`).join(', ');
+      throw createApiError('InvalidRequest', `The transaction has expired: ${which} has passed. Build it again with a later TTL.`);
+    }
+  }
+
   /** Refuse an unsealed dApp transaction the wallet can't sign without breaking it. */
   function assertDAppTxSignable(txHex: string, balancesUnshielded: boolean): void {
     try {
@@ -433,6 +447,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
 
     const ttl = createTtl();
     const dappTx = stage === 'unsealed' ? adopt(txHex, 'Unbound') : adopt(txHex, 'Finalized');
+    assertNotExpired(txHex, stage);
     // Signing an unsealed transaction signs the dApp's part too; refuse one that can't be signed before booking anything.
     if (stage === 'unsealed') {
       assertDAppTxSignable(txHex, tokenKindsToBalance === 'all' || tokenKindsToBalance.includes('unshielded'));

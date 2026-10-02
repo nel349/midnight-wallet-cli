@@ -144,9 +144,12 @@ function createConnector(overrides?: {
 
 /** A real unsealed ledger-9 dApp transaction (the agent pays from its own signed input), as hex. */
 let AGENT_TX: string;
+/** The same payment sealed (bound), as balanceSealedTransaction takes it. */
+let SEALED_AGENT_TX: string;
 
 beforeAll(async () => {
   AGENT_TX = Buffer.from(await unsealedBytes(agentPaysMerchant())).toString('hex');
+  SEALED_AGENT_TX = Buffer.from(await sealedBytes(agentPaysMerchant())).toString('hex');
 });
 
 describe('dapp-connector', () => {
@@ -688,11 +691,12 @@ describe('dapp-connector', () => {
       const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
       const bundle = createBundleStub({ [sdkMethod]: balance });
       connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+      const tx = stage === 'Unbound' ? AGENT_TX : SEALED_AGENT_TX;
 
-      await connector.handlers[method]({ tx: AGENT_TX }, ctx());
+      await connector.handlers[method]({ tx }, ctx());
 
-      expect(bundle.facade.adoptTransaction).toHaveBeenCalledWith(Uint8Array.from(Buffer.from(AGENT_TX, 'hex')), stage);
-      expect(balance).toHaveBeenCalledWith({ stage, hex: AGENT_TX }, expect.objectContaining({ ttl: expect.any(Date) }));
+      expect(bundle.facade.adoptTransaction).toHaveBeenCalledWith(Uint8Array.from(Buffer.from(tx, 'hex')), stage);
+      expect(balance).toHaveBeenCalledWith({ stage, hex: tx }, expect.objectContaining({ ttl: expect.any(Date) }));
     });
 
     it('submitTransaction reads the hex as a finalized transaction and submits that handle', async () => {
@@ -818,7 +822,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      await expect(connector.handlers.balanceSealedTransaction({ tx: 'aabb' }, ctx()))
+      await expect(connector.handlers.balanceSealedTransaction({ tx: SEALED_AGENT_TX }, ctx()))
         .rejects.toThrow('proof generation failed');
     });
   });
@@ -954,9 +958,10 @@ describe('dapp-connector', () => {
       const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
       connector = createConnector({ bundleOverrides: { [sdkMethod]: balance } });
 
-      await connector.handlers[method]({ tx: AGENT_TX }, ctx());
-      await connector.handlers[method]({ tx: AGENT_TX, options: { payFees: true } }, ctx());
-      await connector.handlers[method]({ tx: AGENT_TX, options: { payFees: false } }, ctx());
+      const tx = method === 'balanceUnsealedTransaction' ? AGENT_TX : SEALED_AGENT_TX;
+      await connector.handlers[method]({ tx }, ctx());
+      await connector.handlers[method]({ tx, options: { payFees: true } }, ctx());
+      await connector.handlers[method]({ tx, options: { payFees: false } }, ctx());
 
       expect(balance.mock.calls.map(([, opts]) => opts)).toEqual([
         { ttl: expect.any(Date), tokenKindsToBalance: 'all' },
@@ -1400,6 +1405,26 @@ describe('dapp-connector', () => {
       expect(err.code).toBe('InvalidRequest');
       expect(err.message).toContain('both signed and unsigned unshielded inputs');
       expect(revertFn).toHaveBeenCalledWith(recipe);
+    });
+  });
+
+  describe('an expired dApp transaction', () => {
+    it.each([
+      ['balanceUnsealedTransaction', unsealedBytes, 'balanceUnboundTransaction'],
+      ['balanceSealedTransaction', sealedBytes, 'balanceFinalizedTransaction'],
+    ] as const)('%s refuses it as InvalidRequest, naming the intent and its TTL, before balancing', async (method, toBytes, sdkMethod) => {
+      // A whole second: the ledger keeps an intent's TTL to the second.
+      const ttl = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
+      const agentPaidAMinuteTooLate = buildTx({ guaranteed: { inputs: [spend(AGENT_SK, 100n)], outputs: [pay(100n)], signers: [AGENT_SK] } }, ttl);
+      const expired = Buffer.from(await toBytes(agentPaidAMinuteTooLate)).toString('hex');
+      const balance = vi.fn();
+      connector = createConnector({ bundleOverrides: { [sdkMethod]: balance } });
+
+      const err: any = await (connector.handlers as any)[method]({ tx: expired }, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toBe(`The transaction has expired: intent 1's TTL (${ttl.toISOString()}) has passed. Build it again with a later TTL.`);
+      expect(balance).not.toHaveBeenCalled();
     });
   });
 
