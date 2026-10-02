@@ -178,38 +178,43 @@ function rpcClose() {
 `;
 }
 
-/** Build walletProvider that delegates to mn serve RPC. */
-function walletProviderCode(): string {
+/**
+ * SDK imports used by walletProviderCode and providerSetupCode. Kept out of
+ * those fragments so a test can evaluate a fragment with the same bindings.
+ */
+export const PROVIDER_IMPORTS = `
+import { createWalletProvider, createMidnightProvider, Transaction } from '@midnight-ntwrk/midnight-js-types';
+import { toHex, fromHex } from '@midnight-ntwrk/midnight-js-utils';
+import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
+import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
+import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
+import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
+`;
+
+/**
+ * walletProvider + midnightProvider backed by mn serve RPC. midnight-js 5
+ * passes version-tagged txs ({ version: 'v9', tx }) and refuses providers that
+ * do not declare `supportedEras`; createWalletProvider/createMidnightProvider
+ * declare v9 and unwrap/re-tag, so the bodies below see live ledger-v9 txs.
+ */
+export function walletProviderCode(): string {
   return `
-// Wallet provider backed by mn serve RPC
-const walletProvider = {
-  getCoinPublicKey: () => {
-    // Will be populated after getShieldedAddresses
-    return walletState?.shieldedCoinPublicKey ?? '';
-  },
-  getEncryptionPublicKey: () => {
-    return walletState?.shieldedEncryptionPublicKey ?? '';
-  },
-  async balanceTx(tx, ttl) {
-    const { toHex } = await import('@midnight-ntwrk/midnight-js-utils');
-    const txHex = toHex(tx.serialize());
-    const result = await rpcCall('balanceUnsealedTransaction', { tx: txHex });
-
-    const { fromHex } = await import('@midnight-ntwrk/midnight-js-utils');
-    const { Transaction } = await import('@midnight-ntwrk/midnight-js-types');
-    const bytes = fromHex(result.tx);
-    return Transaction.deserialize('signature', 'proof', 'binding', bytes);
-  },
-  async submitTx(tx) {
-    const { toHex } = await import('@midnight-ntwrk/midnight-js-utils');
-    const txHex = toHex(tx.serialize());
-    await rpcCall('submitTransaction', { tx: txHex });
-    return tx.identifiers()[0];
-  },
-};
-
-// Get wallet state for coin/encryption public keys
 const walletState = await rpcCall('getShieldedAddresses', {});
+
+const walletProvider = createWalletProvider({
+  getCoinPublicKey: () => walletState.shieldedCoinPublicKey,
+  getEncryptionPublicKey: () => walletState.shieldedEncryptionPublicKey,
+  // ttl is ignored: mn serve applies its own TTL when balancing.
+  async balanceTx(tx) {
+    const result = await rpcCall('balanceUnsealedTransaction', { tx: toHex(tx.serialize()) });
+    return Transaction.deserialize('signature', 'proof', 'binding', fromHex(result.tx));
+  },
+});
+
+const midnightProvider = createMidnightProvider(async (tx) => {
+  await rpcCall('submitTransaction', { tx: toHex(tx.serialize()) });
+  return tx.identifiers()[0];
+});
 `;
 }
 
@@ -293,13 +298,9 @@ const compiled = witnesses
 `;
 }
 
-function providerSetupCode(managedDir: string, networkConfig: NetworkConfig, privateStateKey: string): string {
+/** The `providers` object deploy/call pass to midnight-js-contracts. */
+export function providerSetupCode(networkConfig: NetworkConfig, privateStateKey: string): string {
   return `
-import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
-import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
-import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
-import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
-
 const zkConfigProvider = new NodeZkConfigProvider(MANAGED_DIR);
 
 const providers = {
@@ -308,14 +309,14 @@ const providers = {
     privateStoragePasswordProvider: () => Promise.resolve('mn-contract-default-pwd-16ch'),
     accountId: 'mn-contract-runner',
   }),
-  publicDataProvider: indexerPublicDataProvider(
-    ${JSON.stringify(networkConfig.indexer)},
-    ${JSON.stringify(networkConfig.indexerWS ?? networkConfig.indexer.replace('http', 'ws'))},
-  ),
+  publicDataProvider: indexerPublicDataProvider({
+    queryURL: ${JSON.stringify(networkConfig.indexer)},
+    subscriptionURL: ${JSON.stringify(networkConfig.indexerWS ?? networkConfig.indexer.replace('http', 'ws'))},
+  }),
   zkConfigProvider,
-  proofProvider: httpClientProofProvider(${JSON.stringify(networkConfig.proofServer)}, zkConfigProvider),
+  proofProvider: httpClientProofProvider({ url: ${JSON.stringify(networkConfig.proofServer)}, zkConfigProvider }),
   walletProvider,
-  midnightProvider: walletProvider,
+  midnightProvider,
 };
 `;
 }
@@ -352,7 +353,7 @@ const providers = {
  */
 const ARG_COERCE_FN = `\nconst coerceArg = (${coerceArg.toString()});\n`;
 
-function generateDeployScript(opts: DeployOptions): string {
+export function generateDeployScript(opts: DeployOptions): string {
   const privateStateKey = opts.privateStateKey ?? `${opts.contractName}PrivateState`;
   // Constructor args are pre-serialized to JSON here (still in our process)
   // so the generated script just spreads them. The coerceArg helper inside
@@ -371,8 +372,9 @@ process.stderr.write('Connecting to mn serve...\\n');
 await rpcConnect();
 process.stderr.write('Connected\\n');
 
+${PROVIDER_IMPORTS}
 ${walletProviderCode()}
-${providerSetupCode(opts.managedDir, opts.networkConfig, privateStateKey)}
+${providerSetupCode(opts.networkConfig, privateStateKey)}
 
 import { deployContract } from '@midnight-ntwrk/midnight-js-contracts';
 
@@ -395,7 +397,7 @@ process.exit(0);
 `;
 }
 
-function generateCallScript(opts: CallOptions): string {
+export function generateCallScript(opts: CallOptions): string {
   const privateStateKey = opts.privateStateKey ?? `${opts.contractName}PrivateState`;
 
   return `
@@ -409,8 +411,9 @@ process.stderr.write('Connecting to mn serve...\\n');
 await rpcConnect();
 process.stderr.write('Connected\\n');
 
+${PROVIDER_IMPORTS}
 ${walletProviderCode()}
-${providerSetupCode(opts.managedDir, opts.networkConfig, privateStateKey)}
+${providerSetupCode(opts.networkConfig, privateStateKey)}
 
 import { findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 
@@ -433,7 +436,7 @@ process.exit(0);
 `;
 }
 
-function generateStateScript(opts: StateOptions): string {
+export function generateStateScript(opts: StateOptions): string {
   return `
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 setNetworkId(${JSON.stringify(opts.networkConfig.networkId.toLowerCase())});
@@ -453,10 +456,10 @@ if (typeof contractMod.ledger !== 'function') {
 }
 
 process.stderr.write('Querying contract state...\\n');
-const provider = indexerPublicDataProvider(
-  ${JSON.stringify(opts.networkConfig.indexer)},
-  ${JSON.stringify(opts.networkConfig.indexerWS ?? opts.networkConfig.indexer.replace('http', 'ws'))},
-);
+const provider = indexerPublicDataProvider({
+  queryURL: ${JSON.stringify(opts.networkConfig.indexer)},
+  subscriptionURL: ${JSON.stringify(opts.networkConfig.indexerWS ?? opts.networkConfig.indexer.replace('http', 'ws'))},
+});
 
 const contractState = await provider.queryContractState(${JSON.stringify(opts.contractAddress)});
 if (!contractState) {

@@ -9,8 +9,8 @@ import type { NetworkConfig } from '../network.ts';
  * No wallet or proof server needed.
  */
 export function buildStateProvider(networkConfig: NetworkConfig) {
-  return indexerPublicDataProvider(
-    networkConfig.indexer,
-    networkConfig.indexerWS ?? networkConfig.indexer.replace('http', 'ws'),
-  );
+  return indexerPublicDataProvider({
+    queryURL: networkConfig.indexer,
+    subscriptionURL: networkConfig.indexerWS ?? networkConfig.indexer.replace('http', 'ws'),
+  });
 }
