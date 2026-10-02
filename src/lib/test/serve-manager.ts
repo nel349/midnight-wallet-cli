@@ -47,9 +47,10 @@ export function serveEndpointMismatch(
   running: { substrateNodeUri?: string; indexerWsUri?: string },
   requested: Pick<NetworkConfig, 'node' | 'indexerWS'>,
 ): string | undefined {
+  const same = (a: string | undefined, b: string) => a !== undefined && a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
   const diffs: string[] = [];
-  if (running.substrateNodeUri !== requested.node) diffs.push(`node ${running.substrateNodeUri} (need ${requested.node})`);
-  if (running.indexerWsUri !== requested.indexerWS) diffs.push(`indexer ${running.indexerWsUri} (need ${requested.indexerWS})`);
+  if (!same(running.substrateNodeUri, requested.node)) diffs.push(`node ${running.substrateNodeUri} (need ${requested.node})`);
+  if (!same(running.indexerWsUri, requested.indexerWS)) diffs.push(`indexer ${running.indexerWsUri} (need ${requested.indexerWS})`);
   return diffs.length > 0 ? diffs.join(', ') : undefined;
 }
 
@@ -153,7 +154,7 @@ export async function startServeOrReuse(options: ServeManagerOptions): Promise<S
     const mismatch = running ? serveEndpointMismatch(running, resolveServeTarget(options).networkConfig) : 'its endpoints could not be read';
     if (mismatch) {
       throw new Error(
-        `mn serve on port ${port} is for ${actualNetwork} but a different chain: ${mismatch}. ` +
+        `mn serve on port ${port} is on a different ${actualNetwork} chain: ${mismatch}. ` +
         `Stop it first (\`pkill -f 'mn serve'\`) and retry.`,
       );
     }
