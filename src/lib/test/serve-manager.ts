@@ -5,7 +5,7 @@
 import { Socket } from 'node:net';
 import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
-import { applyEndpointOverrides, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../network.ts';
+import { applyEndpointOverrides, endpointFlags, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
 import { loadWalletCache, saveWalletCache } from '../wallet-cache.ts';
 import { suppressRpcNoise } from '../transfer.ts';
@@ -31,7 +31,7 @@ export function resolveServeTarget(options: ServeManagerOptions): { networkName:
       command: 'serve',
       subcommand: undefined,
       positionals: [],
-      flags: options.network ? { network: options.network } : {},
+      flags: { ...(options.network ? { network: options.network } : {}), ...endpointFlags(options.endpoints ?? {}) },
     },
   });
   applyEndpointOverrides(networkConfig, options.endpoints ?? {}, networkName);

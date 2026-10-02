@@ -83,57 +83,97 @@ interface TestcontainerPorts {
   proofServerPort?: number;
 }
 
+/** Host ports of each Midnight component running locally, distinct and sorted. */
+export interface LocalStackPorts {
+  node: number[];
+  indexer: number[];
+  proofServer: number[];
+}
+
 /**
- * Auto-detect testcontainer ports by querying `docker ps`.
- * Looks for running midnight-node, indexer-standalone, and proof-server containers.
+ * Collect the host ports of local Midnight containers from
+ * `docker ps --format "{{.Image}}|{{.Ports}}"` output.
  */
+export function parseLocalStacks(dockerPsOutput: string): LocalStackPorts {
+  const found = { node: new Set<number>(), indexer: new Set<number>(), proofServer: new Set<number>() };
+  for (const line of dockerPsOutput.split('\n')) {
+    if (!line) continue;
+    const [image = '', ports = ''] = line.split('|');
+    const hostPorts = (containerPort: number): number[] =>
+      [...ports.matchAll(new RegExp(`:(\\d+)->${containerPort}/tcp`, 'g'))].map((m) => parseInt(m[1]!, 10));
+    if (image.includes('indexer')) hostPorts(8088).forEach((p) => found.indexer.add(p));
+    if (image.includes('midnight-node')) hostPorts(9944).forEach((p) => found.node.add(p));
+    if (image.includes('proof-server')) hostPorts(6300).forEach((p) => found.proofServer.add(p));
+  }
+  const sorted = (set: Set<number>) => [...set].sort((a, b) => a - b);
+  return { node: sorted(found.node), indexer: sorted(found.indexer), proofServer: sorted(found.proofServer) };
+}
+
+export class AmbiguousLocalStacksError extends Error {
+  readonly code = 'AMBIGUOUS_LOCAL_STACKS';
+  constructor(found: LocalStackPorts) {
+    super(
+      `Several local Midnight stacks are running (node ${found.node.join(', ')}; ` +
+      `indexer ${found.indexer.join(', ')}; proof-server ${found.proofServer.join(', ')}), ` +
+      `and mn won't guess which one to use.\n` +
+      `Pick one per command:  --node ws://localhost:<port> --indexer-ws ws://localhost:<port>${INDEXER_GRAPHQL_WS_PATH} --proof-server http://localhost:<port>\n` +
+      `or once:               midnight config set node <url>; midnight config set indexer-ws <url>; midnight config set proof-server <url>`,
+    );
+    this.name = 'AmbiguousLocalStacksError';
+  }
+}
+
+/**
+ * The single local stack's ports. Throws AmbiguousLocalStacksError when any
+ * component runs on more than one port: picking would be a guess, and could
+ * even mix two stacks.
+ */
+export function pickLocalStack(found: LocalStackPorts): TestcontainerPorts {
+  if (found.node.length > 1 || found.indexer.length > 1 || found.proofServer.length > 1) {
+    throw new AmbiguousLocalStacksError(found);
+  }
+  return { nodePort: found.node[0], indexerPort: found.indexer[0], proofServerPort: found.proofServer[0] };
+}
+
+/**
+ * Read the local Midnight containers from docker (empty when docker isn't
+ * available, or when MN_NO_LOCAL_DETECT=1 turns detection off and leaves
+ * undeployed on its default endpoints).
+ */
+export function detectLocalStacks(): LocalStackPorts {
+  if (process.env.MN_NO_LOCAL_DETECT === '1') return { node: [], indexer: [], proofServer: [] };
+  try {
+    return parseLocalStacks(execSync('docker ps --format "{{.Image}}|{{.Ports}}"', { encoding: 'utf-8', timeout: 5000 }));
+  } catch {
+    return { node: [], indexer: [], proofServer: [] };
+  }
+}
+
+/** Ports of the single local stack, or {} when there is none or more than one. */
 export function detectTestcontainerPorts(): TestcontainerPorts {
   try {
-    const output = execSync(
-      'docker ps --format "{{.Image}}|{{.Ports}}"',
-      { encoding: 'utf-8', timeout: 5000 }
-    );
-
-    const result: TestcontainerPorts = {};
-
-    for (const line of output.trim().split('\n')) {
-      if (!line) continue;
-      const [image, ports] = line.split('|');
-
-      const extractHostPort = (containerPort: number): number | undefined => {
-        const regex = new RegExp(`0\\.0\\.0\\.0:(\\d+)->${containerPort}/tcp`);
-        const match = ports?.match(regex);
-        return match ? parseInt(match[1], 10) : undefined;
-      };
-
-      if (image.includes('indexer-standalone') || image.includes('indexer')) {
-        const port = extractHostPort(8088);
-        if (port) result.indexerPort = port;
-      }
-      if (image.includes('midnight-node')) {
-        const port = extractHostPort(9944);
-        if (port) result.nodePort = port;
-      }
-      if (image.includes('proof-server')) {
-        const port = extractHostPort(6300);
-        if (port) result.proofServerPort = port;
-      }
-    }
-
-    return result;
+    return pickLocalStack(detectLocalStacks());
   } catch {
     return {};
   }
 }
 
+export interface ResolveNetworkConfigOptions {
+  /** Endpoints come from flags or config, so local auto-detection is skipped. */
+  explicitEndpoints?: boolean;
+  /** Local stack detection (tests inject docker output). */
+  detect?: () => LocalStackPorts;
+}
+
 /**
- * Resolve a full network config, applying testcontainer port overrides for undeployed.
+ * Resolve a full network config. On undeployed without explicit endpoints,
+ * use the single running local stack's ports; refuse if several run.
  */
-export function resolveNetworkConfig(name: NetworkName): NetworkConfig {
+export function resolveNetworkConfig(name: NetworkName, options: ResolveNetworkConfigOptions = {}): NetworkConfig {
   const config = getNetworkConfig(name);
 
-  if (name === 'undeployed') {
-    const detected = detectTestcontainerPorts();
+  if (name === 'undeployed' && !options.explicitEndpoints) {
+    const detected = pickLocalStack((options.detect ?? detectLocalStacks)());
 
     if (detected.indexerPort) {
       config.indexer = `http://localhost:${detected.indexerPort}${INDEXER_GRAPHQL_PATH}`;
@@ -154,6 +194,15 @@ export interface EndpointOverrides {
   proofServer?: string;
   node?: string;
   indexerWS?: string;
+}
+
+/** The CLI flags carrying these endpoints, for building parsed args in code. */
+export function endpointFlags(e: EndpointOverrides): Record<string, string> {
+  const flags: Record<string, string> = {};
+  if (e.node !== undefined) flags.node = e.node;
+  if (e.indexerWS !== undefined) flags['indexer-ws'] = e.indexerWS;
+  if (e.proofServer !== undefined) flags['proof-server'] = e.proofServer;
+  return flags;
 }
 
 /**

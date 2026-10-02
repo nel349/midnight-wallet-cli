@@ -1,7 +1,7 @@
 // Contract commands — inspect, deploy, call, and query state for compiled Midnight contracts.
 
 import { resolve } from 'node:path';
-import { applyEndpointOverrides, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../lib/network.ts';
+import { applyEndpointOverrides, endpointFlags, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../lib/network.ts';
 import { type ParsedArgs, getFlag, hasFlag, requireFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
@@ -134,14 +134,14 @@ interface ContractNetwork {
 async function contractNetwork(args: ParsedArgs, subcommand: string): Promise<ContractNetwork> {
   const { resolveNetwork } = await import('../lib/resolve-network.ts');
   const network = getFlag(args, 'network') ?? 'undeployed';
-  const { name, config: networkConfig } = resolveNetwork({
-    args: { command: 'contract', subcommand, positionals: [], flags: { network } },
-  });
   const endpoints: EndpointOverrides = {
     node: getFlag(args, 'node'),
     indexerWS: getFlag(args, 'indexer-ws'),
     proofServer: getFlag(args, 'proof-server'),
   };
+  const { name, config: networkConfig } = resolveNetwork({
+    args: { command: 'contract', subcommand, positionals: [], flags: { network, ...endpointFlags(endpoints) } },
+  });
   applyEndpointOverrides(networkConfig, endpoints, name);
   return { network, networkConfig, endpoints };
 }

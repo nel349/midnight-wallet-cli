@@ -11,7 +11,7 @@ import {
   getValidNetworkNames,
   resolveNetworkConfig,
 } from './network.ts';
-import { loadCliConfig } from './cli-config.ts';
+import { loadCliConfig, getEndpointOverridesForNetwork } from './cli-config.ts';
 
 export interface NetworkResolutionContext {
   args: ParsedArgs;
@@ -46,14 +46,19 @@ export function resolveNetworkName(ctx: NetworkResolutionContext): NetworkName {
 }
 
 /**
- * Resolve network name + full config in one call.
- * Applies testcontainer port detection for undeployed.
+ * Resolve network name + full config in one call. On undeployed, local stack
+ * detection runs only when no endpoint is given by flag or config: explicit
+ * endpoints win anyway, and detection refuses when several stacks run.
  */
 export function resolveNetwork(ctx: NetworkResolutionContext): {
   name: NetworkName;
   config: NetworkConfig;
 } {
   const name = resolveNetworkName(ctx);
-  const config = resolveNetworkConfig(name);
+  const configured = getEndpointOverridesForNetwork(loadCliConfig(ctx.configDir), name);
+  const explicitEndpoints = ENDPOINT_FLAGS.some((flag) => getFlag(ctx.args, flag) !== undefined || configured[flag] !== undefined);
+  const config = resolveNetworkConfig(name, { explicitEndpoints });
   return { name, config };
 }
+
+const ENDPOINT_FLAGS = ['node', 'indexer-ws', 'proof-server'] as const;

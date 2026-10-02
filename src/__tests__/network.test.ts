@@ -132,12 +132,10 @@ describe('resolveNetworkConfig', () => {
     expect(resolved).toEqual(standard);
   });
 
-  it('returns a config object with all required fields for undeployed', () => {
-    const resolved = resolveNetworkConfig('undeployed');
-    expect(resolved.indexer).toBeDefined();
-    expect(resolved.indexerWS).toBeDefined();
-    expect(resolved.node).toBeDefined();
-    expect(resolved.proofServer).toBeDefined();
+  it('returns the default localnet endpoints for undeployed when no local stack runs', () => {
+    // Detection injected: the real docker state varies by machine.
+    const resolved = resolveNetworkConfig('undeployed', { detect: () => ({ node: [], indexer: [], proofServer: [] }) });
+    expect(resolved).toEqual(getNetworkConfig('undeployed'));
     expect(resolved.networkId).toBe('Undeployed');
   });
 
