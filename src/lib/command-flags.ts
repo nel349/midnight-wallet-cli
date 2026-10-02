@@ -17,7 +17,7 @@ export const COMMAND_FLAGS: Readonly<Record<string, readonly string[]>> = {
   'balance': ['force-shielded', 'network', 'no-cache', 'seed', 'shielded', 'verbose', 'wallet', ...ENDPOINTS],
   'cache': ['network', 'wallet'],
   'config': [],
-  'contract': ['address', 'args', 'circuit', 'managed', 'name', 'network', 'path', 'secret-key', 'wallet'],
+  'contract': ['address', 'args', 'circuit', 'managed', 'name', 'network', 'path', 'secret-key', 'wallet', ...ENDPOINTS],
   'dev': [],
   'dust': ['network', 'no-cache', 'seed', 'verbose', 'wallet', ...ENDPOINTS],
   'generate': ['force', 'mnemonic', 'network', 'output', 'seed'],

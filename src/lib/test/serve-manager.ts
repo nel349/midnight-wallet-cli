@@ -5,6 +5,7 @@
 import { Socket } from 'node:net';
 import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
+import { applyEndpointOverrides, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
 import { loadWalletCache, saveWalletCache } from '../wallet-cache.ts';
 import { suppressRpcNoise } from '../transfer.ts';
@@ -17,8 +18,38 @@ import type { ServeHandle } from './types.ts';
 export interface ServeManagerOptions {
   port?: number;
   network?: string;
+  /** Explicit endpoints; they win over the network defaults and docker auto-detection. */
+  endpoints?: EndpointOverrides;
   wallet?: string;
   onMessage?: (msg: string) => void;
+}
+
+/** The network and endpoints a serve for these options must use. */
+export function resolveServeTarget(options: ServeManagerOptions): { networkName: NetworkName; networkConfig: NetworkConfig } {
+  const { name: networkName, config: networkConfig } = resolveNetwork({
+    args: {
+      command: 'serve',
+      subcommand: undefined,
+      positionals: [],
+      flags: options.network ? { network: options.network } : {},
+    },
+  });
+  applyEndpointOverrides(networkConfig, options.endpoints ?? {}, networkName);
+  return { networkName, networkConfig };
+}
+
+/**
+ * Why a running serve can't be reused for `requested`, or undefined if it can.
+ * Same network name isn't enough: two local stacks are both `undeployed`.
+ */
+export function serveEndpointMismatch(
+  running: { substrateNodeUri?: string; indexerWsUri?: string },
+  requested: Pick<NetworkConfig, 'node' | 'indexerWS'>,
+): string | undefined {
+  const diffs: string[] = [];
+  if (running.substrateNodeUri !== requested.node) diffs.push(`node ${running.substrateNodeUri} (need ${requested.node})`);
+  if (running.indexerWsUri !== requested.indexerWS) diffs.push(`indexer ${running.indexerWsUri} (need ${requested.indexerWS})`);
+  return diffs.length > 0 ? diffs.join(', ') : undefined;
 }
 
 // ── Port + serve probe helpers ──────────────────────────────────
@@ -45,20 +76,32 @@ export function isPortInUse(port: number): Promise<boolean> {
  * port-in-use is "our" mn serve (reusable) or some other process.
  */
 export async function probeServeNetwork(port: number): Promise<string | null> {
+  const result = await probeServeRpc(port, 'getConnectionStatus');
+  const id = (result as { networkId?: unknown } | null)?.networkId;
+  return typeof id === 'string' ? id : null;
+}
+
+/** The node and indexer a serve on `port` reports via getConfiguration, or null. */
+export async function probeServeEndpoints(port: number): Promise<{ substrateNodeUri?: string; indexerWsUri?: string } | null> {
+  const result = await probeServeRpc(port, 'getConfiguration');
+  return result && typeof result === 'object' ? result as { substrateNodeUri?: string; indexerWsUri?: string } : null;
+}
+
+/** One JSON-RPC call to a serve on `port`: its `result`, or null on any error/timeout. */
+async function probeServeRpc(port: number, method: string): Promise<unknown | null> {
   const WebSocket = (await import('ws')).default;
-  return new Promise<string | null>((resolve) => {
+  return new Promise<unknown | null>((resolve) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}`);
     const timeout = setTimeout(() => { try { ws.close(); } catch {} resolve(null); }, 2000);
     ws.on('open', () => {
-      ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getConnectionStatus', params: {} }));
+      ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: {} }));
     });
     ws.on('message', (data: Buffer) => {
       clearTimeout(timeout);
       try {
         const msg = JSON.parse(data.toString());
-        const id = msg?.result?.networkId;
         ws.close();
-        resolve(typeof id === 'string' ? id : null);
+        resolve(msg?.result ?? null);
       } catch {
         ws.close();
         resolve(null);
@@ -105,6 +148,15 @@ export async function startServeOrReuse(options: ServeManagerOptions): Promise<S
       );
     }
 
+    const running = await probeServeEndpoints(port);
+    const mismatch = running ? serveEndpointMismatch(running, resolveServeTarget(options).networkConfig) : 'its endpoints could not be read';
+    if (mismatch) {
+      throw new Error(
+        `mn serve on port ${port} is for ${actualNetwork} but a different chain: ${mismatch}. ` +
+        `Stop it first (\`pkill -f 'mn serve'\`) and retry.`,
+      );
+    }
+
     onMessage(`Reusing existing mn serve on port ${port}`);
     return {
       port,
@@ -127,14 +179,7 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
   const config = loadWalletConfig(resolveWalletPath(options.wallet));
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
-  const { name: networkName, config: networkConfig } = resolveNetwork({
-    args: {
-      command: 'serve',
-      subcommand: undefined,
-      positionals: [],
-      flags: options.network ? { network: options.network } : {},
-    },
-  });
+  const { networkName, networkConfig } = resolveServeTarget(options);
   const address = config.addresses[networkName];
 
   // Suppress SDK noise

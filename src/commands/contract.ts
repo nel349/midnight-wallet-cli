@@ -1,7 +1,7 @@
 // Contract commands — inspect, deploy, call, and query state for compiled Midnight contracts.
 
 import { resolve } from 'node:path';
-import type { NetworkName } from '../lib/network.ts';
+import { applyEndpointOverrides, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../lib/network.ts';
 import { type ParsedArgs, getFlag, hasFlag, requireFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
@@ -121,17 +121,38 @@ async function handleInspect(args: ParsedArgs): Promise<void> {
   process.stderr.write('\n');
 }
 
+// ── Network: --network, then explicit endpoint flags over the defaults ──
+// Without endpoint flags, `undeployed` resolves to whatever local stack docker
+// shows, which is ambiguous when more than one runs.
+
+interface ContractNetwork {
+  network: string;
+  networkConfig: NetworkConfig;
+  endpoints: EndpointOverrides;
+}
+
+async function contractNetwork(args: ParsedArgs, subcommand: string): Promise<ContractNetwork> {
+  const { resolveNetwork } = await import('../lib/resolve-network.ts');
+  const network = getFlag(args, 'network') ?? 'undeployed';
+  const { name, config: networkConfig } = resolveNetwork({
+    args: { command: 'contract', subcommand, positionals: [], flags: { network } },
+  });
+  const endpoints: EndpointOverrides = {
+    node: getFlag(args, 'node'),
+    indexerWS: getFlag(args, 'indexer-ws'),
+    proofServer: getFlag(args, 'proof-server'),
+  };
+  applyEndpointOverrides(networkConfig, endpoints, name);
+  return { network, networkConfig, endpoints };
+}
+
 // ── Preflight check: balance + dust before deploy/call ──
 
-async function preflight(network: string, jsonMode: boolean, wallet?: string): Promise<void> {
+async function preflight({ network, networkConfig }: ContractNetwork, jsonMode: boolean, wallet?: string): Promise<void> {
   const { loadWalletConfig, resolveWalletPath } = await import('../lib/wallet-config.ts');
-  const { resolveNetwork } = await import('../lib/resolve-network.ts');
   const { defaultRepository } = await import('../lib/wallet-data-repository.ts');
   const { NATIVE_TOKEN_TYPE } = await import('../lib/constants.ts');
 
-  const { config: networkConfig } = resolveNetwork({
-    args: { command: 'contract', subcommand: undefined, positionals: [], flags: { network } },
-  });
   // resolveWalletPath honours --wallet when passed; without the arg, it
   // falls back to the active wallet from config. Forwarding the user's
   // --wallet flag here keeps the preflight check aligned with the wallet
@@ -184,7 +205,7 @@ async function preflight(network: string, jsonMode: boolean, wallet?: string): P
 
 // ── Serve lifecycle for deploy/call ──
 
-async function ensureServe(network: string, jsonMode: boolean, wallet?: string): Promise<{ port: number; stop: () => Promise<void> }> {
+async function ensureServe({ network, endpoints }: ContractNetwork, jsonMode: boolean, wallet?: string): Promise<{ port: number; stop: () => Promise<void> }> {
   const { startServeOrReuse } = await import('../lib/test/serve-manager.ts');
 
   // startServeOrReuse handles port-in-use detection: if a compatible mn
@@ -193,6 +214,7 @@ async function ensureServe(network: string, jsonMode: boolean, wallet?: string):
   const spinner = jsonMode ? silentSpinner() : startSpinner('Starting mn serve...');
   const handle = await startServeOrReuse({
     network,
+    endpoints,
     wallet,
     onMessage: (msg) => spinner.update(msg),
   });
@@ -212,7 +234,6 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
   const contractName = getFlag(args, 'name');
 
   const { runDeploy } = await import('../lib/contract/runner.ts');
-  const { resolveNetwork } = await import('../lib/resolve-network.ts');
 
   if (!jsonMode) {
     process.stderr.write('\n' + header('Contract Deploy') + '\n\n');
@@ -232,10 +253,8 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     }
   }
 
-  const network = getFlag(args, 'network') ?? 'undeployed';
-  const { config: networkConfig } = resolveNetwork({
-    args: { command: 'contract', subcommand: 'deploy', positionals: [], flags: { network } },
-  });
+  const target = await contractNetwork(args, 'deploy');
+  const { network, networkConfig } = target;
 
   // Constructor args via --args '<json>'. Same parsing as `mn contract call`:
   // arrays are passed positionally; objects are unwrapped to Object.values
@@ -270,10 +289,10 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
   }
 
   // Pre-check: verify wallet has balance and dust before attempting deploy
-  await preflight(network, jsonMode, getFlag(args, 'wallet'));
+  await preflight(target, jsonMode, getFlag(args, 'wallet'));
 
   // Start mn serve (or reuse existing)
-  const serve = await ensureServe(network, jsonMode, getFlag(args, 'wallet'));
+  const serve = await ensureServe(target, jsonMode, getFlag(args, 'wallet'));
 
   const spinner = jsonMode ? silentSpinner() : startSpinner('Deploying contract...');
 
@@ -350,7 +369,6 @@ async function handleCall(args: ParsedArgs): Promise<void> {
   const argsJson = getFlag(args, 'args');
 
   const { runCall } = await import('../lib/contract/runner.ts');
-  const { resolveNetwork } = await import('../lib/resolve-network.ts');
 
   if (!jsonMode) {
     process.stderr.write('\n' + header('Contract Call') + '\n\n');
@@ -368,10 +386,8 @@ async function handleCall(args: ParsedArgs): Promise<void> {
     }
   }
 
-  const network = getFlag(args, 'network') ?? 'undeployed';
-  const { config: networkConfig } = resolveNetwork({
-    args: { command: 'contract', subcommand: 'call', positionals: [], flags: { network } },
-  });
+  const target = await contractNetwork(args, 'call');
+  const { network, networkConfig } = target;
 
   if (!jsonMode) {
     process.stderr.write(keyValue('Contract', info.name) + '\n');
@@ -379,9 +395,9 @@ async function handleCall(args: ParsedArgs): Promise<void> {
     process.stderr.write(keyValue('Address', address.slice(0, 20) + '...') + '\n\n');
   }
 
-  await preflight(network, jsonMode, getFlag(args, 'wallet'));
+  await preflight(target, jsonMode, getFlag(args, 'wallet'));
 
-  const serve = await ensureServe(network, jsonMode, getFlag(args, 'wallet'));
+  const serve = await ensureServe(target, jsonMode, getFlag(args, 'wallet'));
   const spinner = jsonMode ? silentSpinner() : startSpinner(`Calling ${circuit}...`);
 
   try {
@@ -428,13 +444,9 @@ async function handleState(args: ParsedArgs): Promise<void> {
   const contractName = getFlag(args, 'name');
   const address = requireFlag(args, 'address', 'contract address');
 
-  const { resolveNetwork } = await import('../lib/resolve-network.ts');
   const { runState } = await import('../lib/contract/runner.ts');
 
-  const network = getFlag(args, 'network') ?? 'undeployed';
-  const { config: networkConfig } = resolveNetwork({
-    args: { command: 'contract', subcommand: 'state', positionals: [], flags: { network } },
-  });
+  const { network, networkConfig } = await contractNetwork(args, 'state');
 
   if (!jsonMode) {
     process.stderr.write('\n' + header('Contract State') + '\n\n');
