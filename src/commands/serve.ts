@@ -1,6 +1,6 @@
 // serve command — start DApp Connector server over WebSocket JSON-RPC
 // Usage: midnight serve [--port 9932] [--wallet path] [--network name]
-//                       [--approve-all] [--no-auto-approve-reads] [--json]
+//                       [--approve-all | --approve-fees] [--no-auto-approve-reads] [--json]
 
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
@@ -20,6 +20,7 @@ import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, dim, teal, green, red } from '../ui/colors.ts';
 import { start as startSpinner, getActiveSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
+import { UsageError } from '../lib/errors.ts';
 
 export default async function serveCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   rejectNoCacheForWrites(args);
@@ -32,6 +33,11 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   }
 
   const approveAll = hasFlag(args, 'approve-all');
+  // Fee wallet: auto-approve only Dust-fee balancing and the submit of what it balanced.
+  const approveFees = hasFlag(args, 'approve-fees');
+  if (approveAll && approveFees) {
+    throw new UsageError('--approve-all and --approve-fees conflict: --approve-fees approves only fee payment, --approve-all approves everything. Pass one.');
+  }
   // Default: auto-approve reads unless --no-auto-approve-reads is set
   const autoApproveReads = approveAll || !hasFlag(args, 'no-auto-approve-reads');
   const jsonMode = hasFlag(args, 'json');
@@ -58,7 +64,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   process.stderr.write(keyValue('Address', formatAddress(address, true)) + '\n');
   process.stderr.write(keyValue('Port', String(port)) + '\n');
   process.stderr.write(keyValue('Auto-approve reads', approveAll || autoApproveReads ? 'yes' : 'no') + '\n');
-  process.stderr.write(keyValue('Auto-approve writes', approveAll ? 'yes' : 'no') + '\n');
+  process.stderr.write(keyValue('Auto-approve writes', approveAll ? 'yes' : approveFees ? 'fee-only (Dust fee + its submit)' : 'no') + '\n');
   process.stderr.write('\n');
 
   // ── Suppress SDK noise ──
@@ -137,7 +143,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     connector = createDAppConnector({
       bundle,
       networkConfig,
-      approvalOptions: { approveAll, autoApproveReads },
+      approvalOptions: { approveAll, approveFees, autoApproveReads },
       callbacks: phaseCallbacks,
     });
 

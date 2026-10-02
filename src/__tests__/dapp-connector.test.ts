@@ -24,6 +24,10 @@ import { createDAppConnector, signatureScheme, type DAppConnector } from '../lib
 import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
+import type { ApprovalOptions } from '../lib/approval.ts';
+import {
+  AGENT_SK, NIGHT, WALLET_SK, WALLET_VK, agentPaysMerchant, buildTx, pay, sealedBytes, spend, unsealedBytes,
+} from './helpers/ledger-tx.ts';
 
 /** A finalized transaction handle as the SDK returns it: it serializes to these bytes. */
 const finalizedTx = (...bytes: number[]) => ({ serialize: () => new Uint8Array(bytes) });
@@ -116,7 +120,7 @@ function createBundleStub(overrides?: {
 function createConnector(overrides?: {
   bundleOverrides?: Parameters<typeof createBundleStub>[0];
   networkConfig?: NetworkConfig;
-  approvalOptions?: { approveAll?: boolean; autoApproveReads?: boolean };
+  approvalOptions?: ApprovalOptions;
 }): DAppConnector {
   return createDAppConnector({
     bundle: createBundleStub(overrides?.bundleOverrides),
@@ -808,6 +812,187 @@ describe('dapp-connector', () => {
   });
 
   // ── Hex-based pending tx tracking ──
+
+  // ── What the wallet balances, per mode ──
+
+  describe('token kinds to balance', () => {
+    it.each([
+      ['balanceUnsealedTransaction', 'balanceUnboundTransaction'],
+      ['balanceSealedTransaction', 'balanceFinalizedTransaction'],
+    ] as const)('%s balances every kind by default, and leaves the fee out when payFees is false', async (method, sdkMethod) => {
+      const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+      connector = createConnector({ bundleOverrides: { [sdkMethod]: balance } });
+
+      await connector.handlers[method]({ tx: 'aabb' }, ctx());
+      await connector.handlers[method]({ tx: 'aabb', options: { payFees: true } }, ctx());
+      await connector.handlers[method]({ tx: 'aabb', options: { payFees: false } }, ctx());
+
+      expect(balance.mock.calls.map(([, opts]) => opts)).toEqual([
+        { ttl: expect.any(Date), tokenKindsToBalance: 'all' },
+        { ttl: expect.any(Date), tokenKindsToBalance: 'all' },
+        { ttl: expect.any(Date), tokenKindsToBalance: ['shielded', 'unshielded'] },
+      ]);
+    });
+  });
+
+  // ── Fee wallet: --approve-fees ──
+
+  describe('fee wallet (approveFees)', () => {
+    let origIsTTY: boolean | undefined;
+    const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
+
+    beforeEach(() => {
+      origIsTTY = process.stdin.isTTY;
+      // An agent has no terminal: anything that is not fee-only must be rejected, not prompted.
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      process.stderr.write = (() => true) as any;
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+    });
+
+    /** A connector in fee-wallet mode over a bundle whose unshielded key is WALLET_VK. */
+    function feeWallet(
+      overrides?: Parameters<typeof createBundleStub>[0],
+      approvalOptions: ApprovalOptions = { approveFees: true, autoApproveReads: true },
+    ) {
+      const bundle = createBundleStub(overrides);
+      (bundle.keystore as any).getPublicKey = () => WALLET_VK;
+      const feeConnector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions });
+      connector = feeConnector;
+      return { bundle, connector: feeConnector };
+    }
+
+    it.each([
+      ['balanceUnsealedTransaction', 'balanceUnboundTransaction', unsealedBytes],
+      ['balanceSealedTransaction', 'balanceFinalizedTransaction', sealedBytes],
+    ] as const)('%s balances Dust-only and is approved without a terminal', async (method, sdkMethod, toBytes) => {
+      const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+      const { connector } = feeWallet({ [sdkMethod]: balance });
+
+      const result = await connector.handlers[method]({ tx: hex(await toBytes(agentPaysMerchant())) }, ctx()) as any;
+
+      expect(balance).toHaveBeenCalledTimes(1);
+      expect(balance.mock.calls[0]![1]).toEqual({ ttl: expect.any(Date), tokenKindsToBalance: ['dust'] });
+      expect(result).toEqual({ tx: 'abcd' });
+    });
+
+    it('approves a fee-only balance as fee-only, not as a prep step, so it holds with --no-auto-approve-reads', async () => {
+      const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+      const { connector } = feeWallet({ balanceUnboundTransaction: balance }, { approveFees: true, autoApproveReads: false });
+
+      const result = await connector.handlers.balanceUnsealedTransaction({ tx: hex(await unsealedBytes(agentPaysMerchant())) }, ctx()) as any;
+
+      expect(balance).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ tx: 'abcd' });
+    });
+
+    it('submits a transaction it balanced fee-only on the same connection, without a terminal', async () => {
+      const submit = vi.fn().mockResolvedValue('tx-id');
+      const { connector } = feeWallet({ submitTransaction: submit });
+
+      const balanced = await connector.handlers.balanceUnsealedTransaction({ tx: hex(await unsealedBytes(agentPaysMerchant())) }, ctx('agent')) as any;
+      const result = await connector.handlers.submitTransaction({ tx: balanced.tx }, ctx('agent'));
+
+      expect(submit).toHaveBeenCalledWith({ stage: 'Finalized', hex: 'abcd' });
+      expect(result).toEqual({ txHash: 'tx-id' });
+    });
+
+    it('rejects submitting a transaction this server did not balance', async () => {
+      const submit = vi.fn();
+      const { connector } = feeWallet({ submitTransaction: submit });
+
+      const err: any = await connector.handlers.submitTransaction({ tx: hex(await sealedBytes(agentPaysMerchant())) }, ctx('agent')).catch((e: any) => e);
+
+      expect(err.code).toBe('Rejected');
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    it('rejects submitting a fee-only transaction from another connection', async () => {
+      const submit = vi.fn();
+      const { connector } = feeWallet({ submitTransaction: submit });
+
+      const balanced = await connector.handlers.balanceUnsealedTransaction({ tx: hex(await unsealedBytes(agentPaysMerchant())) }, ctx('agent')) as any;
+      const err: any = await connector.handlers.submitTransaction({ tx: balanced.tx }, ctx('someone-else')).catch((e: any) => e);
+
+      expect(err.code).toBe('Rejected');
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    it('rejects submitting a transaction this server balanced, but not fee-only', async () => {
+      const submit = vi.fn();
+      const opts: ApprovalOptions = { approveAll: true };
+      const { connector } = feeWallet({ submitTransaction: submit }, opts);
+
+      const balanced = await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx('agent')) as any;
+      delete opts.approveAll;
+      opts.approveFees = true;
+      const err: any = await connector.handlers.submitTransaction({ tx: balanced.tx }, ctx('agent')).catch((e: any) => e);
+
+      expect(err.code).toBe('Rejected');
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['spends the wallet\'s own Night',
+        () => buildTx({ guaranteed: { inputs: [spend(WALLET_SK, 100n)], outputs: [pay(100n)], signers: [WALLET_SK] } }),
+        "intent 1 guaranteed unshielded input 0 spends this wallet's own funds"],
+      ['leaves an input for the wallet to sign',
+        () => buildTx({ guaranteed: { inputs: [spend(AGENT_SK, 100n)], outputs: [pay(100n)], signers: [] } }),
+        'intent 1 guaranteed unshielded input 0 is unsigned, so this wallet would sign it'],
+      ['leaves an output for the wallet to fund',
+        () => buildTx({ guaranteed: { inputs: [], outputs: [pay(100n)], signers: [] } }),
+        `segment 0 is short 100 of unshielded token ${NIGHT}, which a Dust-only balance can't fund`],
+    ])('refuses, with the reason, a transaction that %s, before balancing anything', async (_label, build, reason) => {
+      const balance = vi.fn();
+      const { bundle, connector } = feeWallet({ balanceUnboundTransaction: balance });
+
+      const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: hex(await unsealedBytes(build())) }, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('Rejected');
+      expect(err.message).toContain('--approve-fees');
+      expect(err.message).toContain(reason);
+      expect(balance).not.toHaveBeenCalled();
+      expect(bundle.facade.adoptTransaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses payFees: false, which leaves a fee wallet nothing to do', async () => {
+      const balance = vi.fn();
+      const { connector } = feeWallet({ balanceUnboundTransaction: balance });
+
+      const err: any = await connector.handlers.balanceUnsealedTransaction(
+        { tx: hex(await unsealedBytes(agentPaysMerchant())), options: { payFees: false } }, ctx(),
+      ).catch((e: any) => e);
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toContain('payFees');
+      expect(balance).not.toHaveBeenCalled();
+    });
+
+    it('refuses bytes it cannot read as a ledger-9 transaction of that stage', async () => {
+      const balance = vi.fn();
+      const { connector } = feeWallet({ balanceFinalizedTransaction: balance });
+
+      const err: any = await connector.handlers.balanceSealedTransaction({ tx: hex(await unsealedBytes(agentPaysMerchant())) }, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toContain('sealed');
+      expect(balance).not.toHaveBeenCalled();
+    });
+
+    it('still needs a prompt for anything else, so an agent\'s makeTransfer is rejected', async () => {
+      const transfer = vi.fn();
+      const { connector } = feeWallet({ transferTransaction: transfer });
+
+      const err: any = await connector.handlers.makeTransfer({
+        desiredOutputs: [{ kind: 'unshielded', type: NIGHT, value: '1', recipient: 'mn_addr_undeployed1xyz' }],
+      }, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('Rejected');
+      expect(transfer).not.toHaveBeenCalled();
+    });
+  });
 
   describe('pending tx tracking (hex-based)', () => {
     it('untrackPendingTx works via hex key (not object identity)', async () => {

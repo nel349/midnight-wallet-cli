@@ -17,6 +17,7 @@ import { toHex, fromHex } from './tx-serde.ts';
 import { getNetworkId } from './network-id.ts';
 import { isDustShortage } from './sdk-errors.ts';
 import { inspectTxHex } from './tx-inspect.ts';
+import { feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
 // Patches the ledger-8 dust variant's revert so it doesn't destroy UTXOs. On
@@ -37,6 +38,9 @@ export interface DAppConnectorOptions {
   approvalOptions: ApprovalOptions;
   callbacks?: DAppConnectorCallbacks;
 }
+
+/** Which token kinds the facade balances a dApp's transaction in. */
+export type TokenKindsToBalance = 'all' | Array<'dust' | 'shielded' | 'unshielded'>;
 
 export interface DAppConnector {
   handlers: Record<string, RpcHandler>;
@@ -161,10 +165,12 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
   // On rejection/disconnect/abandon we revert the FINALIZED transaction: that
   // releases the coins it spent in all three wallets and clears the pending
   // entry `finalizeRecipe` registered for it. Reverting the recipe would leave
-  // that entry pending until its TTL.
-  const pendingTxsByConnection = new Map<string, Map<string, { finalized: FinalizedTx; timer: ReturnType<typeof setTimeout> }>>();
+  // that entry pending until its TTL. `feeOnly` marks a transaction this
+  // connection had balanced Dust-only under --approve-fees: only its submit
+  // counts as fee-only.
+  const pendingTxsByConnection = new Map<string, Map<string, { finalized: FinalizedTx; timer: ReturnType<typeof setTimeout>; feeOnly: boolean }>>();
 
-  function trackPendingTx(connectionId: string, txHex: string, finalized: FinalizedTx): void {
+  function trackPendingTx(connectionId: string, txHex: string, finalized: FinalizedTx, feeOnly = false): void {
     let txMap = pendingTxsByConnection.get(connectionId);
     if (!txMap) {
       txMap = new Map();
@@ -177,7 +183,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       try { await facade.revert(finalized); } catch { /* best-effort */ }
       process.stderr.write(dim(`  abandoned tx reverted (${connectionId})`) + '\n');
     }, ABANDONED_TX_TIMEOUT_MS);
-    txMap.set(txHex, { finalized, timer });
+    txMap.set(txHex, { finalized, timer, feeOnly });
   }
 
   function untrackPendingTx(connectionId: string, txHex: string): void {
@@ -255,10 +261,11 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     method: string,
     details: Array<{ label: string; value: string }> = [],
     context?: RpcHandlerContext,
+    feeOnly = false,
   ): Promise<void> {
     context?.notify('approval:pending', { method });
     const result = await promptApproval(
-      { method, network: networkConfig.networkId, details, dappName: context?.connectionId },
+      { method, network: networkConfig.networkId, details, dappName: context?.connectionId, feeOnly },
       approvalOptions,
     );
     const outcome = result === 'reject' ? 'rejected' : 'approved';
@@ -266,6 +273,74 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     if (result === 'reject') {
       throw createApiError('Rejected', 'User rejected the request');
     }
+  }
+
+  /**
+   * Fee-wallet mode (--approve-fees): refuse a dApp transaction unless paying
+   * its Dust fee is all this wallet would do to it. Signing an unbound recipe
+   * signs the dApp's own transaction, so Dust-only balancing alone does not
+   * keep the wallet to the fee (see fee-only-check.ts).
+   */
+  function assertFeeOnly(txHex: string, stage: DAppTxStage, payFees: unknown): void {
+    if (payFees === false) {
+      throw createApiError('InvalidRequest',
+        'This wallet is a fee wallet (--approve-fees): it only pays the Dust fee, so payFees: false leaves it nothing to do');
+    }
+    let tx: FeeCheckTransaction;
+    try {
+      tx = readDAppTransaction(fromHex(txHex), stage);
+    } catch (err) {
+      throw createApiError('InvalidRequest',
+        `The transaction could not be read as a proven ledger-9 ${stage} transaction: ${extractErrorDetail(err)}`);
+    }
+    const reasons = feeOnlyRefusals(tx, keystore.getPublicKey());
+    if (reasons.length > 0) {
+      throw createApiError('Rejected',
+        `This wallet is a fee wallet (--approve-fees) and pays only the Dust fee; it refuses this transaction because ${reasons.join('; ')}`);
+    }
+  }
+
+  /**
+   * Balance a dApp's transaction. Under --approve-fees: Dust only, and only once
+   * `assertFeeOnly` passes, never falling back to a wider balance. Otherwise
+   * every token kind, or all but Dust when the dApp says `payFees: false`.
+   */
+  async function balanceDAppTransaction(
+    method: 'balanceUnsealedTransaction' | 'balanceSealedTransaction',
+    stage: DAppTxStage,
+    params: Record<string, unknown>,
+    context: RpcHandlerContext,
+  ): Promise<{ tx: string }> {
+    const txHex = String(params.tx ?? '');
+    if (!txHex) {
+      throw createApiError('InvalidRequest', 'tx is required');
+    }
+    const payFees = (params.options as { payFees?: unknown } | undefined)?.payFees;
+    const feeOnly = approvalOptions.approveFees === true;
+    if (feeOnly) assertFeeOnly(txHex, stage, payFees);
+    const tokenKindsToBalance: TokenKindsToBalance = feeOnly
+      ? ['dust']
+      : payFees === false ? ['shielded', 'unshielded'] : 'all';
+
+    const tracker = makeTracker(method, context);
+
+    tracker.start('approve');
+    await requireApproval(method, inspectTxHex(txHex, stage), context, feeOnly);
+
+    tracker.start('building');
+    const balanceOptions = { ttl: createTtl(), tokenKindsToBalance };
+    let recipe: any;
+    if (stage === 'unsealed') {
+      const unsealedTx = adopt(txHex, 'Unbound');
+      recipe = await withDustRetry(() => facade.balanceUnboundTransaction(unsealedTx, balanceOptions));
+    } else {
+      const sealedTx = adopt(txHex, 'Finalized');
+      recipe = await withDustRetry(() => facade.balanceFinalizedTransaction(sealedTx, balanceOptions));
+    }
+    const { hex, finalized } = await processRecipe(recipe, tracker);
+    trackPendingTx(context.connectionId, hex, finalized, feeOnly);
+    context.metadata.phases = tracker.getTimings();
+    return { tx: hex };
   }
 
   /** Encode an SDK address object to bech32m string. */
@@ -491,10 +566,13 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
 
       const tracker = makeTracker('submitTransaction', context);
 
-      // Submit is the irreversible action — always prompt
+      // Submit is the irreversible action: prompt, unless under --approve-fees
+      // it is a transaction this connection had balanced fee-only.
+      const feeOnly = approvalOptions.approveFees === true
+        && pendingTxsByConnection.get(context.connectionId)?.get(txHex)?.feeOnly === true;
       tracker.start('approve');
       try {
-        await requireApproval('submitTransaction', inspectTxHex(txHex, 'sealed'), context);
+        await requireApproval('submitTransaction', inspectTxHex(txHex, 'sealed'), context, feeOnly);
       } catch (err) {
         // Rejection — revert to release dust coins from pending.
         const txMap = pendingTxsByConnection.get(context.connectionId);
@@ -534,49 +612,11 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       }
     },
 
-    balanceUnsealedTransaction: async (params, context) => {
-      const txHex = String(params.tx ?? '');
-      if (!txHex) {
-        throw createApiError('InvalidRequest', 'tx is required');
-      }
+    balanceUnsealedTransaction: (params, context) =>
+      balanceDAppTransaction('balanceUnsealedTransaction', 'unsealed', params, context),
 
-      const tracker = makeTracker('balanceUnsealedTransaction', context);
-
-      tracker.start('approve');
-      await requireApproval('balanceUnsealedTransaction', inspectTxHex(txHex, 'unsealed'), context);
-
-      tracker.start('building');
-      const unsealedTx = adopt(txHex, 'Unbound');
-      const recipe = await withDustRetry(() => facade.balanceUnboundTransaction(unsealedTx, {
-        ttl: createTtl(),
-      }));
-      const { hex, finalized } = await processRecipe(recipe, tracker);
-      trackPendingTx(context.connectionId, hex, finalized);
-      context.metadata.phases = tracker.getTimings();
-      return { tx: hex };
-    },
-
-    balanceSealedTransaction: async (params, context) => {
-      const txHex = String(params.tx ?? '');
-      if (!txHex) {
-        throw createApiError('InvalidRequest', 'tx is required');
-      }
-
-      const tracker = makeTracker('balanceSealedTransaction', context);
-
-      tracker.start('approve');
-      await requireApproval('balanceSealedTransaction', inspectTxHex(txHex, 'sealed'), context);
-
-      tracker.start('building');
-      const sealedTx = adopt(txHex, 'Finalized');
-      const recipe = await withDustRetry(() => facade.balanceFinalizedTransaction(sealedTx, {
-        ttl: createTtl(),
-      }));
-      const { hex, finalized } = await processRecipe(recipe, tracker);
-      trackPendingTx(context.connectionId, hex, finalized);
-      context.metadata.phases = tracker.getTimings();
-      return { tx: hex };
-    },
+    balanceSealedTransaction: (params, context) =>
+      balanceDAppTransaction('balanceSealedTransaction', 'sealed', params, context),
 
     makeIntent: async (params, context) => {
       const desiredInputs = params.desiredInputs as any[];

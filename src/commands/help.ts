@@ -326,7 +326,7 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'serve',
     description: 'Start DApp Connector server over WebSocket JSON-RPC',
-    usage: 'midnight serve [--port <n>] [--wallet <name|file>] [--network <name>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--approve-all] [--no-auto-approve-reads] [--json]',
+    usage: 'midnight serve [--port <n>] [--wallet <name|file>] [--network <name>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--approve-all | --approve-fees] [--no-auto-approve-reads] [--json]',
     flags: [
       '--port <n>                    Server port (default: 9932)',
       '--wallet <name|file>          Wallet name or path',
@@ -335,12 +335,16 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--node <url>                  Override substrate node RPC URL',
       '--indexer-ws <url>            Override indexer WebSocket URL',
       '--approve-all                 Auto-approve all requests (reads + writes)',
+      '--approve-fees                Fee wallet: auto-approve only Dust-fee balancing of a',
+      '                              transaction that needs nothing else from this wallet,',
+      '                              and the submit of what it balanced; other writes prompt',
       '--no-auto-approve-reads       Prompt for read methods too',
     ],
     examples: [
       'midnight serve',
       'midnight serve --port 8080',
       'midnight serve --approve-all',
+      'midnight serve --approve-fees',
     ],
     jsonFields: {
       port: 'Server port number',
@@ -719,7 +723,7 @@ starts with mn_addr_ or mn_shield-addr_, it's used as an address directly.
 DAPP CONNECTOR
 ──────────────
 
-  midnight serve [--port 9932] [--approve-all] [--network name]
+  midnight serve [--port 9932] [--approve-all | --approve-fees] [--network name]
 
 Starts a WebSocket JSON-RPC server implementing the Midnight
 ConnectedAPI interface (same as the Lace browser wallet). Any DApp
@@ -728,6 +732,13 @@ can connect to it — no browser extension needed.
   - Port default: 9932, localhost only
   - Read operations: auto-approved
   - Write operations: terminal approval prompt (or --approve-all)
+  - --approve-fees: fee wallet for an agent. balanceUnsealedTransaction /
+    balanceSealedTransaction pay only the Dust fee and are auto-approved when
+    the transaction spends none of this wallet's funds, has no unsigned
+    unshielded input, and needs no non-Dust value; otherwise they are
+    refused. submitTransaction is auto-approved only for a transaction this
+    server balanced that way on the same connection. Everything else still
+    prompts (rejected without a terminal).
   - --no-auto-approve-reads: require approval for everything
 
 DApp developers connect via the midnight-wallet-connector npm package:

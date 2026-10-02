@@ -27,7 +27,7 @@ export const COMMAND_FLAGS: Readonly<Record<string, readonly string[]>> = {
   'inspect-cost': [],
   'localnet': ['tail'],
   'manual': ['no-pager', 'raw'],
-  'serve': ['approve-all', 'force-shielded', 'network', 'no-auto-approve-reads', 'no-cache', 'port', 'verbose', 'wallet', ...ENDPOINTS],
+  'serve': ['approve-all', 'approve-fees', 'force-shielded', 'network', 'no-auto-approve-reads', 'no-cache', 'port', 'verbose', 'wallet', ...ENDPOINTS],
   'status': ['all', 'network', 'watch'],
   'test': [
     'all', 'browser-mode', 'build-cmd', 'build-dir', 'force', 'goal', 'name', 'network', 'no-ai',
