@@ -167,6 +167,8 @@ export interface RpcServer {
   wss: WebSocketServer;
   /** Active connections */
   connections: Map<string, RpcConnection>;
+  /** Resolves once the port is bound; rejects with the bind error (e.g. EADDRINUSE). */
+  ready: Promise<void>;
   /** Gracefully close the server and all connections */
   close(): Promise<void>;
 }
@@ -209,6 +211,12 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
   // Bind to loopback only — prevents remote machines on the network from connecting.
   // Browser DApps on localhost can still connect via ws://localhost:<port>.
   const wss = new WebSocketServer({ port, host: '127.0.0.1' });
+  const ready = new Promise<void>((resolve, reject) => {
+    wss.once('listening', () => resolve());
+    wss.once('error', reject);
+  });
+  // A caller that never awaits `ready` must not see an unhandled rejection.
+  ready.catch(() => { /* surfaced through `ready` */ });
 
   // Prevent unhandled server-level errors (e.g. port conflict) from crashing
   wss.on('error', (err: Error) => {
@@ -338,7 +346,7 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
     });
   }
 
-  return { wss, connections, close };
+  return { wss, connections, ready, close };
 }
 
 // ── APIError factory ──

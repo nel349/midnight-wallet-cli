@@ -16,10 +16,12 @@ import { createPhaseTracker, type PhaseTracker } from './phase-tracker.ts';
 import { toHex, fromHex } from './tx-serde.ts';
 import { getNetworkId } from './network-id.ts';
 import { isDustShortage } from './sdk-errors.ts';
+import { DEFAULT_FEE_LIMITS, feeLimitRefusal, pendingLimitRefusal, type FeeLimits } from './fee-limits.ts';
 import { inspectTxHex } from './tx-inspect.ts';
 import { feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
+import { toDust } from '../ui/format.ts';
 
 // ── Types ──
 
@@ -32,6 +34,8 @@ export interface DAppConnectorOptions {
   bundle: FacadeBundle;
   networkConfig: NetworkConfig;
   approvalOptions: ApprovalOptions;
+  /** Under --approve-fees: the most a transaction may cost, and how many may wait unsubmitted. */
+  feeLimits?: FeeLimits;
   callbacks?: DAppConnectorCallbacks;
 }
 
@@ -97,6 +101,9 @@ function extractErrorDetail(err: unknown): string {
   return deduped.join(' → ') || 'Unknown error';
 }
 
+/** The error message when the operator declines an approval prompt. */
+export const OPERATOR_REJECTED_MESSAGE = 'User rejected the request';
+
 /** The connector API's history entry for one wallet history entry. */
 export type HistoryEntry = {
   txHash: string;
@@ -135,6 +142,7 @@ export function signatureScheme(tag: string): 'schnorr_bip340' {
 
 export function createDAppConnector(options: DAppConnectorOptions): DAppConnector {
   const { bundle, networkConfig, approvalOptions, callbacks } = options;
+  const feeLimits = options.feeLimits ?? DEFAULT_FEE_LIMITS;
   const { facade, keystore } = bundle;
   const networkId = getNetworkId(networkConfig.networkId);
 
@@ -271,7 +279,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     const outcome = result === 'reject' ? 'rejected' : 'approved';
     context?.notify('approval:resolved', { method, result: outcome });
     if (result === 'reject') {
-      throw createApiError('Rejected', 'User rejected the request');
+      throw createApiError('Rejected', OPERATOR_REJECTED_MESSAGE);
     }
   }
 
@@ -301,6 +309,26 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
   }
 
   /**
+   * Fee-wallet limits, checked before anything is booked: no more than
+   * `maxPending` balanced transactions may wait unsubmitted, and the total fee
+   * (the dApp's tx plus the wallet's balancing tx) may not exceed `maxFee`.
+   */
+  async function assertWithinFeeLimits(dappTx: WalletTransaction<'Unbound'> | WalletTransaction<'Finalized'>, ttl: Date): Promise<void> {
+    let pending = 0;
+    for (const [, txMap] of pendingTxsByConnection) pending += txMap.size;
+    const pendingReason = pendingLimitRefusal(pending, feeLimits);
+    let reason = pendingReason;
+    if (!pendingReason) {
+      const fee = await facade.estimateTransactionFee(dappTx, { ttl });
+      process.stderr.write(dim(`  fee-only: estimated fee ${toDust(fee)} DUST (limit ${toDust(feeLimits.maxFeeSpecks)})`) + '\n');
+      reason = feeLimitRefusal(fee, feeLimits);
+    }
+    if (reason) {
+      throw createApiError('Rejected', `This wallet is a fee wallet (--approve-fees) and refuses this transaction: ${reason}`);
+    }
+  }
+
+  /**
    * Balance a dApp's transaction. Under --approve-fees: Dust only, and only once
    * `assertFeeOnly` passes, never falling back to a wider balance. Otherwise
    * every token kind, or all but Dust when the dApp says `payFees: false`.
@@ -322,19 +350,23 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       ? ['dust']
       : payFees === false ? ['shielded', 'unshielded'] : 'all';
 
+    const ttl = createTtl();
+    const dappTx = stage === 'unsealed' ? adopt(txHex, 'Unbound') : adopt(txHex, 'Finalized');
+    if (feeOnly) await assertWithinFeeLimits(dappTx, ttl);
+
     const tracker = makeTracker(method, context);
 
     tracker.start('approve');
     await requireApproval(method, inspectTxHex(txHex, stage), context, feeOnly);
 
     tracker.start('building');
-    const balanceOptions = { ttl: createTtl(), tokenKindsToBalance };
+    const balanceOptions = { ttl, tokenKindsToBalance };
     let recipe: any;
     if (stage === 'unsealed') {
-      const unsealedTx = adopt(txHex, 'Unbound');
+      const unsealedTx = dappTx as WalletTransaction<'Unbound'>;
       recipe = await withDustRetry(() => facade.balanceUnboundTransaction(unsealedTx, balanceOptions));
     } else {
-      const sealedTx = adopt(txHex, 'Finalized');
+      const sealedTx = dappTx as WalletTransaction<'Finalized'>;
       recipe = await withDustRetry(() => facade.balanceFinalizedTransaction(sealedTx, balanceOptions));
     }
     const { hex, finalized } = await processRecipe(recipe, tracker);

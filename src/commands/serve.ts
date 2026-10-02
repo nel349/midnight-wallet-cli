@@ -11,12 +11,13 @@ import { hasDustAvailable, suppressSdkTransientErrors, waitForDustAvailable } fr
 import { saveWalletCache } from '../lib/wallet-cache.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
-import { createDAppConnector, type DAppConnectorCallbacks } from '../lib/dapp-connector.ts';
+import { createDAppConnector, OPERATOR_REJECTED_MESSAGE, type DAppConnectorCallbacks } from '../lib/dapp-connector.ts';
 import type { PhaseTiming } from '../lib/phase-tracker.ts';
 import { createRpcServer, type RpcServer } from '../lib/ws-rpc.ts';
 import { DEFAULT_SERVE_PORT } from '../lib/constants.ts';
 import { shieldedSyncEnabled } from '../lib/shielded-policy.ts';
-import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
+import { header, keyValue, divider, formatAddress, toDust } from '../ui/format.ts';
+import { parseFeeLimits } from '../lib/fee-limits.ts';
 import { bold, dim, teal, green, red } from '../ui/colors.ts';
 import { start as startSpinner, getActiveSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
@@ -38,6 +39,12 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   if (approveAll && approveFees) {
     throw new UsageError('--approve-all and --approve-fees conflict: --approve-fees approves only fee payment, --approve-all approves everything. Pass one.');
   }
+  const maxFeeFlag = getFlag(args, 'max-fee');
+  const maxPendingFlag = getFlag(args, 'max-pending');
+  if (!approveFees && (maxFeeFlag !== undefined || maxPendingFlag !== undefined)) {
+    throw new UsageError('--max-fee and --max-pending only apply with --approve-fees.');
+  }
+  const feeLimits = parseFeeLimits(maxFeeFlag, maxPendingFlag);
   // Default: auto-approve reads unless --no-auto-approve-reads is set
   const autoApproveReads = approveAll || !hasFlag(args, 'no-auto-approve-reads');
   const jsonMode = hasFlag(args, 'json');
@@ -65,6 +72,9 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   process.stderr.write(keyValue('Port', String(port)) + '\n');
   process.stderr.write(keyValue('Auto-approve reads', approveAll || autoApproveReads ? 'yes' : 'no') + '\n');
   process.stderr.write(keyValue('Auto-approve writes', approveAll ? 'yes' : approveFees ? 'fee-only (Dust fee + its submit)' : 'no') + '\n');
+  if (approveFees) {
+    process.stderr.write(keyValue('Fee limits', `max ${toDust(feeLimits.maxFeeSpecks)} DUST per tx, ${feeLimits.maxPending} unsubmitted at once`) + '\n');
+  }
   process.stderr.write('\n');
 
   // ── Suppress SDK noise ──
@@ -144,6 +154,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       bundle,
       networkConfig,
       approvalOptions: { approveAll, approveFees, autoApproveReads },
+      feeLimits,
       callbacks: phaseCallbacks,
     });
 
@@ -172,7 +183,10 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
         const duration = formatDuration(durationMs);
         if (error) {
-          const label = error.code === 'Rejected' ? 'rejected by operator' : error.message;
+          // A prompt the operator declined, versus a refusal by policy (e.g. fee limits).
+          const label = error.code === 'Rejected' && error.message === OPERATOR_REJECTED_MESSAGE
+            ? 'rejected by operator'
+            : error.message;
           process.stderr.write(`  ${red('✗')} ${dim(`${conn.id} ← ${req.method} (${duration})`)} ${red(label)}` + '\n');
           // Always show the full error message for non-rejection failures
           if (error.code !== 'Rejected' && error.message) {
@@ -195,6 +209,19 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     });
 
     // ── Server ready ──
+    // Only once the port is bound. If it's taken, whatever already listens
+    // there (often an older mn serve with other approval flags) would answer
+    // clients in our place, so fail instead of claiming to be ready.
+    try {
+      await server.ready;
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      throw new Error(
+        code === 'EADDRINUSE'
+          ? `Port ${port} is already in use (another mn serve?). Stop it or pass --port <n>.`
+          : `Could not listen on port ${port}: ${(err as Error).message}`,
+      );
+    }
 
     process.stderr.write('\n' + divider() + '\n');
     process.stderr.write('  ' + bold(teal(`Server ready — listening on ws://localhost:${port}`)) + '\n');

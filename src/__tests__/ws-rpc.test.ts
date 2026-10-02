@@ -443,3 +443,30 @@ describe('ws-rpc', () => {
     });
   });
 });
+
+describe('createRpcServer readiness', () => {
+  // `mn serve` must not report ready (or keep running) when its port is taken:
+  // a client would then talk to whatever already listens there.
+  it('resolves ready once listening', async () => {
+    const server = createRpcServer({ port: 0, handlers: {} });
+    await expect(server.ready).resolves.toBeUndefined();
+    await server.close();
+  });
+
+  it('rejects ready with EADDRINUSE when the port is already taken', async () => {
+    const { createServer } = await import('node:net');
+    const blocker = createServer();
+    await new Promise<void>((r) => blocker.listen(0, '127.0.0.1', r));
+    const port = (blocker.address() as import('node:net').AddressInfo).port;
+    const origWrite = process.stderr.write;
+    process.stderr.write = (() => true) as any;
+    try {
+      const server = createRpcServer({ port, handlers: {} });
+      await expect(server.ready).rejects.toMatchObject({ code: 'EADDRINUSE' });
+      await server.close();
+    } finally {
+      process.stderr.write = origWrite;
+      blocker.close();
+    }
+  });
+});

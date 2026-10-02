@@ -18,3 +18,16 @@ describe('serve --approve-fees', () => {
     expect((err as Error).message).toContain('--approve-all and --approve-fees conflict');
   });
 });
+
+describe('serve --max-fee / --max-pending', () => {
+  it.each([
+    [['--max-fee', '0.5'], /only apply with --approve-fees/],
+    [['--max-pending', '3'], /only apply with --approve-fees/],
+    [['--approve-fees', '--max-fee', 'lots'], /--max-fee must be a positive DUST amount/],
+    [['--approve-fees', '--max-pending', '0'], /--max-pending must be a whole number/],
+  ])('rejects %j with a usage error before any wallet loads', async (flags, message) => {
+    const err = await serveCommand(parseArgs(['serve', ...flags])).catch((e) => e);
+    expect(err).toBeInstanceOf(UsageError);
+    expect(err.message).toMatch(message);
+  });
+});

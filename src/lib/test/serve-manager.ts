@@ -253,6 +253,17 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
     },
   });
 
+  try {
+    await server.ready;
+  } catch (err) {
+    connector.dispose();
+    await server.close();
+    await stopFacade(bundle);
+    unsuppress();
+    restoreRpc();
+    throw new Error(`Could not start mn serve on port ${port}: ${(err as Error).message}`);
+  }
+
   onMessage(`Server ready on ws://localhost:${port}`);
 
   // Return handle for lifecycle management

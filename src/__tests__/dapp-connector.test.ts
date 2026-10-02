@@ -25,6 +25,7 @@ import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
 import { PROOF_TIMEOUT_MS } from '../lib/constants.ts';
+import type { FeeLimits } from '../lib/fee-limits.ts';
 import type { ApprovalOptions } from '../lib/approval.ts';
 import {
   AGENT_SK, NIGHT, WALLET_SK, WALLET_VK, agentPaysMerchant, buildTx, pay, sealedBytes, spend, unsealedBytes,
@@ -92,6 +93,7 @@ function createBundleStub(overrides?: {
   balanceFinalizedTransaction?: () => Promise<any>;
   initSwap?: () => Promise<any>;
   getAllFromTxHistory?: () => Promise<any[]>;
+  estimateTransactionFee?: (...args: any[]) => Promise<bigint>;
 }): FacadeBundle {
   const defaultStateFn = () => rx.of(mockState());
 
@@ -109,6 +111,7 @@ function createBundleStub(overrides?: {
       initSwap: overrides?.initSwap ?? vi.fn().mockResolvedValue({ type: 'SWAP' }),
       registerNightUtxosForDustGeneration: vi.fn(),
       adoptTransaction: vi.fn((bytes: Uint8Array, stage: string) => ({ stage, hex: Buffer.from(bytes).toString('hex') })),
+      estimateTransactionFee: overrides?.estimateTransactionFee ?? vi.fn().mockResolvedValue(1_000n),
       getAllFromTxHistory: overrides?.getAllFromTxHistory ?? vi.fn().mockResolvedValue(HISTORY),
     },
     keystore: {
@@ -857,13 +860,75 @@ describe('dapp-connector', () => {
     function feeWallet(
       overrides?: Parameters<typeof createBundleStub>[0],
       approvalOptions: ApprovalOptions = { approveFees: true, autoApproveReads: true },
+      feeLimits?: FeeLimits,
     ) {
       const bundle = createBundleStub(overrides);
       (bundle.keystore as any).getPublicKey = () => WALLET_VK;
-      const feeConnector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions });
+      const feeConnector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions, feeLimits });
       connector = feeConnector;
       return { bundle, connector: feeConnector };
     }
+
+    describe('fee limits', () => {
+      const ONE_DUST = 1_000_000_000_000_000n;
+
+      it('refuses a transaction whose estimated fee is over --max-fee, before balancing', async () => {
+        const balance = vi.fn();
+        const estimate = vi.fn().mockResolvedValue(ONE_DUST + 1n);
+        const { connector } = feeWallet({ balanceUnboundTransaction: balance, estimateTransactionFee: estimate }, undefined,
+          { maxFeeSpecks: ONE_DUST, maxPending: 2 });
+
+        const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: hex(await unsealedBytes(agentPaysMerchant())) }, ctx())
+          .catch((e) => e);
+
+        expect(err.code).toBe('Rejected');
+        expect(err.message).toContain('over --max-fee 1.000000 DUST');
+        expect(estimate).toHaveBeenCalledTimes(1);
+        expect(balance).not.toHaveBeenCalled();
+      });
+
+      it('balances a transaction at the cap', async () => {
+        const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+        const { connector } = feeWallet({ balanceUnboundTransaction: balance, estimateTransactionFee: async () => ONE_DUST }, undefined,
+          { maxFeeSpecks: ONE_DUST, maxPending: 2 });
+
+        await connector.handlers.balanceUnsealedTransaction({ tx: hex(await unsealedBytes(agentPaysMerchant())) }, ctx());
+        expect(balance).toHaveBeenCalledTimes(1);
+      });
+
+      it('refuses a new balance while --max-pending unsubmitted transactions hold Dust, and frees a slot on submit', async () => {
+        const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+        const finalizeRecipe = vi.fn()
+          .mockResolvedValueOnce(finalizedTx(0x01))
+          .mockResolvedValueOnce(finalizedTx(0x02))
+          .mockResolvedValueOnce(finalizedTx(0x03));
+        const { connector } = feeWallet({ balanceUnboundTransaction: balance, finalizeRecipe }, undefined,
+          { maxFeeSpecks: ONE_DUST, maxPending: 2 });
+        const agentTx = { tx: hex(await unsealedBytes(agentPaysMerchant())) };
+
+        const first: any = await connector.handlers.balanceUnsealedTransaction(agentTx, ctx('c1'));
+        await connector.handlers.balanceUnsealedTransaction(agentTx, ctx('c2'));
+        const err: any = await connector.handlers.balanceUnsealedTransaction(agentTx, ctx('c1')).catch((e) => e);
+        expect(err.code).toBe('Rejected');
+        expect(err.message).toContain('2 balanced transactions are still waiting to be submitted (--max-pending 2)');
+        expect(balance).toHaveBeenCalledTimes(2);
+
+        await connector.handlers.submitTransaction({ tx: first.tx }, ctx('c1'));
+        await connector.handlers.balanceUnsealedTransaction(agentTx, ctx('c1'));
+        expect(balance).toHaveBeenCalledTimes(3);
+      });
+
+      it('does not apply outside fee-wallet mode', async () => {
+        const estimate = vi.fn().mockResolvedValue(10n * ONE_DUST);
+        const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
+        const { connector } = feeWallet({ balanceUnboundTransaction: balance, estimateTransactionFee: estimate },
+          { approveAll: true }, { maxFeeSpecks: 1n, maxPending: 1 });
+
+        await connector.handlers.balanceUnsealedTransaction({ tx: hex(await unsealedBytes(agentPaysMerchant())) }, ctx());
+        expect(estimate).not.toHaveBeenCalled();
+        expect(balance).toHaveBeenCalledTimes(1);
+      });
+    });
 
     it.each([
       ['balanceUnsealedTransaction', 'balanceUnboundTransaction', unsealedBytes],

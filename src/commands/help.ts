@@ -339,6 +339,10 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--approve-fees                Fee wallet: auto-approve only Dust-fee balancing of a',
       '                              transaction that needs nothing else from this wallet,',
       '                              and the submit of what it balanced; other writes prompt',
+      '--max-fee <DUST>              With --approve-fees: refuse a transaction whose total',
+      '                              Dust fee is higher (default 10 DUST)',
+      '--max-pending <n>             With --approve-fees: refuse new balances while n',
+      '                              balanced transactions await submission (default 2)',
       '--no-auto-approve-reads       Prompt for read methods too',
     ],
     examples: [
