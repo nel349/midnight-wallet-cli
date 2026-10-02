@@ -3,7 +3,7 @@
 // SDK address encoding is stubbed at the boundary; transactions reach the code
 // as opaque handles the stub facade adopts, and leave as their real hex.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import * as rx from 'rxjs';
 
 // Stub SDK address encoding — MidnightBech32m.encode returns a mock
@@ -134,6 +134,13 @@ function createConnector(overrides?: {
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
+
+/** A real unsealed ledger-9 dApp transaction (the agent pays from its own signed input), as hex. */
+let AGENT_TX: string;
+
+beforeAll(async () => {
+  AGENT_TX = Buffer.from(await unsealedBytes(agentPaysMerchant())).toString('hex');
+});
 
 describe('dapp-connector', () => {
   let connector: DAppConnector | undefined;
@@ -565,10 +572,10 @@ describe('dapp-connector', () => {
       const bundle = createBundleStub({ [sdkMethod]: balance });
       connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
 
-      await connector.handlers[method]({ tx: 'c0ffee' }, ctx());
+      await connector.handlers[method]({ tx: AGENT_TX }, ctx());
 
-      expect(bundle.facade.adoptTransaction).toHaveBeenCalledWith(new Uint8Array([0xc0, 0xff, 0xee]), stage);
-      expect(balance).toHaveBeenCalledWith({ stage, hex: 'c0ffee' }, expect.objectContaining({ ttl: expect.any(Date) }));
+      expect(bundle.facade.adoptTransaction).toHaveBeenCalledWith(Uint8Array.from(Buffer.from(AGENT_TX, 'hex')), stage);
+      expect(balance).toHaveBeenCalledWith({ stage, hex: AGENT_TX }, expect.objectContaining({ ttl: expect.any(Date) }));
     });
 
     it('submitTransaction reads the hex as a finalized transaction and submits that handle', async () => {
@@ -658,7 +665,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()))
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()))
         .rejects.toThrow('ZK proof generation timed out');
     });
 
@@ -670,7 +677,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      const result = await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()) as any;
+      const result = await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()) as any;
       expect(result.tx).toBe('feed');
     });
 
@@ -682,7 +689,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()))
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()))
         .rejects.toThrow('signing failed');
     });
 
@@ -742,7 +749,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      const promise = connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx());
+      const promise = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx());
       await vi.advanceTimersByTimeAsync(3_100);
       const result = await promise as any;
       expect(result.tx).toBeDefined();
@@ -764,7 +771,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      const promise = connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx());
+      const promise = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx());
       await vi.advanceTimersByTimeAsync(3_100);
       await promise;
       expect(callCount).toBe(2);
@@ -779,7 +786,7 @@ describe('dapp-connector', () => {
       const balance = vi.fn().mockRejectedValue(nightShortage);
       connector = createConnector({ approvalOptions: { approveAll: true }, bundleOverrides: { balanceUnboundTransaction: balance } });
 
-      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx())).rejects.toBe(nightShortage);
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx())).rejects.toBe(nightShortage);
       expect(balance).toHaveBeenCalledTimes(1);
     });
 
@@ -792,7 +799,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()))
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()))
         .rejects.toThrow('some other error');
     });
 
@@ -809,7 +816,7 @@ describe('dapp-connector', () => {
         },
       });
 
-      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx()))
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()))
         .rejects.toThrow('No dust tokens');
       expect(callCount).toBe(10); // DUST_RETRY_ATTEMPTS = 10
     });
@@ -827,9 +834,9 @@ describe('dapp-connector', () => {
       const balance = vi.fn().mockResolvedValue({ type: 'RECIPE' });
       connector = createConnector({ bundleOverrides: { [sdkMethod]: balance } });
 
-      await connector.handlers[method]({ tx: 'aabb' }, ctx());
-      await connector.handlers[method]({ tx: 'aabb', options: { payFees: true } }, ctx());
-      await connector.handlers[method]({ tx: 'aabb', options: { payFees: false } }, ctx());
+      await connector.handlers[method]({ tx: AGENT_TX }, ctx());
+      await connector.handlers[method]({ tx: AGENT_TX, options: { payFees: true } }, ctx());
+      await connector.handlers[method]({ tx: AGENT_TX, options: { payFees: false } }, ctx());
 
       expect(balance.mock.calls.map(([, opts]) => opts)).toEqual([
         { ttl: expect.any(Date), tokenKindsToBalance: 'all' },
@@ -991,7 +998,7 @@ describe('dapp-connector', () => {
       const opts: ApprovalOptions = { approveAll: true };
       const { connector } = feeWallet({ submitTransaction: submit }, opts);
 
-      const balanced = await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx('agent')) as any;
+      const balanced = await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx('agent')) as any;
       delete opts.approveAll;
       opts.approveFees = true;
       const err: any = await connector.handlers.submitTransaction({ tx: balanced.tx }, ctx('agent')).catch((e: any) => e);
@@ -1083,7 +1090,7 @@ describe('dapp-connector', () => {
 
       // Balance a tx — this tracks it
       const balanceResult = await connector.handlers.balanceUnsealedTransaction(
-        { tx: 'aabb' }, ctx(connId),
+        { tx: AGENT_TX }, ctx(connId),
       ) as any;
 
       // Submit using the hex from balance result — this untracks by hex
@@ -1113,7 +1120,7 @@ describe('dapp-connector', () => {
       });
 
       const connId = 'conn_revert_test';
-      await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx(connId));
+      await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx(connId));
 
       // Disconnect reverts the FINALIZED transaction: that releases its coins in
       // all three wallets and clears its pending entry (the recipe would not).
@@ -1146,7 +1153,7 @@ describe('dapp-connector', () => {
 
       // Balance first (auto-approved via approveAll) — tracks the tx internally
       const balanceResult = await connector.handlers.balanceUnsealedTransaction(
-        { tx: 'aabb' }, ctx(connId),
+        { tx: AGENT_TX }, ctx(connId),
       ) as any;
 
       // Switch: remove approveAll + non-TTY → submit will be rejected
@@ -1167,6 +1174,50 @@ describe('dapp-connector', () => {
     });
   });
 
+  describe('a dApp transaction the wallet SDK cannot sign correctly', () => {
+    // wallet-sdk 2.0.0-rc.0 duplicates the signatures already on an offer it
+    // signs, so one with both signed and unsigned inputs can't be signed.
+    const partlySigned = async () => Buffer.from(await unsealedBytes(buildTx({
+      guaranteed: { inputs: [spend(AGENT_SK, 60n, 0)], outputs: [pay(60n)], signers: [AGENT_SK] },
+      fallible: { inputs: [spend(WALLET_SK, 40n, 1)], outputs: [pay(40n)], signers: [] },
+    }))).toString('hex');
+
+    it('is refused as InvalidRequest before the operator is asked and before anything is balanced', async () => {
+      const balance = vi.fn();
+      const bundle = createBundleStub({ balanceUnboundTransaction: balance });
+      // No approveAll and no TTY: reaching the approval step would fail as Rejected instead.
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: {} });
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      try {
+        const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: await partlySigned() }, ctx()).catch((e: any) => e);
+
+        expect(err.code).toBe('InvalidRequest');
+        expect(err.message).toContain('both signed and unsigned unshielded inputs');
+        expect(balance).not.toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+      }
+    });
+  });
+
+  describe('failed signing', () => {
+    it('reverts the recipe so its coins are not held until the TTL', async () => {
+      const recipe = { type: 'RECIPE' };
+      const revertFn = vi.fn().mockResolvedValue(undefined);
+      const bundle = createBundleStub({
+        balanceUnboundTransaction: () => Promise.resolve(recipe),
+        signRecipe: () => Promise.reject(new Error('signer unavailable')),
+      });
+      (bundle.facade as any).revert = revertFn;
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx())).rejects.toThrow('signer unavailable');
+      expect(revertFn).toHaveBeenCalledWith(recipe);
+      expect(bundle.facade.finalizeRecipe).not.toHaveBeenCalled();
+    });
+  });
+
   describe('failed proving', () => {
     it('reverts the recipe so its coins are not held until the TTL', async () => {
       const recipe = { type: 'RECIPE' };
@@ -1178,7 +1229,7 @@ describe('dapp-connector', () => {
       (bundle.facade as any).revert = revertFn;
       connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
 
-      await expect(connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx())).rejects.toThrow('proof server unreachable');
+      await expect(connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx())).rejects.toThrow('proof server unreachable');
       expect(revertFn).toHaveBeenCalledWith(recipe);
     });
 
@@ -1196,7 +1247,7 @@ describe('dapp-connector', () => {
         (bundle.facade as any).revert = revertFn;
         connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
 
-        const call = connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx());
+        const call = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx());
         const outcome = expect(call).rejects.toThrow('ZK proof generation timed out');
         await vi.advanceTimersByTimeAsync(PROOF_TIMEOUT_MS + 1);
         await outcome;
@@ -1232,7 +1283,7 @@ describe('dapp-connector', () => {
       });
 
       const connId = 'conn_abandon';
-      await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx(connId));
+      await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx(connId));
 
       // Advance past ABANDONED_TX_TIMEOUT_MS (120_000ms)
       await vi.advanceTimersByTimeAsync(121_000);
@@ -1259,7 +1310,7 @@ describe('dapp-connector', () => {
         approvalOptions: { approveAll: true },
       });
 
-      await connector.handlers.balanceUnsealedTransaction({ tx: 'aabb' }, ctx('conn_dispose'));
+      await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx('conn_dispose'));
 
       // Dispose before timeout fires
       connector.dispose();

@@ -35,6 +35,7 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ### Fixed
 
+- **`mn serve` no longer breaks a dApp transaction the dApp already signed.** wallet-sdk 2.0.0-rc.0 re-appends the existing signatures when it signs an unshielded offer, so balancing a transaction whose unshielded inputs were already signed (an agent paying from its own funds) returned one the ledger rejects ("mismatch between number of inputs and signatures"). mn now signs only its own balancing transaction when the dApp's inputs are all signed. A transaction with both signed and unsigned unshielded inputs can't be signed correctly by this SDK, so it is refused with `InvalidRequest` before anything is reserved. If signing fails, the coins balancing reserved are released.
 - **`mn serve` no longer claims to be ready when its port is taken.** It printed "Server ready" and stayed running even when the port was already bound (often by an older `mn serve` with different approval flags, which then answered clients in its place). It now fails with "Port N is already in use"; the in-process serve that `mn contract` and `mn test` start does the same.
 
 - **mn no longer guesses between several local Midnight stacks.** On `undeployed` without endpoints, auto-detection kept whichever container `docker ps` listed last and could mix components of two stacks. It now refuses when a component runs on more than one port, listing them and how to choose. Detection is skipped when endpoints are explicit, and `MN_NO_LOCAL_DETECT=1` disables it.

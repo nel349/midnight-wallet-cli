@@ -38,6 +38,33 @@ export function readDAppTransaction(bytes: Uint8Array, stage: DAppTxStage): FeeC
     : Transaction.deserialize<SignatureEnabled, Proof, Binding>('signature', 'proof', 'binding', bytes);
 }
 
+export interface UnshieldedInputRef {
+  /** Where the input sits, e.g. "intent 1 guaranteed unshielded input 0". */
+  where: string;
+  owner: SignatureVerifyingKey;
+  /** Whether the offer carries a signature for this input. */
+  signed: boolean;
+}
+
+/** Every unshielded input of every intent, guaranteed section before fallible. */
+export function unshieldedInputs(tx: FeeCheckTransaction): UnshieldedInputRef[] {
+  const refs: UnshieldedInputRef[] = [];
+  for (const [segment, intent] of tx.intents ?? new Map()) {
+    const offers: Array<[string, UnshieldedOffer<SignatureEnabled> | undefined]> = [
+      ['guaranteed', intent.guaranteedUnshieldedOffer],
+      ['fallible', intent.fallibleUnshieldedOffer],
+    ];
+    for (const [section, offer] of offers) {
+      offer?.inputs.forEach((input, i) => refs.push({
+        where: `intent ${segment} ${section} unshielded input ${i}`,
+        owner: input.owner,
+        signed: offer.signatures[i] !== undefined,
+      }));
+    }
+  }
+  return refs;
+}
+
 /**
  * Why paying only the Dust fee for `tx` would not keep the wallet to the fee.
  * Empty when it would. Refuses when:
@@ -54,22 +81,12 @@ export function feeOnlyRefusals(tx: FeeCheckTransaction, walletKey: SignatureVer
   const reasons: string[] = [];
   const walletAddress = addressFromKey(walletKey);
 
-  for (const [segment, intent] of tx.intents ?? new Map()) {
-    const offers: Array<[string, UnshieldedOffer<SignatureEnabled> | undefined]> = [
-      ['guaranteed', intent.guaranteedUnshieldedOffer],
-      ['fallible', intent.fallibleUnshieldedOffer],
-    ];
-    for (const [section, offer] of offers) {
-      if (!offer) continue;
-      offer.inputs.forEach((input, i) => {
-        const where = `intent ${segment} ${section} unshielded input ${i}`;
-        if (addressFromKey(input.owner) === walletAddress) {
-          reasons.push(`${where} spends this wallet's own funds`);
-        }
-        if (offer.signatures[i] === undefined) {
-          reasons.push(`${where} is unsigned, so this wallet would sign it`);
-        }
-      });
+  for (const { where, owner, signed } of unshieldedInputs(tx)) {
+    if (addressFromKey(owner) === walletAddress) {
+      reasons.push(`${where} spends this wallet's own funds`);
+    }
+    if (!signed) {
+      reasons.push(`${where} is unsigned, so this wallet would sign it`);
     }
   }
 

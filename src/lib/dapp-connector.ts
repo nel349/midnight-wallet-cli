@@ -19,6 +19,7 @@ import { isDustShortage } from './sdk-errors.ts';
 import { DEFAULT_FEE_LIMITS, feeLimitRefusal, pendingLimitRefusal, type FeeLimits } from './fee-limits.ts';
 import { inspectTxHex } from './tx-inspect.ts';
 import { feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
+import { assertSignable, signRecipe } from './sign-recipe.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
 import { toDust } from '../ui/format.ts';
@@ -221,7 +222,14 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
    *  Returns both the serialized hex and the finalized tx object (for tracking/revert). */
   async function processRecipe(recipe: any, tracker?: PhaseTracker): Promise<{ hex: string; finalized: FinalizedTx }> {
     tracker?.start('signing');
-    const signed = await facade.signRecipe(recipe, keystore.signDataAsync);
+    let signed: any;
+    try {
+      signed = await signRecipe(facade, recipe, keystore.signDataAsync);
+    } catch (err) {
+      // Release what balancing booked; nothing will be tracked for this recipe.
+      try { await facade.revert(recipe); } catch { /* best-effort */ }
+      throw err;
+    }
     tracker?.start('proving');
     let timer: ReturnType<typeof setTimeout> | undefined;
     let finalized: FinalizedTx;
@@ -308,6 +316,15 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     }
   }
 
+  /** Refuse an unsealed dApp transaction the wallet can't sign without breaking it. */
+  function assertDAppTxSignable(txHex: string): void {
+    try {
+      assertSignable(readDAppTransaction(fromHex(txHex), 'unsealed'));
+    } catch (err) {
+      throw createApiError('InvalidRequest', extractErrorDetail(err));
+    }
+  }
+
   /**
    * Fee-wallet limits, checked before anything is booked: no more than
    * `maxPending` balanced transactions may wait unsubmitted, and the total fee
@@ -352,6 +369,8 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
 
     const ttl = createTtl();
     const dappTx = stage === 'unsealed' ? adopt(txHex, 'Unbound') : adopt(txHex, 'Finalized');
+    // Signing an unsealed transaction signs the dApp's part too; refuse one that can't be signed before booking anything.
+    if (stage === 'unsealed') assertDAppTxSignable(txHex);
     if (feeOnly) await assertWithinFeeLimits(dappTx, ttl);
 
     const tracker = makeTracker(method, context);

@@ -1,18 +1,14 @@
 // The premise behind fee-only-check.ts, run through the real SDK.
 //
 // When `mn serve` balances an unsealed dApp transaction it signs the recipe
-// with `facade.signRecipe(recipe, keystore.signDataAsync)`, and for an unbound
-// recipe the facade signs the dApp's own base transaction. These tests build
-// a real WalletFacade offline (its wallets are never started, so nothing
-// syncs) and hand that exact call real ledger-v9 transactions, to show:
-// - on what feeOnlyRefusals passes, the wallet attaches no signature of its own;
+// with sign-recipe.ts's `signRecipe`, which hands an unbound recipe to the
+// facade's signer unless the dApp's transaction is already fully signed. These
+// tests build a real WalletFacade offline and hand that exact call real
+// ledger-v9 transactions, to show:
+// - on what feeOnlyRefusals passes, the wallet attaches no signature of its own
+//   and the transaction stays one the ledger accepts;
 // - on what it refuses for an unsigned input, the wallet does sign, so the
 //   checks here would catch an attachment.
-//
-// Only external I/O is replaced: the chain-version probe (normally an indexer
-// query) answers the ledger-v9 fork version, and the submission service
-// (normally a node connection) refuses to submit. Endpoints point at a closed
-// loopback port.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -26,54 +22,19 @@ import {
   type Signature,
   type SignatureVerifyingKey,
 } from '@midnightntwrk/ledger-v9';
-import { InMemoryTransactionHistoryStorage } from '@midnightntwrk/wallet-sdk';
-import { DustWallet } from '@midnightntwrk/wallet-sdk/dust';
-import {
-  WalletFacade,
-  WalletEntrySchema,
-  mergeWalletEntries,
-  type BalancingRecipe,
-} from '@midnightntwrk/wallet-sdk/facade';
-import { ShieldedWallet } from '@midnightntwrk/wallet-sdk/shielded';
-import { PublicKey, UnshieldedWallet, createKeystore } from '@midnightntwrk/wallet-sdk/unshielded';
+import type { BalancingRecipe, WalletFacade } from '@midnightntwrk/wallet-sdk/facade';
 import { feeOnlyRefusals, readDAppTransaction } from '../lib/fee-only-check.ts';
-import { FORK_SCHEDULE } from '../lib/network.ts';
-import { DUST_COST_OVERHEAD, DUST_FEE_BLOCKS_MARGIN } from '../lib/constants.ts';
+import { signRecipe } from '../lib/sign-recipe.ts';
 import {
   AGENT_SK, AGENT_VK, NETWORK, TTL, WALLET_SK, WALLET_VK,
   agentPaysMerchant, buildTx, pay, spend, unsealedBytes,
 } from './helpers/ledger-tx.ts';
-
-/** The secret behind the helpers' WALLET_SK, as mn's schnorr keystore takes it. */
-const keystore = createKeystore({ kind: 'schnorr', secret: new Uint8Array(32).fill(1) }, NETWORK);
-
-/** Nothing listens on port 9: a request that does go out fails instead of reaching a network. */
-const CLOSED_HTTP = 'http://127.0.0.1:9';
-const CLOSED_WS = 'ws://127.0.0.1:9';
+import { initOfflineFacade, keystore } from './helpers/offline-facade.ts';
 
 let facade: WalletFacade;
 
 beforeAll(async () => {
-  facade = await WalletFacade.init({
-    configuration: {
-      networkId: NETWORK,
-      forks: FORK_SCHEDULE,
-      indexerClientConnection: { indexerHttpUrl: CLOSED_HTTP, indexerWsUrl: CLOSED_WS },
-      costParameters: { additionalFeeOverhead: DUST_COST_OVERHEAD, feeBlocksMargin: DUST_FEE_BLOCKS_MARGIN },
-      txHistoryStorage: new InMemoryTransactionHistoryStorage(WalletEntrySchema, mergeWalletEntries),
-      provingServerUrl: new URL(CLOSED_HTTP),
-      relayURL: new URL(CLOSED_WS),
-      // A ledger-9-native chain reports the fork version, which starts every wallet on its ledger-v9 variant.
-      chainVersionProbe: () => Promise.resolve(FORK_SCHEDULE.v9),
-    },
-    submissionService: () => ({
-      submitTransaction: () => Promise.reject<never>(new Error('these tests never submit')),
-      close: () => Promise.resolve(),
-    }),
-    shielded: (cfg) => ShieldedWallet(cfg).startWithSeed(new Uint8Array(32).fill(4)),
-    unshielded: (cfg) => UnshieldedWallet(cfg).startWithPublicKey(PublicKey.fromKeyStore(keystore)),
-    dust: (cfg) => DustWallet(cfg).startWithSeed(new Uint8Array(32).fill(5)),
-  });
+  facade = await initOfflineFacade();
 });
 
 afterAll(async () => {
@@ -94,7 +55,7 @@ async function signAsServe(dappBytes: Uint8Array): Promise<{ after: Uint8Array; 
     signerCalls++;
     return keystore.signDataAsync(data);
   };
-  const signed = await facade.signRecipe(recipe, signer);
+  const signed = await signRecipe(facade, recipe, signer);
   if (signed.type !== 'UNBOUND_TRANSACTION') throw new Error(`expected an unbound recipe back, got ${signed.type}`);
   expect(signed.balancingTransaction).toBeUndefined();
   return { after: signed.baseTransaction.serialize(), signerCalls };
@@ -140,58 +101,35 @@ describe('the keystore mn signs with', () => {
   });
 });
 
-describe('facade.signRecipe on an unbound recipe, as mn serve calls it', () => {
-  it('attaches no signature of the wallet\'s to an agent transaction feeOnlyRefusals passes', async () => {
+describe('signRecipe on an unbound recipe, as mn serve calls it', () => {
+  it('leaves an agent transaction feeOnlyRefusals passes byte-identical and well-formed, signing nothing', async () => {
     const before = await unsealedBytes(agentPaysMerchant());
     expect(feeOnlyRefusals(readDAppTransaction(before, 'unsealed'), WALLET_VK)).toEqual([]);
+    expect(wellFormedError(before)).toBeUndefined();
 
     const { after, signerCalls } = await signAsServe(before);
 
-    // The wallet's signer is asked to sign the agent's intent, but nothing it returns is kept.
-    expect(signerCalls).toBe(1);
-    const b = offerAt(before, 'guaranteed');
-    const a = offerAt(after, 'guaranteed');
-    expect(a.signers).not.toContain('wallet');
-    expect(a.inputs).toEqual(b.inputs);
-    expect(a.outputs).toEqual(b.outputs);
+    expect(signerCalls).toBe(0);
+    expect(offerAt(after, 'guaranteed').signers).toEqual(['agent']);
+    expect(Buffer.from(after).equals(Buffer.from(before))).toBe(true);
+    expect(wellFormedError(after)).toBeUndefined();
   });
 
-  it('attaches no signature of the wallet\'s when guaranteed and fallible inputs are all signed', async () => {
+  it('leaves a transaction whose guaranteed and fallible inputs are all signed byte-identical and well-formed', async () => {
     const before = await unsealedBytes(buildTx({
       guaranteed: { inputs: [spend(AGENT_SK, 60n, 0)], outputs: [pay(60n)], signers: [AGENT_SK] },
       fallible: { inputs: [spend(AGENT_SK, 40n, 1)], outputs: [pay(40n)], signers: [AGENT_SK] },
     }));
     expect(feeOnlyRefusals(readDAppTransaction(before, 'unsealed'), WALLET_VK)).toEqual([]);
 
-    const { after } = await signAsServe(before);
+    const { after, signerCalls } = await signAsServe(before);
 
+    expect(signerCalls).toBe(0);
     for (const section of ['guaranteed', 'fallible'] as const) {
-      const b = offerAt(before, section);
-      const a = offerAt(after, section);
-      expect(a.signers).not.toContain('wallet');
-      expect(a.inputs).toEqual(b.inputs);
-      expect(a.outputs).toEqual(b.outputs);
+      expect(offerAt(after, section).signers).toEqual(['agent']);
     }
-  });
-
-  // An SDK defect, recorded as it behaves today. The SDK builds a full,
-  // per-input signature list (existing ones kept, empty slots filled) and hands
-  // it to ledger-v9's UnshieldedOffer.addSignatures, which appends rather than
-  // replaces. On an offer the agent already signed, every signature comes back
-  // twice, and the ledger refuses the result as malformed. When this test
-  // fails, the SDK has changed how it attaches signatures: re-check the
-  // assertions above and drop this one.
-  it('re-appends the agent\'s own signatures, leaving a transaction the ledger refuses', async () => {
-    const before = await unsealedBytes(agentPaysMerchant());
-    expect(wellFormedError(before)).toBeUndefined();
-
-    const { after } = await signAsServe(before);
-
-    const b = offerAt(before, 'guaranteed');
-    const a = offerAt(after, 'guaranteed');
-    expect(b.signers).toEqual(['agent']);
-    expect(a.signatures).toEqual([...b.signatures, ...b.signatures]);
-    expect(wellFormedError(after)).toContain('mismatch between number of inputs (1) and signatures (2)');
+    expect(Buffer.from(after).equals(Buffer.from(before))).toBe(true);
+    expect(wellFormedError(after)).toBeUndefined();
   });
 
   it('does sign an unsigned input the wallet owns, which feeOnlyRefusals refuses', async () => {
@@ -230,9 +168,8 @@ describe('facade.signRecipe on an unbound recipe, as mn serve calls it', () => {
     expect(read.fallibleUnshieldedOffer).toBeUndefined();
     expect(feeOnlyRefusals(readDAppTransaction(before, 'unsealed'), WALLET_VK)).toEqual([]);
 
-    const { after, signerCalls } = await signAsServe(before);
+    const { after } = await signAsServe(before);
 
-    expect(signerCalls).toBe(1);
     expect(Buffer.from(after).equals(Buffer.from(before))).toBe(true);
   });
 });
