@@ -8,6 +8,8 @@ import {
   LedgerState,
   Transaction,
   WellFormedStrictness,
+  sampleSigningKey,
+  signatureVerifyingKey,
   verifySignature,
   type Bindingish,
   type PreBinding,
@@ -18,7 +20,7 @@ import {
   type SignatureVerifyingKey,
 } from '@midnightntwrk/ledger-v9';
 import type { BalancingRecipe, WalletFacade } from '@midnightntwrk/wallet-sdk/facade';
-import { readDAppTransaction } from '../lib/fee-only-check.ts';
+import { feeOnlyRefusals, readDAppTransaction } from '../lib/fee-only-check.ts';
 import { PartlySignedTransactionError, assertSignable, signRecipe, unshieldedSignatures } from '../lib/sign-recipe.ts';
 import {
   AGENT_SK, AGENT_VK, NETWORK, TTL, WALLET_SK, WALLET_VK,
@@ -185,5 +187,41 @@ describe('the wallet SDK defect signRecipe works around', () => {
     const after = signed.baseTransaction.serialize();
     expect(signersOf(readDAppTransaction(after, 'unsealed'))).toEqual(['agent', 'agent']);
     expect(wellFormedError(after)).toContain('mismatch between number of inputs (1) and signatures (2)');
+  });
+});
+
+describe('an agent paying from an ECDSA (secp256k1) key', () => {
+  // Ledger 9 takes unshielded inputs owned by either signature kind; mn's own
+  // key is BIP-340 Schnorr.
+  const agentEcdsa = sampleSigningKey('ecdsa');
+
+  it('is a transaction the ledger accepts, and one the fee-only check passes', async () => {
+    expect(signatureVerifyingKey(agentEcdsa).tag).toBe('ecdsa');
+    const before = await unsealedBytes(buildTx({ guaranteed: { inputs: [spend(agentEcdsa, 100n)], outputs: [pay(100n)], signers: [agentEcdsa] } }));
+
+    expect(wellFormedError(before)).toBeUndefined();
+    expect(feeOnlyRefusals(readDAppTransaction(before, 'unsealed'), WALLET_VK)).toEqual([]);
+  });
+
+  it('comes through signRecipe byte-identical and well-formed', async () => {
+    const before = await unsealedBytes(buildTx({ guaranteed: { inputs: [spend(agentEcdsa, 100n)], outputs: [pay(100n)], signers: [agentEcdsa] } }));
+    const signer = countingSigner();
+
+    const signed = await signRecipe(facade, unboundRecipe(before, walletBalancing()), signer);
+
+    if (signed.type !== 'UNBOUND_TRANSACTION') throw new Error(`expected an unbound recipe, got ${signed.type}`);
+    const base = signed.baseTransaction.serialize();
+    expect(Buffer.from(base).equals(Buffer.from(before))).toBe(true);
+    expect(wellFormedError(base)).toBeUndefined();
+    expect(signer.calls).toBe(1);
+  });
+
+  // The SDK's signer checks the wallet's key against every input's owner, even
+  // inputs already signed, so without signRecipe's workaround the fee wallet
+  // could not serve this agent at all.
+  it('is refused by facade.signRecipe, which checks the wallet\'s key against inputs it has nothing to sign', async () => {
+    const before = await unsealedBytes(buildTx({ guaranteed: { inputs: [spend(agentEcdsa, 100n)], outputs: [pay(100n)], signers: [agentEcdsa] } }));
+
+    await expect(facade.signRecipe(unboundRecipe(before), keystore.signDataAsync)).rejects.toThrow('Signature scheme does not match');
   });
 });
