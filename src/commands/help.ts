@@ -327,7 +327,7 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'serve',
     description: 'Start DApp Connector server over WebSocket JSON-RPC',
-    usage: 'midnight serve [--port <n>] [--wallet <name|file>] [--network <name>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--approve-all | --approve-fees] [--no-auto-approve-reads] [--json]',
+    usage: 'midnight serve [--port <n>] [--wallet <name|file>] [--network <name>] [--proof-server <url>] [--node <url>] [--indexer-ws <url>] [--approve-all | --approve-fees [--max-fee <DUST>] [--max-pending <n>]] [--no-auto-approve-reads] [--json]',
     flags: [
       '--port <n>                    Server port (default: 9932)',
       '--wallet <name|file>          Wallet name or path',
@@ -754,7 +754,11 @@ can connect to it — no browser extension needed.
     unshielded input, and needs no non-Dust value; otherwise they are
     refused. submitTransaction is auto-approved only for a transaction this
     server balanced that way on the same connection. Everything else still
-    prompts (rejected without a terminal).
+    prompts (rejected without a terminal). --max-fee <DUST> (default 10)
+    and --max-pending <n> (default 2) bound what an agent can cost it.
+  - --json: the listening line reports the approval policy, e.g.
+    "approval":{"reads":"auto","writes":"fee-only","feeLimits":
+    {"maxFeeSpecks":"10000000000000000","maxPending":2}}
   - --no-auto-approve-reads: require approval for everything
 
 DApp developers connect via the midnight-wallet-connector npm package:

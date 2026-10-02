@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  describeApprovalPolicy,
   renderApprovalBox,
   isReadOnlyMethod,
   isPrepMethod,
@@ -291,6 +292,31 @@ describe('approval', () => {
       Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
     });
 
+    describe('without a terminal, the hint names what the server could have been started with', () => {
+      let origIsTTY: boolean | undefined;
+      beforeEach(() => {
+        origIsTTY = process.stdin.isTTY;
+        Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      });
+      afterEach(() => {
+        Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+      });
+
+      it('suggests --approve-all, or --approve-fees for a fee wallet, on a server with neither', async () => {
+        expect(await promptApproval(baseRequest)).toBe('reject');
+        const written = stripAnsi(stderrOutput.join(''));
+        expect(written).toContain('Use --approve-all for non-interactive environments, or --approve-fees for a fee wallet');
+      });
+
+      it('on a fee wallet, says the request is outside --approve-fees and names the method', async () => {
+        expect(await promptApproval(baseRequest, { approveFees: true })).toBe('reject');
+        const written = stripAnsi(stderrOutput.join(''));
+        expect(written).toContain("--approve-fees approves only paying the Dust fee for an agent's own balanced transaction");
+        expect(written).toContain('makeTransfer needs a terminal to approve');
+        expect(written).not.toContain('Use --approve-all');
+      });
+    });
+
     it('rejects concurrent prompts when one is already active', async () => {
       const origIsTTY = process.stdin.isTTY;
       Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
@@ -314,5 +340,31 @@ describe('approval', () => {
 
       Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
     });
+  });
+});
+
+describe('describeApprovalPolicy (what mn serve reports, in its header and --json)', () => {
+  const limits = { maxFeeSpecks: 10n ** 15n / 2n, maxPending: 3 };
+
+  it('a fee wallet: reads auto, writes fee-only, with its limits exact in specks', () => {
+    expect(describeApprovalPolicy({ approveFees: true, autoApproveReads: true }, limits)).toEqual({
+      reads: 'auto', writes: 'fee-only', feeLimits: { maxFeeSpecks: '500000000000000', maxPending: 3 },
+    });
+  });
+
+  it('--approve-all: everything auto, no fee limits (they only bind a fee wallet)', () => {
+    expect(describeApprovalPolicy({ approveAll: true }, limits)).toEqual({ reads: 'auto', writes: 'all' });
+  });
+
+  it('the default: reads auto, writes prompt', () => {
+    expect(describeApprovalPolicy({ autoApproveReads: true }, limits)).toEqual({ reads: 'auto', writes: 'prompt' });
+  });
+
+  it('--no-auto-approve-reads: everything prompts', () => {
+    expect(describeApprovalPolicy({}, limits)).toEqual({ reads: 'prompt', writes: 'prompt' });
+  });
+
+  it('is plain JSON (no bigint), so --json can print it', () => {
+    expect(() => JSON.stringify(describeApprovalPolicy({ approveFees: true }, limits))).not.toThrow();
   });
 });

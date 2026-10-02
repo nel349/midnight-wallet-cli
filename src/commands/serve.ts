@@ -18,6 +18,7 @@ import { DEFAULT_SERVE_PORT } from '../lib/constants.ts';
 import { shieldedSyncEnabled } from '../lib/shielded-policy.ts';
 import { header, keyValue, divider, formatAddress, toDust } from '../ui/format.ts';
 import { parseFeeLimits } from '../lib/fee-limits.ts';
+import { describeApprovalPolicy } from '../lib/approval.ts';
 import { bold, dim, teal, green, red } from '../ui/colors.ts';
 import { start as startSpinner, getActiveSpinner } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
@@ -70,9 +71,10 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   process.stderr.write(keyValue('Network', networkName) + '\n');
   process.stderr.write(keyValue('Address', formatAddress(address, true)) + '\n');
   process.stderr.write(keyValue('Port', String(port)) + '\n');
-  process.stderr.write(keyValue('Auto-approve reads', approveAll || autoApproveReads ? 'yes' : 'no') + '\n');
-  process.stderr.write(keyValue('Auto-approve writes', approveAll ? 'yes' : approveFees ? 'fee-only (Dust fee + its submit)' : 'no') + '\n');
-  if (approveFees) {
+  const policy = describeApprovalPolicy({ approveAll, approveFees, autoApproveReads }, feeLimits);
+  process.stderr.write(keyValue('Auto-approve reads', policy.reads === 'auto' ? 'yes' : 'no') + '\n');
+  process.stderr.write(keyValue('Auto-approve writes', { all: 'yes', 'fee-only': 'fee-only (Dust fee + its submit)', prompt: 'no' }[policy.writes]) + '\n');
+  if (policy.feeLimits) {
     process.stderr.write(keyValue('Fee limits', `max ${toDust(feeLimits.maxFeeSpecks)} DUST per tx, ${feeLimits.maxPending} unsubmitted at once`) + '\n');
   }
   process.stderr.write('\n');
@@ -233,6 +235,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
         network: networkName,
         address,
         status: 'listening',
+        approval: policy,
       });
     }
 

@@ -22,6 +22,7 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 - **64-byte BIP-39 seeds accepted everywhere a seed is taken.** `--seed` and `MN_SEED` take 64 or 128 hex chars (a 32-byte raw seed, or the 64-byte `mnemonicToSeedSync` output that mn itself stores for mnemonic wallets). Other lengths are still rejected, and errors name the source (`--seed` or `MN_SEED`).
 - **`mn airdrop` infers `--shielded` from a shielded address.** `mn airdrop --wallet mn_shield-addr_...` now routes to the shielded airdrop instead of asking for `--shielded`. `--shielded` with an `mn_addr_...` address is still an error.
 - **`MN_NO_LOCAL_DETECT=1` turns off local stack detection** (see Fixed).
+- **`mn serve --json` reports its approval policy.** The listening line now includes `approval` (`reads`, `writes`: `all` / `fee-only` / `prompt`, and under `--approve-fees` the `feeLimits` with the fee cap in specks), so whoever started the server can check what it will approve. Without a terminal, a refused request's hint now also names `--approve-fees`, or, on a fee wallet, says the request is outside it.
 
 ### Changed
 

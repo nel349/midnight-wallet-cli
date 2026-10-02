@@ -4,6 +4,7 @@
 import * as readline from 'node:readline';
 import { box } from '../ui/format.ts';
 import { bold, teal, dim, yellow, green, red } from '../ui/colors.ts';
+import type { FeeLimits } from './fee-limits.ts';
 
 // ── Types ──
 
@@ -42,6 +43,27 @@ export interface ApprovalOptions {
    * terminal gets it rejected.
    */
   approveFees?: boolean;
+}
+
+/** What a server approves without asking, as `mn serve` reports it. */
+export interface ApprovalPolicy {
+  /** Read-only requests answered without a prompt. */
+  reads: 'auto' | 'prompt';
+  /** Writes: all approved, only the fee-wallet ones (Dust fee + its submit), or none without a prompt. */
+  writes: 'all' | 'fee-only' | 'prompt';
+  /** Under fee-only: the most Dust one transaction may cost (specks, as a string) and how many may wait unsubmitted. */
+  feeLimits?: { maxFeeSpecks: string; maxPending: number };
+}
+
+export function describeApprovalPolicy(options: ApprovalOptions, feeLimits: FeeLimits): ApprovalPolicy {
+  const writes = options.approveAll ? 'all' : options.approveFees ? 'fee-only' : 'prompt';
+  return {
+    reads: options.approveAll || options.autoApproveReads ? 'auto' : 'prompt',
+    writes,
+    ...(writes === 'fee-only'
+      ? { feeLimits: { maxFeeSpecks: feeLimits.maxFeeSpecks.toString(), maxPending: feeLimits.maxPending } }
+      : {}),
+  };
 }
 
 // ── Read-only method set ──
@@ -108,6 +130,14 @@ export function renderApprovalBox(request: ApprovalRequest): string {
 
 // ── Prompt ──
 
+/** What a server without a terminal can do about a request it can't prompt for. */
+function nonInteractiveHint(request: ApprovalRequest, options: ApprovalOptions): string {
+  if (options.approveFees) {
+    return `--approve-fees approves only paying the Dust fee for an agent's own balanced transaction (and its submit); ${request.method} needs a terminal to approve`;
+  }
+  return 'Use --approve-all for non-interactive environments, or --approve-fees for a fee wallet that only pays an agent\'s Dust fee';
+}
+
 /**
  * Prompt the user to approve or reject a DApp Connector operation.
  * Returns 'approve' or 'reject'.
@@ -146,7 +176,7 @@ export async function promptApproval(
   // Non-interactive environment — reject by default
   if (!process.stdin.isTTY) {
     process.stderr.write(red('  Cannot prompt for approval: stdin is not a TTY') + '\n');
-    process.stderr.write(dim('  Use --approve-all for non-interactive environments') + '\n');
+    process.stderr.write(dim(`  ${nonInteractiveHint(request, options)}`) + '\n');
     return 'reject';
   }
 
