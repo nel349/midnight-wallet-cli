@@ -197,29 +197,27 @@ describe('approval', () => {
       expect(written).toContain('Auto-approved (read-only)');
     });
 
-    it('auto-approves prep methods when autoApproveReads is true', async () => {
-      const prepRequest: ApprovalRequest = {
-        method: 'balanceUnsealedTransaction',
-        network: 'undeployed',
-        details: [],
-      };
-      const result = await promptApproval(prepRequest, { autoApproveReads: true });
-      expect(result).toBe('approve');
-      const written = stripAnsi(stderrOutput.join(''));
-      expect(written).toContain('Auto-approved (prep)');
-    });
+    // Balancing signs and returns a finished transaction a dApp can submit
+    // through any node, so it is a write: it prompts unless --approve-all, or
+    // --approve-fees for a fee-only balance.
+    it.each(['balanceUnsealedTransaction', 'balanceSealedTransaction'])(
+      'prompts for %s even with autoApproveReads (no terminal: rejected), naming the flags that would approve it',
+      async (method) => {
+        const origIsTTY = process.stdin.isTTY;
+        Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+        try {
+          const result = await promptApproval({ method, network: 'undeployed', details: [] }, { autoApproveReads: true });
+          expect(result).toBe('reject');
+          const written = stripAnsi(stderrOutput.join(''));
+          expect(written).not.toContain('Auto-approved');
+          expect(written).toContain('Balancing prompts like any other write: use --approve-all for non-interactive environments, or --approve-fees');
+        } finally {
+          Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+        }
+      },
+    );
 
-    it('auto-approves balanceSealedTransaction as prep method', async () => {
-      const prepRequest: ApprovalRequest = {
-        method: 'balanceSealedTransaction',
-        network: 'undeployed',
-        details: [],
-      };
-      const result = await promptApproval(prepRequest, { autoApproveReads: true });
-      expect(result).toBe('approve');
-    });
-
-    it('does not auto-approve prep methods when autoApproveReads is false', async () => {
+    it('does not auto-approve balancing when autoApproveReads is false', async () => {
       const origIsTTY = process.stdin.isTTY;
       Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
 
@@ -306,7 +304,7 @@ describe('approval', () => {
       it('suggests --approve-all, or --approve-fees for a fee wallet, on a server with neither', async () => {
         expect(await promptApproval(baseRequest)).toBe('reject');
         const written = stripAnsi(stderrOutput.join(''));
-        expect(written).toContain('Use --approve-all for non-interactive environments, or --approve-fees for a fee wallet');
+        expect(written).toContain('makeTransfer needs a terminal to approve: use --approve-all for non-interactive environments, or --approve-fees for a fee wallet');
       });
 
       it('on a fee wallet, says the request is outside --approve-fees and names the method', async () => {
@@ -352,7 +350,7 @@ describe('describeApprovalPolicy (what mn serve reports, in its header and --jso
     ['--approve-fees', { approveFees: true, autoApproveReads: true }, {
       reads: 'auto', balancing: 'fee-only', writes: 'fee-only', feeLimits: { maxFeeSpecks: '500000000000000', maxPending: 3 },
     }],
-    ['the default', { autoApproveReads: true }, { reads: 'auto', balancing: 'auto', writes: 'prompt' }],
+    ['the default', { autoApproveReads: true }, { reads: 'auto', balancing: 'prompt', writes: 'prompt' }],
     ['--no-auto-approve-reads', {}, { reads: 'auto', balancing: 'prompt', writes: 'prompt' }],
   ] as const)('%s', (_flags, options, expected) => {
     expect(describeApprovalPolicy(options, limits)).toEqual(expected);

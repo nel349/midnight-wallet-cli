@@ -1408,6 +1408,31 @@ describe('dapp-connector', () => {
     });
   });
 
+  describe('balancing on a server started without --approve-all or --approve-fees', () => {
+    // Found live: a dApp asked plain `mn serve` (no terminal) to balance a spend
+    // of the wallet's own NIGHT and got back a sealed transaction carrying the
+    // wallet's valid signature, which it could submit through any node.
+    it('prompts, so with no terminal a spend of the wallet\'s own NIGHT is rejected before anything is balanced or signed', async () => {
+      const walletSpend = Buffer.from(await unsealedBytes(buildTx({
+        guaranteed: { inputs: [spend(WALLET_SK, 990n)], outputs: [pay(990n)], signers: [] },
+      }))).toString('hex');
+      const balance = vi.fn();
+      const bundle = createBundleStub({ balanceUnboundTransaction: balance });
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { autoApproveReads: true } });
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      try {
+        const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: walletSpend }, ctx()).catch((e: any) => e);
+
+        expect(err.code).toBe('Rejected');
+        expect(balance).not.toHaveBeenCalled();
+        expect(bundle.facade.signRecipe).not.toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+      }
+    });
+  });
+
   describe('an expired dApp transaction', () => {
     it.each([
       ['balanceUnsealedTransaction', unsealedBytes, 'balanceUnboundTransaction'],

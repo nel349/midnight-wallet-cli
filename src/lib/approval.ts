@@ -71,7 +71,7 @@ export function describeApprovalPolicy(options: ApprovalOptions, feeLimits: FeeL
       feeLimits: { maxFeeSpecks: feeLimits.maxFeeSpecks.toString(), maxPending: feeLimits.maxPending },
     };
   }
-  return { reads: 'auto', balancing: options.autoApproveReads ? 'auto' : 'prompt', writes: 'prompt' };
+  return { reads: 'auto', balancing: 'prompt', writes: 'prompt' };
 }
 
 // ── Read-only method set ──
@@ -88,7 +88,12 @@ const READ_ONLY_METHODS = new Set([
   'getConnectionStatus',
 ]);
 
-/** Prep-step methods with no on-chain effect — auto-approved only when autoApproveReads is true */
+/**
+ * Balancing methods. Not reads: they reserve the wallet's coins and sign, and
+ * the result is a finished transaction the dApp can submit through any node.
+ * So they prompt like any other write, unless the server runs with
+ * --approve-all, or --approve-fees for a fee-only balance.
+ */
 const PREP_METHODS = new Set([
   'balanceUnsealedTransaction',
   'balanceSealedTransaction',
@@ -143,7 +148,8 @@ function nonInteractiveHint(request: ApprovalRequest, options: ApprovalOptions):
   if (options.approveFees) {
     return `--approve-fees approves only paying the Dust fee for an agent's own balanced transaction (and its submit); ${request.method} needs a terminal to approve`;
   }
-  return 'Use --approve-all for non-interactive environments, or --approve-fees for a fee wallet that only pays an agent\'s Dust fee';
+  const what = isPrepMethod(request.method) ? 'Balancing prompts like any other write' : `${request.method} needs a terminal to approve`;
+  return `${what}: use --approve-all for non-interactive environments, or --approve-fees for a fee wallet that only pays an agent's Dust fee`;
 }
 
 /**
@@ -151,6 +157,7 @@ function nonInteractiveHint(request: ApprovalRequest, options: ApprovalOptions):
  * Returns 'approve' or 'reject'.
  *
  * If options.approveAll is true, auto-approves without prompting.
+ * If options.approveFees is true, auto-approves a fee-only request.
  * If options.autoApproveReads is true and the method is read-only, auto-approves.
  *
  * Rejects if stdin is not a TTY (non-interactive environment).
@@ -173,12 +180,6 @@ export async function promptApproval(
 
   if (options.autoApproveReads && isReadOnlyMethod(request.method)) {
     process.stderr.write(dim(`  Auto-approved (read-only): ${request.method}`) + '\n');
-    return 'approve';
-  }
-
-  // A fee wallet balances only fee-only (approved above); anything else it is asked to balance prompts.
-  if (options.autoApproveReads && !options.approveFees && isPrepMethod(request.method)) {
-    process.stderr.write(dim(`  Auto-approved (prep): ${request.method}`) + '\n');
     return 'approve';
   }
 

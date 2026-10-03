@@ -46,9 +46,11 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
     throw new UsageError('--max-fee and --max-pending only apply with --approve-fees.');
   }
   const feeLimits = parseFeeLimits(maxFeeFlag, maxPendingFlag);
-  // Reads never prompt. This flag (named before balancing had its own name)
-  // decides whether balancing prompts too.
-  const autoApproveReads = approveAll || !hasFlag(args, 'no-auto-approve-reads');
+  // Read methods never prompt, and balancing prompts unless --approve-all or
+  // --approve-fees, so --no-auto-approve-reads (which made balancing prompt
+  // before that was the default) has nothing left to do.
+  const autoApproveReads = true;
+  const noAutoApproveReadsGiven = hasFlag(args, 'no-auto-approve-reads');
   const jsonMode = hasFlag(args, 'json');
 
   // ── Load wallet ──
@@ -74,6 +76,9 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   process.stderr.write(keyValue('Port', String(port)) + '\n');
   const policy = describeApprovalPolicy({ approveAll, approveFees, autoApproveReads }, feeLimits);
   process.stderr.write(keyValue('Auto-approve balancing', { auto: 'yes', 'fee-only': 'fee-only (Dust fee only)', prompt: 'no' }[policy.balancing]) + '\n');
+  if (noAutoApproveReadsGiven) {
+    process.stderr.write(dim('  --no-auto-approve-reads has no effect: read methods never prompt, and balancing prompts unless --approve-all or --approve-fees') + '\n');
+  }
   process.stderr.write(keyValue('Auto-approve writes', { auto: 'yes', 'fee-only': 'fee-only (submit of a fee-only balance)', prompt: 'no' }[policy.writes]) + '\n');
   if (policy.feeLimits) {
     process.stderr.write(keyValue('Fee limits', `max ${toDust(feeLimits.maxFeeSpecks)} DUST per tx, ${feeLimits.maxPending} unsubmitted at once`) + '\n');

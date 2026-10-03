@@ -343,7 +343,8 @@ const COMMAND_SPECS: CommandSpec[] = [
       '                              Dust fee is higher (default 10 DUST)',
       '--max-pending <n>             With --approve-fees: refuse new balances while n',
       '                              balanced transactions await submission (default 2)',
-      '--no-auto-approve-reads       Prompt for balancing too (reads never prompt)',
+      '--no-auto-approve-reads       No effect (kept for old scripts): reads never prompt,',
+      '                              and balancing prompts by default',
     ],
     examples: [
       'midnight serve',
@@ -746,8 +747,10 @@ ConnectedAPI interface (same as the Lace browser wallet). Any DApp
 can connect to it — no browser extension needed.
 
   - Port default: 9932, localhost only
-  - Read operations: auto-approved
-  - Write operations: terminal approval prompt (or --approve-all)
+  - Read operations: never prompt
+  - Write operations, balancing included (balanceUnsealedTransaction /
+    balanceSealedTransaction sign and return a finished transaction):
+    terminal approval prompt (or --approve-all)
   - --approve-fees: fee wallet for an agent. balanceUnsealedTransaction /
     balanceSealedTransaction pay only the Dust fee and are auto-approved when
     the transaction spends none of this wallet's funds, has no unsigned
@@ -759,9 +762,7 @@ can connect to it — no browser extension needed.
   - --json: the listening line reports the approval policy, e.g.
     "approval":{"reads":"auto","balancing":"fee-only","writes":"fee-only","feeLimits":
     {"maxFeeSpecks":"10000000000000000","maxPending":2}}
-  - --no-auto-approve-reads: prompt for balanceUnsealedTransaction /
-    balanceSealedTransaction too (by default they are auto-approved; read
-    methods never prompt)
+  - --no-auto-approve-reads: no effect, kept for old scripts
 
 DApp developers connect via the midnight-wallet-connector npm package:
 
