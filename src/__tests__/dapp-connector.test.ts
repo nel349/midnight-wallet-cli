@@ -28,6 +28,10 @@ vi.mock('../lib/tx-serde.ts', () => ({
 }));
 
 import { createDAppConnector, type DAppConnector } from '../lib/dapp-connector.ts';
+import { signedMessageBytes } from '../lib/sign-data.ts';
+import {
+  Intent, UnshieldedOffer, addressFromKey, sampleSigningKey, signData as ledgerSignData, signatureVerifyingKey, unshieldedToken, verifySignature,
+} from '@midnight-ntwrk/ledger-v8';
 import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
@@ -412,7 +416,7 @@ describe('dapp-connector', () => {
 
       expect(result.data).toBe('cafebabe');
       expect((bundle.keystore as any).signData).toHaveBeenCalledWith(
-        new Uint8Array([0xca, 0xfe, 0xba, 0xbe])
+        signedMessageBytes(new Uint8Array([0xca, 0xfe, 0xba, 0xbe]))
       );
     });
 
@@ -432,7 +436,7 @@ describe('dapp-connector', () => {
 
       expect(result.data).toBe(b64Data);
       expect((bundle.keystore as any).signData).toHaveBeenCalledWith(
-        new Uint8Array(Buffer.from('hello world'))
+        signedMessageBytes(new Uint8Array(Buffer.from('hello world')))
       );
     });
 
@@ -451,8 +455,32 @@ describe('dapp-connector', () => {
 
       expect(result.data).toBe('sign me');
       expect((bundle.keystore as any).signData).toHaveBeenCalledWith(
-        new Uint8Array(Buffer.from('sign me', 'utf-8'))
+        signedMessageBytes(new Uint8Array(Buffer.from('sign me', 'utf-8')))
       );
+    });
+
+    // The key that signs here also signs the wallet's unshielded spends, over a
+    // transaction's signature data. Signed as given, a dApp could send that
+    // signature data as its message and get back a valid spend signature.
+    it('signs the prefixed message, so a transaction\'s signature data sent as data gives no spend signature', async () => {
+      const sk = sampleSigningKey();
+      const vk = signatureVerifyingKey(sk);
+      const intent = Intent.new(new Date(Date.UTC(2030, 0, 1)));
+      intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
+        [{ value: 990n, owner: vk, type: unshieldedToken().raw, intentHash: '00'.repeat(32), outputNo: 0 }],
+        [{ value: 990n, owner: addressFromKey(vk), type: unshieldedToken().raw }], []);
+      const spendData = intent.signatureData(1);
+      const bundle = createBundleStub();
+      // The SDK keystore's signing, with this key: ledger signData over the bytes given.
+      (bundle as any).keystore = { signData: (d: Uint8Array) => ledgerSignData(sk, d), getPublicKey: () => vk };
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      const result = await connector.handlers.signData({
+        data: Buffer.from(spendData).toString('hex'), options: { encoding: 'hex', keyType: 'unshielded' },
+      }, ctx()) as any;
+
+      expect(verifySignature(vk, spendData, result.signature)).toBe(false);
+      expect(verifySignature(vk, signedMessageBytes(spendData), result.signature)).toBe(true);
     });
 
     it('throws for unknown encoding', async () => {

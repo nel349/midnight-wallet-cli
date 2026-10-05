@@ -14,6 +14,7 @@ import { promptApproval } from './approval.ts';
 import { createApiError, type RpcHandler, type RpcHandlerContext } from './ws-rpc.ts';
 import { createPhaseTracker, type PhaseTracker } from './phase-tracker.ts';
 import { serializeTx, deserializeUnsealed, deserializeSealed, fromHex } from './tx-serde.ts';
+import { signedMessageBytes } from './sign-data.ts';
 import { inspectTxHex } from './tx-inspect.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
@@ -629,7 +630,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
 
       // keystore.signData returns ledger.Signature (hex string)
       // keystore.getPublicKey returns SignatureVerifyingKey (hex string)
-      const signature = keystore.signData(payload);
+      const signature = keystore.signData(signedMessageBytes(payload));
       const verifyingKey = keystore.getPublicKey();
 
       return {
