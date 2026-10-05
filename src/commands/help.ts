@@ -836,6 +836,15 @@ ERROR CODES
   PROOF_FAILURE           6     Proof server failed to generate the ZK proof
   INVALID_DUST_PROOF      6     Chain rejected the dust spend proof as malformed
   DUST_REQUIRED           5     No dust tokens available for fees
+  DUST_GENERATING         5     Dust registration fee not generated yet; the
+                                message says when (rerun then, or add NIGHT)
+  CHAIN_CLOCK_BEHIND      4     The chain's clock lags this computer's (a local
+                                chain after sleep); wait for it or restart it
+  UNSUPPORTED_LEDGER      4     The chain is on ledger 8; use mn 0.5.x for it
+  LOCALNET_UNAVAILABLE    4     localnet up can't start a ledger-9 stack; run
+                                one and set its endpoints (config set)
+  LOCAL_STACK_UNREACHABLE 4     No ledger-9 stack answers at the endpoints
+  AMBIGUOUS_LOCAL_STACKS  4     Several local stacks run; pass endpoint flags
   CANCELLED               7     Operation cancelled (SIGINT)
   UNKNOWN                 1     Unclassified error
 

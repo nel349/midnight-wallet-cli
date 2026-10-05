@@ -30,6 +30,14 @@ describe('help --agent', () => {
     expect(out).toContain('--json');
   });
 
+  it('lists every error code mn can return', async () => {
+    const { ERROR_CODES } = await import('../lib/exit-codes.ts');
+    await helpCommand(parseArgs(['help', '--agent']));
+    const table = io.stdout().split('ERROR CODES')[1]!.split('MCP SERVER')[0]!;
+    const missing = Object.values(ERROR_CODES).filter((code) => !new RegExp(`^  ${code}\\s+\\d`, 'm').test(table));
+    expect(missing).toEqual([]);
+  });
+
   it('documents all commands', async () => {
     const args = parseArgs(['help', '--agent']);
     await helpCommand(args);
