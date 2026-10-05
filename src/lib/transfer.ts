@@ -11,6 +11,7 @@ import { getNetworkId } from './network-id.ts';
 import { type FacadeBundle, hasDustAvailable, quickSync, suppressSdkTransientErrors } from './facade.ts';
 import { defaultRepository } from './wallet-data-repository.ts';
 import { verbose } from './verbose.ts';
+import { UsageError } from './errors.ts';
 import {
   NATIVE_TOKEN_TYPE,
   TOKEN_MULTIPLIER,
@@ -88,20 +89,20 @@ export function parseAmount(amountStr: string): number {
   const text = amountStr.trim();
   const match = /^(\d*)(?:\.(\d*))?$/.exec(text);
   if (!match || (match[1] === '' && !match[2])) {
-    throw new Error(`Invalid amount: "${amountStr}" — must be a positive number, e.g. 1.5`);
+    throw new UsageError(`Invalid amount: "${amountStr}" — must be a positive number, e.g. 1.5`);
   }
   const decimals = match[2] ?? '';
   if (decimals.length > NIGHT_DECIMALS) {
-    throw new Error(`Invalid amount: "${amountStr}" — NIGHT has ${NIGHT_DECIMALS} decimals, this has ${decimals.length}`);
+    throw new UsageError(`Invalid amount: "${amountStr}" — NIGHT has ${NIGHT_DECIMALS} decimals, this has ${decimals.length}`);
   }
   const amount = Number(text);
   if (amount <= 0) {
-    throw new Error(`Invalid amount: "${amountStr}" — must be greater than 0`);
+    throw new UsageError(`Invalid amount: "${amountStr}" — must be greater than 0`);
   }
   // Amounts travel as numbers; refuse one a number can't carry to the exact smallest unit.
   const exact = BigInt((match[1] || '0') + decimals.padEnd(NIGHT_DECIMALS, '0'));
   if (nightToMicro(amount) !== exact) {
-    throw new Error(`Invalid amount: "${amountStr}" — too many digits to handle exactly`);
+    throw new UsageError(`Invalid amount: "${amountStr}" — too many digits to handle exactly`);
   }
   return amount;
 }

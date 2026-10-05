@@ -66,6 +66,10 @@ describe('COMMAND_FLAGS matches the code', () => {
     'resolveSeed(': ['seed', 'wallet'],
     'isVerbose(': ['verbose'],
     'rejectNoCacheForWrites(': ['no-cache'],
+    'resolveTransferRequest(': ['shielded', 'force-shielded', 'wallet', 'network'],
+    'resolveScanDir(': ['managed', 'path'],
+    'resolveContractDeployRequest(': ['path', 'managed', 'name', 'args', 'secret-key'],
+    'resolveContractCallRequest(': ['path', 'managed', 'name', 'address', 'circuit', 'args'],
   };
 
   function flagsReadBy(source: string): Set<string> {

@@ -8,7 +8,8 @@ import { writeJsonResult } from '../lib/json-output.ts';
 import { header, keyValue } from '../ui/format.ts';
 import { bold, dim, teal, yellow, green } from '../ui/colors.ts';
 import { start as startSpinner, type Spinner } from '../ui/spinner.ts';
-import { validateCallRequest, validateContractAddress } from '../lib/contract/validate.ts';
+import { validateContractAddress } from '../lib/contract/validate.ts';
+import { resolveContractCallRequest, resolveContractDeployRequest, resolveScanDir } from '../lib/contract/request.ts';
 import {
   findContractInfo,
   formatCircuitSignature,
@@ -60,18 +61,6 @@ export default async function contractCommand(args: ParsedArgs, signal?: AbortSi
 }
 
 // ── Inspect ──
-
-/**
- * Resolve the directory to scan for managed/<name>/. Honours --managed
- * (direct path to a managed/<name>/ dir, used by all four subcommands) and
- * --path (dApp root, the more common case). When both are set --managed
- * wins because it's the more specific signal.
- */
-function resolveScanDir(args: ParsedArgs): string {
-  const managedFlag = getFlag(args, 'managed');
-  const pathFlag = getFlag(args, 'path');
-  return resolve(managedFlag ?? pathFlag ?? process.cwd());
-}
 
 async function handleInspect(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
@@ -227,12 +216,7 @@ async function ensureServe({ network, endpoints }: ContractNetwork, jsonMode: bo
 
 async function handleDeploy(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
-  // dApp dir for runner/witness discovery is --path (or cwd). --managed only
-  // tells us where contract-info.json lives; the runner still needs the
-  // project root to load witnesses.js and write the level-db cache.
-  const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
-  const scanDir = resolveScanDir(args);
-  const contractName = getFlag(args, 'name');
+  const { dappDir, info, constructorArgs, privateStateSecretKey } = resolveContractDeployRequest(args);
 
   const { runDeploy } = await import('../lib/contract/runner.ts');
 
@@ -240,45 +224,8 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     process.stderr.write('\n' + header('Contract Deploy') + '\n\n');
   }
 
-  const { info } = findContractInfo(scanDir, contractName);
-
-  // Fail fast when the contract declares witnesses but no compiled
-  // witnesses.js is on disk — otherwise the SDK throws a cryptic
-  // "first (witnesses) argument does not contain a function-valued field
-  // named X" mid-deploy after a long wait.
-  const declaredWitnesses = info.witnesses.map((w) => w.name);
-  if (declaredWitnesses.length > 0) {
-    const { findWitnessFile, buildMissingWitnessError } = await import('../lib/contract/witness-discovery.ts');
-    if (!findWitnessFile(dappDir)) {
-      throw new Error(buildMissingWitnessError({ projectRoot: dappDir, witnessNames: declaredWitnesses }));
-    }
-  }
-
   const target = await contractNetwork(args, 'deploy');
   const { network, networkConfig } = target;
-
-  // Constructor args via --args '<json>'. Same parsing as `mn contract call`:
-  // arrays are passed positionally; objects are unwrapped to Object.values
-  // (so the contract author can pick whichever shape feels natural).
-  const argsJson = getFlag(args, 'args');
-  let constructorArgs: unknown[] = [];
-  if (argsJson) {
-    try {
-      const parsed = JSON.parse(argsJson);
-      constructorArgs = Array.isArray(parsed) ? parsed : Object.values(parsed);
-    } catch (err) {
-      throw new UsageError(`Invalid --args JSON: ${(err as Error).message}`);
-    }
-  }
-
-  // --secret-key seeds the contract's initial private state (32-byte hex). Use it
-  // for a contract whose constructor derives its owner from a witness
-  // (owner = public_key(secret_key())): without it the owner is derived from the
-  // deploy wallet. Passed to the deploy subprocess via env, never on disk.
-  const privateStateSecretKey = getFlag(args, 'secret-key');
-  if (privateStateSecretKey !== undefined && !/^[0-9a-fA-F]{64}$/.test(privateStateSecretKey)) {
-    throw new UsageError('--secret-key must be 32 bytes of hex (64 chars)');
-  }
 
   if (!jsonMode) {
     process.stderr.write(keyValue('Contract', info.name) + '\n');
@@ -361,33 +308,13 @@ function writeNextStepsHint(address: string, circuits: { name: string; arguments
 
 async function handleCall(args: ParsedArgs): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
-  const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
-  const scanDir = resolveScanDir(args);
-  const contractName = getFlag(args, 'name');
-
-  const address = requireFlag(args, 'address', 'contract address');
-  const circuit = requireFlag(args, 'circuit', 'circuit name');
-  const argsJson = getFlag(args, 'args');
+  const { dappDir, info, address, circuit, callArgs } = resolveContractCallRequest(args);
 
   const { runCall } = await import('../lib/contract/runner.ts');
 
   if (!jsonMode) {
     process.stderr.write('\n' + header('Contract Call') + '\n\n');
   }
-
-  const { info } = findContractInfo(scanDir, contractName);
-
-  let callArgs: unknown[] = [];
-  if (argsJson) {
-    try {
-      const parsed = JSON.parse(argsJson);
-      callArgs = Array.isArray(parsed) ? parsed : Object.values(parsed);
-    } catch (err) {
-      throw new UsageError(`Invalid --args JSON: ${(err as Error).message}`);
-    }
-  }
-  validateContractAddress(address);
-  validateCallRequest(info, circuit, callArgs);
 
   const target = await contractNetwork(args, 'call');
   const { network, networkConfig } = target;

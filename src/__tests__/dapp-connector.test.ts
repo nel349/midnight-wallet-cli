@@ -7,18 +7,6 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import * as rx from 'rxjs';
 
 // Stub SDK address encoding — MidnightBech32m.encode returns a mock
-vi.mock('@midnightntwrk/wallet-sdk/address-format', () => ({
-  MidnightBech32m: {
-    encode: (_networkId: any, address: any) => ({
-      asString: () => 'bech32m_mock_address',
-    }),
-    parse: (str: string) => ({
-      decode: () => ({ parsed: str }),
-    }),
-  },
-  UnshieldedAddress: {},
-  ShieldedAddress: {},
-}));
 
 import { createDAppConnector, signatureScheme, toHistoryEntry, type DAppConnector } from '../lib/dapp-connector.ts';
 import { startLocalIndexer, type LocalIndexer } from './helpers/local-indexer.ts';
@@ -28,11 +16,23 @@ import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
 import { PROOF_TIMEOUT_MS } from '../lib/constants.ts';
 import { FORK_SCHEDULE } from '../lib/network.ts';
+import { deriveUnshieldedAddress, deriveAllShieldedAddresses, deriveShieldedAddress } from '../lib/derive-address.ts';
+import { DustAddress, MidnightBech32m, UnshieldedAddress } from '@midnightntwrk/wallet-sdk/address-format';
 import type { FeeLimits } from '../lib/fee-limits.ts';
 import type { ApprovalOptions } from '../lib/approval.ts';
 import {
   AGENT_SK, NIGHT, WALLET_SK, WALLET_VK, agentPaysMerchant, buildTx, pay, sealedBytes, spend, unsealedBytes,
 } from './helpers/ledger-tx.ts';
+
+/** The wallet's own addresses, as SDK address objects in its state. */
+const WALLET_SHIELDED = deriveShieldedAddress(Buffer.from('00'.repeat(31) + '07', 'hex'));
+const WALLET_UNSHIELDED = new UnshieldedAddress(Buffer.alloc(32, 7));
+const WALLET_DUST = new DustAddress(7n);
+
+/** Real undeployed addresses for a fixed seed, so outputs decode as they would from a dApp. */
+const RECIPIENT_SEED = Buffer.from('00'.repeat(31) + '42', 'hex');
+const UNSHIELDED_RECIPIENT = deriveUnshieldedAddress(RECIPIENT_SEED, 'undeployed');
+const SHIELDED_RECIPIENT = deriveAllShieldedAddresses(RECIPIENT_SEED).undeployed;
 
 /** A finalized transaction handle as the SDK returns it: it serializes to these bytes. */
 const finalizedTx = (...bytes: number[]) => ({ serialize: () => new Uint8Array(bytes) });
@@ -64,20 +64,17 @@ function mockState(overrides?: {
     protocolVersion: overrides?.protocolVersion ?? { shielded: FORK_SCHEDULE.v9, unshielded: FORK_SCHEDULE.v9, dust: FORK_SCHEDULE.v9 },
     unshielded: {
       balances: overrides?.unshieldedBalances ?? { '0000000000000000000000000000000000000000000000000000000000000000': 5000000n },
-      address: { data: Buffer.alloc(32) },
+      address: WALLET_UNSHIELDED,
       progress: { appliedId: 1n, highestTransactionId: 1n },
     },
     shielded: {
       balances: overrides?.shieldedBalances ?? {},
-      address: {
-        coinPublicKeyString: () => 'coin-pub-key-hex',
-        encryptionPublicKeyString: () => 'enc-pub-key-hex',
-      },
+      address: WALLET_SHIELDED,
     },
     dust: {
       balance: (_time: Date) => overrides?.dustBalance ?? 1000n,
       availableCoins: [],
-      address: { data: 0n },
+      address: WALLET_DUST,
     },
   };
 }
@@ -296,6 +293,24 @@ describe('dapp-connector', () => {
       const result = await connector.handlers.getTxHistory({ pageNumber: 1, pageSize: 1 }, ctx()) as any[];
       expect(result).toHaveLength(1);
       expect(result[0].txHash).toBe('tx-hash-002');
+    });
+
+    it.each([
+      [{ pageNumber: -1 }, 'Invalid pageNumber: -1'],
+      [{ pageNumber: 1.5 }, 'Invalid pageNumber: 1.5'],
+      [{ pageNumber: '1' }, 'Invalid pageNumber: "1"'],
+      [{ pageSize: 0 }, 'Invalid pageSize: 0'],
+      [{ pageSize: -5 }, 'Invalid pageSize: -5'],
+      [{ pageSize: 'all' }, 'Invalid pageSize: "all"'],
+    ])('refuses paging %o as InvalidRequest before reading the history', async (paging, message) => {
+      const history = vi.fn().mockResolvedValue(HISTORY);
+      connector = createConnector({ bundleOverrides: { getAllFromTxHistory: history } });
+
+      const err: any = await connector.handlers.getTxHistory(paging, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toContain(message);
+      expect(history).not.toHaveBeenCalled();
     });
 
     it('returns an empty page past the end of the history', async () => {
@@ -528,6 +543,21 @@ describe('dapp-connector', () => {
   // ── signData ──
 
   describe('signData', () => {
+    it('refuses data that is not valid in its encoding before the operator is asked', async () => {
+      // No approveAll and no TTY: reaching the approval step would fail as Rejected instead.
+      connector = createConnector({ approvalOptions: {} });
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      try {
+        const err: any = await connector.handlers.signData({ data: '@@@not base64@@@', options: { encoding: 'base64', keyType: 'unshielded' } }, ctx())
+          .catch((e: any) => e);
+        expect(err.code).toBe('InvalidRequest');
+        expect(err.message).toBe('data is not valid base64 (standard alphabet, padded)');
+      } finally {
+        Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+      }
+    });
+
     it('handles hex encoding', async () => {
       const bundle = createBundleStub();
       connector = createDAppConnector({
@@ -654,6 +684,69 @@ describe('dapp-connector', () => {
       }, ctx())).rejects.toThrow('Invalid output kind: "public"');
     });
 
+    // A dApp's mistakes in what it asks for are InvalidRequest, refused before
+    // the operator is prompted and before the wallet builds anything.
+    const output = (o: Record<string, unknown>) => ({ kind: 'unshielded', type: NIGHT, value: '5', recipient: UNSHIELDED_RECIPIENT, ...o });
+    /** No approveAll and no TTY: reaching the approval step would fail as Rejected instead. */
+    async function withoutOperator<T>(run: () => Promise<T>): Promise<T> {
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      try {
+        return await run();
+      } finally {
+        Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+      }
+    }
+
+    it.each([
+      ['a zero value', output({ value: '0' }), 'Invalid value: 0 — must be greater than 0'],
+      ['a negative value', output({ value: '-1' }), 'Invalid value: -1 — must be greater than 0'],
+      ['a fractional value', output({ value: '1.5' }), 'Invalid value: "1.5" — must be a whole number'],
+      ['a value that is not a number', output({ value: 'lots' }), 'Invalid value: "lots"'],
+      ['a boolean value, which BigInt would read as 1', output({ value: true }), 'Invalid value: "true"'],
+      ['a token type that is not 32 bytes of hex', output({ type: '0000' }), 'Invalid token type: "0000"'],
+      ['a recipient that is not an address', output({ recipient: 'bob' }), 'Invalid recipient: "bob" is not an unshielded address on Undeployed'],
+      ['a shielded address for an unshielded output', output({ recipient: SHIELDED_RECIPIENT }), 'is not an unshielded address on Undeployed'],
+      ['an unshielded address for a shielded output', output({ kind: 'shielded' }), 'is not a shielded address on Undeployed'],
+      ['an address for another network', output({ recipient: deriveUnshieldedAddress(RECIPIENT_SEED, 'preprod') }), 'is not an unshielded address on Undeployed'],
+    ])('makeTransfer refuses %s as InvalidRequest without prompting', async (_name, desired, message) => {
+      const transfer = vi.fn();
+      const c = connector = createConnector({ bundleOverrides: { transferTransaction: transfer }, approvalOptions: {} });
+
+      const err: any = await withoutOperator(() => c.handlers.makeTransfer({ desiredOutputs: [desired] }, ctx()).catch((e: any) => e));
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toContain(message);
+      expect(transfer).not.toHaveBeenCalled();
+    });
+
+    it('makeTransfer passes a valid output to the wallet as a decoded address and a bigint', async () => {
+      const transfer = vi.fn().mockResolvedValue({ type: 'UNPROVEN_TRANSACTION' });
+      connector = createConnector({ bundleOverrides: { transferTransaction: transfer } });
+
+      await connector.handlers.makeTransfer({ desiredOutputs: [output({})] }, ctx()).catch(() => undefined);
+
+      const [[combined]] = transfer.mock.calls;
+      expect(combined).toEqual([{ type: 'unshielded', outputs: [{ type: NIGHT, receiverAddress: expect.anything(), amount: 5n }] }]);
+    });
+
+    it.each([
+      ['an input kind that is neither', { kind: 'public', type: NIGHT, value: '5' }, 'Invalid input kind: "public"'],
+      ['a zero input value', { kind: 'unshielded', type: NIGHT, value: '0' }, 'Invalid value: 0'],
+      ['an input token type that is not hex', { kind: 'unshielded', type: 'night', value: '5' }, 'Invalid token type: "night"'],
+    ])('makeIntent refuses %s as InvalidRequest without building a swap', async (_name, input, message) => {
+      const initSwap = vi.fn();
+      const c = connector = createConnector({ bundleOverrides: { initSwap }, approvalOptions: {} });
+
+      const err: any = await withoutOperator(() => c.handlers.makeIntent({
+        desiredInputs: [input], desiredOutputs: [], options: { intentId: 'random', payFees: true },
+      }, ctx()).catch((e: any) => e));
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toContain(message);
+      expect(initSwap).not.toHaveBeenCalled();
+    });
+
     it('submitTransaction throws when tx is missing', async () => {
       connector = createConnector();
       await expect(connector.handlers.submitTransaction({}, ctx()))
@@ -749,8 +842,8 @@ describe('dapp-connector', () => {
     it('returns bech32m-encoded unshielded address', async () => {
       connector = createConnector();
       const result = await connector.handlers.getUnshieldedAddress({}, ctx()) as any;
-      expect(result).toHaveProperty('unshieldedAddress');
-      expect(typeof result.unshieldedAddress).toBe('string');
+      expect(result.unshieldedAddress).toMatch(/^mn_addr_undeployed1/);
+      expect(MidnightBech32m.parse(result.unshieldedAddress).decode(UnshieldedAddress, 'undeployed').equals(WALLET_UNSHIELDED.hexString)).toBe(true);
     });
   });
 
@@ -758,9 +851,10 @@ describe('dapp-connector', () => {
     it('returns shielded address and public keys', async () => {
       connector = createConnector();
       const result = await connector.handlers.getShieldedAddresses({}, ctx()) as any;
-      expect(result).toHaveProperty('shieldedAddress');
-      expect(result.shieldedCoinPublicKey).toBe('coin-pub-key-hex');
-      expect(result.shieldedEncryptionPublicKey).toBe('enc-pub-key-hex');
+      expect(result.shieldedAddress).toBe(MidnightBech32m.encode('undeployed', WALLET_SHIELDED).asString());
+      expect(result.shieldedAddress).toMatch(/^mn_shield-addr_undeployed1/);
+      expect(result.shieldedCoinPublicKey).toBe(WALLET_SHIELDED.coinPublicKeyString());
+      expect(result.shieldedEncryptionPublicKey).toBe(WALLET_SHIELDED.encryptionPublicKeyString());
     });
   });
 
@@ -768,8 +862,8 @@ describe('dapp-connector', () => {
     it('returns bech32m-encoded dust address', async () => {
       connector = createConnector();
       const result = await connector.handlers.getDustAddress({}, ctx()) as any;
-      expect(result).toHaveProperty('dustAddress');
-      expect(typeof result.dustAddress).toBe('string');
+      expect(result.dustAddress).toMatch(/^mn_dust_undeployed1/);
+      expect(MidnightBech32m.parse(result.dustAddress).decode(DustAddress, 'undeployed').data).toBe(7n);
     });
   });
 
@@ -849,6 +943,28 @@ describe('dapp-connector', () => {
         methodNames: ['getUnshieldedBalances', 'makeTransfer'],
       }, ctx());
       expect(result).toBeUndefined();
+    });
+
+    it('resolves for a method this wallet does not know, as the spec asks', async () => {
+      process.stderr.write = (() => true) as any;
+      connector = createConnector();
+      await expect(connector.handlers.hintUsage({ methodNames: ['someFutureMethod'] }, ctx())).resolves.toBeUndefined();
+    });
+
+    it.each([
+      ['a string instead of an array', 'makeTransfer'],
+      ['a non-string entry', ['makeTransfer', 42]],
+      ['a name carrying terminal escape codes', ['\u001b[2Jcleared']],
+    ])('refuses %s as InvalidRequest without printing it', async (_name, methodNames) => {
+      const written: string[] = [];
+      process.stderr.write = ((chunk: string) => { written.push(chunk); return true; }) as any;
+      connector = createConnector();
+
+      const err: any = await connector.handlers.hintUsage({ methodNames }, ctx()).catch((e: any) => e);
+
+      expect(err.code).toBe('InvalidRequest');
+      expect(err.message).toBe('methodNames must be an array of connector method names');
+      expect(written.join('')).not.toContain('hints usage');
     });
   });
 
@@ -1218,7 +1334,7 @@ describe('dapp-connector', () => {
       const { connector } = feeWallet({ transferTransaction: transfer });
 
       const err: any = await connector.handlers.makeTransfer({
-        desiredOutputs: [{ kind: 'unshielded', type: NIGHT, value: '1', recipient: 'mn_addr_undeployed1xyz' }],
+        desiredOutputs: [{ kind: 'unshielded', type: NIGHT, value: '1', recipient: UNSHIELDED_RECIPIENT }],
       }, ctx()).catch((e: any) => e);
 
       expect(err.code).toBe('Rejected');

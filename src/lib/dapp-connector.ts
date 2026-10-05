@@ -20,6 +20,7 @@ import { DEFAULT_FEE_LIMITS, feeLimitRefusal, pendingLimitRefusal, type FeeLimit
 import { inspectTxHex } from './tx-inspect.ts';
 import { expiredIntents, feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { PartlySignedTransactionError, assertSignable, signRecipe } from './sign-recipe.ts';
+import { decodeSignPayload } from './sign-data.ts';
 import { fetchPartialSuccessSegments, type SegmentResult } from './tx-segments.ts';
 import { walletsBelowLedger9 } from './ledger-guard.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
@@ -485,6 +486,45 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     return MidnightBech32m.encode(networkId, address).asString();
   }
 
+  /** A token amount the dApp gives: a whole number of the smallest unit, above 0. */
+  function parsePositiveAmount(value: unknown, field: string): bigint {
+    let amount: bigint;
+    try {
+      if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'bigint') throw new TypeError();
+      amount = BigInt(value);
+    } catch {
+      throw createApiError('InvalidRequest', `Invalid ${field}: "${String(value)}" — must be a whole number of the token's smallest unit`);
+    }
+    if (amount <= 0n) throw createApiError('InvalidRequest', `Invalid ${field}: ${amount} — must be greater than 0`);
+    return amount;
+  }
+
+  function parseKind(kind: unknown, of: 'input' | 'output'): 'shielded' | 'unshielded' {
+    if (kind !== 'shielded' && kind !== 'unshielded') {
+      throw createApiError('InvalidRequest', `Invalid ${of} kind: "${kind}" — must be "shielded" or "unshielded"`);
+    }
+    return kind;
+  }
+
+  function parseTokenType(type: unknown): string {
+    if (typeof type !== 'string' || !/^[0-9a-fA-F]{64}$/.test(type)) {
+      throw createApiError('InvalidRequest', `Invalid token type: "${type}" — must be 64 hex characters`);
+    }
+    return type;
+  }
+
+  /** DesiredInput[] → CombinedSwapInputs { shielded?: Record, unshielded?: Record }. */
+  function parseDesiredInputs(inputs: any[]): Record<string, Record<string, bigint>> {
+    if (!Array.isArray(inputs)) throw createApiError('InvalidRequest', 'desiredInputs must be an array');
+    const swapInputs: Record<string, Record<string, bigint>> = {};
+    for (const input of inputs) {
+      const kind = parseKind(input?.kind, 'input');
+      swapInputs[kind] ??= {};
+      swapInputs[kind][parseTokenType(input.type)] = parsePositiveAmount(input.value, 'value');
+    }
+    return swapInputs;
+  }
+
   /**
    * Convert DApp Connector DesiredOutput[] to SDK CombinedTokenTransfer[].
    *
@@ -495,26 +535,26 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
    *   DesiredOutput.recipient (bech32m string)       → TokenTransfer.receiverAddress (Address object)
    */
   function parseDesiredOutputs(outputs: any[]): any[] {
+    if (!Array.isArray(outputs)) throw createApiError('InvalidRequest', 'desiredOutputs must be an array');
     const grouped: Record<string, any[]> = {};
 
     for (const output of outputs) {
-      const kind = output.kind as string;
-      if (kind !== 'shielded' && kind !== 'unshielded') {
-        throw createApiError('InvalidRequest', `Invalid output kind: "${kind}" — must be "shielded" or "unshielded"`);
-      }
-      if (!grouped[kind]) grouped[kind] = [];
-
-      const amount = BigInt(output.value);
+      const kind = parseKind(output?.kind, 'output');
+      grouped[kind] ??= [];
+      const type = parseTokenType(output.type);
+      const amount = parsePositiveAmount(output.value, 'value');
 
       let receiverAddress: any;
-      if (kind === 'unshielded') {
-        receiverAddress = MidnightBech32m.parse(output.recipient).decode(UnshieldedAddress, networkId);
-      } else {
-        receiverAddress = MidnightBech32m.parse(output.recipient).decode(ShieldedAddress, networkId);
+      try {
+        receiverAddress = MidnightBech32m.parse(String(output.recipient))
+          .decode(kind === 'unshielded' ? UnshieldedAddress : ShieldedAddress, networkId);
+      } catch (err) {
+        throw createApiError('InvalidRequest',
+          `Invalid recipient: "${output.recipient}" is not ${kind === 'unshielded' ? 'an' : 'a'} ${kind} address on ${networkConfig.networkId} (${extractErrorDetail(err)})`);
       }
 
       grouped[kind].push({
-        type: output.type,
+        type,
         receiverAddress,
         amount,
       });
@@ -649,8 +689,14 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
 
     getTxHistory: async (params) => {
       getState();
-      const pageNumber = Number(params.pageNumber ?? 0);
-      const pageSize = Number(params.pageSize ?? 20);
+      const pageNumber = (params.pageNumber ?? 0) as number;
+      const pageSize = (params.pageSize ?? 20) as number;
+      if (!Number.isSafeInteger(pageNumber) || pageNumber < 0) {
+        throw createApiError('InvalidRequest', `Invalid pageNumber: ${JSON.stringify(pageNumber)} — must be a whole number, 0 or more`);
+      }
+      if (!Number.isSafeInteger(pageSize) || pageSize < 1) {
+        throw createApiError('InvalidRequest', `Invalid pageSize: ${JSON.stringify(pageSize)} — must be a whole number, 1 or more`);
+      }
       const start = pageNumber * pageSize;
       const entries = await facade.getAllFromTxHistory();
       const page: HistoryEntry[] = [];
@@ -696,6 +742,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         throw createApiError('InvalidRequest', 'desiredOutputs must be a non-empty array');
       }
       assertWalletsOnLedger9();
+      const combinedTransfers = parseDesiredOutputs(outputs);
 
       const tracker = makeTracker('makeTransfer', context);
 
@@ -707,7 +754,6 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       await requireApproval('makeTransfer', details, context);
 
       tracker.start('building');
-      const combinedTransfers = parseDesiredOutputs(outputs);
       const payFees = (params.options as any)?.payFees ?? true;
       const recipe = await withDustRetry(() => facade.transferTransaction(combinedTransfers, {
         ttl: createTtl(),
@@ -789,6 +835,8 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         throw createApiError('InvalidRequest', 'options is required for makeIntent');
       }
       assertWalletsOnLedger9();
+      const swapInputs = parseDesiredInputs(desiredInputs ?? []);
+      const combinedOutputs = parseDesiredOutputs(desiredOutputs ?? []);
 
       const tracker = makeTracker('makeIntent', context);
 
@@ -796,17 +844,6 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       await requireApproval('makeIntent', [], context);
 
       tracker.start('building');
-      // Convert DesiredInput[] → CombinedSwapInputs { shielded?: Record, unshielded?: Record }
-      const swapInputs: Record<string, Record<string, bigint>> = {};
-      if (Array.isArray(desiredInputs)) {
-        for (const input of desiredInputs) {
-          const kind = input.kind as string;
-          if (!swapInputs[kind]) swapInputs[kind] = {};
-          swapInputs[kind][input.type] = BigInt(input.value);
-        }
-      }
-
-      const combinedOutputs = parseDesiredOutputs(desiredOutputs ?? []);
 
       const recipe = await withDustRetry(() => facade.initSwap(swapInputs, combinedOutputs, {
         ttl: createTtl(),
@@ -829,26 +866,18 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
         throw createApiError('InvalidRequest', `Unsupported keyType: "${signOptions.keyType}" — only "unshielded" is supported`);
       }
 
+      // Decode before asking the operator: a payload that can't be read is the dApp's mistake.
+      let payload: Uint8Array;
+      try {
+        payload = decodeSignPayload(data, signOptions.encoding);
+      } catch (err) {
+        throw createApiError('InvalidRequest', (err as Error).message);
+      }
+
       await requireApproval('signData', [
         { label: 'Encoding', value: signOptions.encoding },
         { label: 'Data', value: data.length > 64 ? data.slice(0, 64) + '...' : data },
       ], context);
-
-      // Decode data based on encoding
-      let payload: Uint8Array;
-      switch (signOptions.encoding) {
-        case 'hex':
-          payload = fromHex(data);
-          break;
-        case 'base64':
-          payload = new Uint8Array(Buffer.from(data, 'base64'));
-          break;
-        case 'text':
-          payload = new Uint8Array(Buffer.from(data, 'utf-8'));
-          break;
-        default:
-          throw createApiError('InvalidRequest', `Unknown encoding: ${signOptions.encoding}`);
-      }
 
       // Both come back as { tag, value }: the hex is in `value`, and the
       // tag names the scheme the connector API reports.
@@ -876,7 +905,11 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     // ── Permission (1) ──
 
     hintUsage: async (params) => {
-      const methods = (params.methodNames as string[]) ?? [];
+      const methods = params.methodNames ?? [];
+      // Names only: they are printed to the operator's terminal as they come.
+      if (!Array.isArray(methods) || !methods.every((m) => typeof m === 'string' && /^[A-Za-z]\w*$/.test(m))) {
+        throw createApiError('InvalidRequest', 'methodNames must be an array of connector method names');
+      }
       process.stderr.write(dim(`  DApp hints usage: ${methods.join(', ')}`) + '\n');
     },
   };

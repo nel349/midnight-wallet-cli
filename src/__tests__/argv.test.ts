@@ -1,3 +1,4 @@
+import { UsageError } from '../lib/errors.ts';
 import { describe, it, expect } from 'vitest';
 import { parseArgs, getFlag, hasFlag, isVerbose, requireFlag, type ParsedArgs } from '../lib/argv.ts';
 
@@ -77,6 +78,12 @@ describe('parseArgs', () => {
     expect(result.flags.network).toBe('preprod');
   });
 
+  it('reads a negative number as a value, not a short flag, so it is refused as an amount', () => {
+    expect(parseArgs(['transfer', 'bob', '-5'])).toMatchObject({ subcommand: 'bob', positionals: ['-5'], flags: {} });
+    expect(parseArgs(['airdrop', '-1.5']).subcommand).toBe('-1.5');
+    expect(parseArgs(['x', '--fee', '-5']).flags).toEqual({ fee: '-5' });
+  });
+
   it('uses process.argv.slice(2) by default when no argv provided', () => {
     // Just verifying the function signature works without args
     const result = parseArgs(undefined);
@@ -101,8 +108,11 @@ describe('getFlag', () => {
     expect(getFlag(args, 'missing')).toBeUndefined();
   });
 
-  it('returns undefined for a boolean flag (no value)', () => {
-    expect(getFlag(args, 'verbose')).toBeUndefined();
+  it('refuses a value flag given with no value, naming it, instead of reading it as absent', () => {
+    // Read as absent, `--network` with no value fell back to the configured network.
+    expect(() => getFlag(args, 'verbose')).toThrow(UsageError);
+    expect(() => getFlag(args, 'verbose')).toThrow('--verbose needs a value');
+    expect(() => getFlag(parseArgs(['balance', '--network', '--wallet', 'alice']), 'network')).toThrow('--network needs a value');
   });
 });
 
@@ -145,8 +155,8 @@ describe('requireFlag', () => {
     expect(() => requireFlag(args, 'seed', 'hex')).toThrow('<hex>');
   });
 
-  it('throws for a boolean-only flag (no value)', () => {
-    expect(() => requireFlag(args, 'verbose', 'level')).toThrow('Missing required flag');
+  it('throws for a flag given with no value', () => {
+    expect(() => requireFlag(args, 'verbose', 'level')).toThrow('--verbose needs a value');
   });
 });
 

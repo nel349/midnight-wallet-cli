@@ -66,9 +66,7 @@ describe('airdrop command — argument validation', () => {
     await expect(airdropCommand(args)).rejects.toThrow('greater than 0');
   });
 
-  it('throws for negative amount (parsed as flag by argv)', async () => {
-    // Note: "-5" starts with "-" so the argv parser treats it as a short flag,
-    // making subcommand undefined → "Missing amount" error
+  it('refuses a negative amount as an amount, not as a missing one', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const config: WalletConfig = {
       seed: TEST_SEED,
@@ -78,7 +76,7 @@ describe('airdrop command — argument validation', () => {
     saveWalletConfig(config, walletFile);
 
     const args = parseArgs(['airdrop', '-5', '--wallet', walletFile]);
-    await expect(airdropCommand(args)).rejects.toThrow('Missing amount');
+    await expect(airdropCommand(args)).rejects.toThrow('Invalid amount: "-5" — must be a positive number');
   });
 
   it('throws when no wallet file exists', async () => {

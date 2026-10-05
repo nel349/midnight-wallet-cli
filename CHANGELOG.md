@@ -2,6 +2,16 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **A dApp's mistakes in what it asks the wallet are `InvalidRequest`, refused before the operator is asked.** `makeTransfer` and `makeIntent` with a zero, negative or fractional value, a token type that isn't 32 bytes of hex, or a recipient that isn't an address of the output's kind on the wallet's network reached the SDK after approval and came back as `InternalError` ("The amount of all inputs needs to be positive", "Unknown letter"). `signData` refuses data that isn't valid in its encoding (base64 was decoded leniently). `getTxHistory` refuses a page number or size that isn't a whole number in range, and `hintUsage` anything but a list of method names (they are printed to the operator's terminal).
+- **MCP checks a transfer, deploy or call before asking for confirmation.** `midnight_transfer`, `midnight_contract_deploy` and `midnight_contract_call` issued a confirmation token for any arguments, so the user could be asked to confirm a transfer of 0 NIGHT or a call to a circuit that doesn't exist; the mistake surfaced only on redeeming it. The amount, recipient, sending wallet, contract address, circuit, argument count, `--args` JSON and `--secret-key` are now checked first, with the same messages the CLI gives, and amount and recipient mistakes are `INVALID_ARGS` (they were `UNKNOWN`).
+- **A value flag given with no value is a usage error.** `mn balance --network` (nothing after it) fell back to the configured network without a word; it now says `--network needs a value`.
+- **A negative amount is refused as one.** `mn transfer bob -5` read `-5` as a flag and said the amount was missing.
+- **`--args` must be a JSON array or object.** A JSON string or number was turned into a wrong argument list (`"12"` became two arguments).
+
 ## [0.6.0-rc.3] - 2026-10-05
 
 ### Fixed

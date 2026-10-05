@@ -2,15 +2,15 @@
 // Usage: midnight transfer <to> <amount> [--shielded]
 
 import * as ledger from '@midnightntwrk/ledger-v9';
-import { MidnightBech32m, ShieldedAddress } from '@midnightntwrk/wallet-sdk/address-format';
+import { MidnightBech32m } from '@midnightntwrk/wallet-sdk/address-format';
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
-import { loadWalletConfig, resolveWalletPath, saveShieldedAddress } from '../lib/wallet-config.ts';
-import { resolveNetwork, resolveNetworkName } from '../lib/resolve-network.ts';
+import { saveShieldedAddress } from '../lib/wallet-config.ts';
+import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
-import { shieldedSyncEnabled, shieldedDisabledReason } from '../lib/shielded-policy.ts';
 import { getNetworkId } from '../lib/network-id.ts';
-import { parseAmount, nightToMicro, executeTransfer, ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
+import { resolveTransferRequest, decodeShieldedRecipient, type TransferRequest } from '../lib/transfer-request.ts';
+import { nightToMicro, executeTransfer, ensureDust, suppressRpcNoise } from '../lib/transfer.ts';
 import { suppressSdkTransientErrors } from '../lib/facade.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { header, keyValue, divider, formatAddress, successMessage } from '../ui/format.ts';
@@ -20,78 +20,17 @@ import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function transferCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   rejectNoCacheForWrites(args);
-  const recipientInput = args.subcommand;
-  const amountStr = args.positionals[0];
-
-  if (!recipientInput) {
-    throw new Error(
-      'Missing recipient address.\n' +
-      'Usage: midnight transfer <to> <amount>\n' +
-      'Example: midnight transfer mn_addr_undeployed1... 100\n' +
-      'Example: midnight transfer alice 100'
-    );
-  }
-
-  if (!amountStr) {
-    throw new Error(
-      'Missing amount.\n' +
-      'Usage: midnight transfer <to> <amount>\n' +
-      'Example: midnight transfer mn_addr_undeployed1... 100'
-    );
-  }
-
-  const isShielded = hasFlag(args, 'shielded');
-  const recipientAddress = resolveRecipient(recipientInput, args, isShielded);
-
-  if (isShielded) {
-    return shieldedTransfer(args, recipientAddress, amountStr, signal);
-  }
-
-  return unshieldedTransfer(args, recipientAddress, amountStr, signal);
-}
-
-/**
- * Resolve recipient: if it looks like an address (mn_addr_ or mn_shield-addr_ prefix),
- * use it directly. Otherwise treat it as a wallet name and load the address from the wallet file.
- */
-function resolveRecipient(input: string, args: ParsedArgs, shielded: boolean): string {
-  // Already an address
-  if (input.startsWith('mn_addr_') || input.startsWith('mn_shield-addr_')) {
-    return input;
-  }
-
-  // Treat as wallet name — load the recipient's wallet config
-  const recipientPath = resolveWalletPath(input);
-  const recipientConfig = loadWalletConfig(recipientPath);
-
-  const networkName = resolveNetworkName({ args });
-
-  if (shielded) {
-    const shieldedAddr = recipientConfig.shieldedAddresses?.[networkName];
-    if (!shieldedAddr) {
-      throw new Error(
-        `Wallet "${input}" has no shielded address for network "${networkName}".\n` +
-        `Regenerate the wallet or run "midnight balance --shielded" first.`
-      );
-    }
-    return shieldedAddr;
-  }
-
-  return recipientConfig.addresses[networkName];
+  const request = resolveTransferRequest(args);
+  return request.shielded ? shieldedTransfer(args, request, signal) : unshieldedTransfer(args, request, signal);
 }
 
 // ── Unshielded transfer (existing flow) ──
 
 async function unshieldedTransfer(
   args: ParsedArgs,
-  recipientAddress: string,
-  amountStr: string,
+  { walletConfig: config, recipientAddress, amountNight }: TransferRequest,
   signal?: AbortSignal,
 ): Promise<void> {
-  const amountNight = parseAmount(amountStr);
-
-  const walletPath = resolveWalletPath(getFlag(args, 'wallet'));
-  const config = loadWalletConfig(walletPath);
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
@@ -179,22 +118,13 @@ async function unshieldedTransfer(
 
 async function shieldedTransfer(
   args: ParsedArgs,
-  recipientAddress: string,
-  amountStr: string,
+  { walletPath, walletConfig: config, recipientAddress, amountNight }: TransferRequest,
   signal?: AbortSignal,
 ): Promise<void> {
-  const amountNight = parseAmount(amountStr);
   const amount = nightToMicro(amountNight);
-
-  const walletPath = resolveWalletPath(getFlag(args, 'wallet'));
-  const config = loadWalletConfig(walletPath);
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
-  if (!shieldedSyncEnabled(networkName, hasFlag(args, 'force-shielded'))) {
-    throw new Error(shieldedDisabledReason(networkName));
-  }
-  const unshieldedAddress = config.addresses[networkName];
   const networkId = getNetworkId(networkConfig.networkId);
   const nightToken = ledger.unshieldedToken().raw;
 
@@ -204,16 +134,7 @@ async function shieldedTransfer(
     indexerWS: getFlag(args, 'indexer-ws'),
   }, networkName);
 
-  // Validate recipient as ShieldedAddress
-  let decodedRecipient: ShieldedAddress;
-  try {
-    decodedRecipient = MidnightBech32m.parse(recipientAddress).decode(ShieldedAddress, networkId);
-  } catch (err: any) {
-    throw new Error(
-      `Invalid shielded address: ${err.message}\n` +
-      `Expected a shielded address (mn_shield-addr_...) for network "${networkConfig.networkId}"`
-    );
-  }
+  const decodedRecipient = decodeShieldedRecipient(recipientAddress, networkName);
 
   process.stderr.write('\n' + header('Shielded Transfer') + '\n\n');
   process.stderr.write(keyValue('Network', networkName) + '\n');

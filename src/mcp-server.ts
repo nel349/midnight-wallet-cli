@@ -56,6 +56,12 @@ interface ToolDef {
     required?: string[];
   };
   handler: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  /**
+   * For a tool behind confirmation: checks the arguments before a token is
+   * issued, throwing what the handler would, so the user is never asked to
+   * confirm a request that can't run.
+   */
+  check?: (params: Record<string, unknown>) => Promise<void>;
 }
 
 // Helper: build ParsedArgs from MCP tool parameters
@@ -87,6 +93,21 @@ function buildArgs(
     positionals,
     flags,
   };
+}
+
+/** midnight_transfer's { to, amount } as `transfer <to> <amount>`. */
+function transferArgs(params: Record<string, unknown>): ParsedArgs {
+  const args = buildArgs('transfer', params, params.to as string | undefined);
+  args.positionals = params.amount === undefined ? [] : [String(params.amount)];
+  delete args.flags.to;
+  delete args.flags.amount;
+  return args;
+}
+
+/** The wallet a deploy or call pays from exists and can be read. */
+async function checkSendingWallet(params: Record<string, unknown>): Promise<void> {
+  const { loadWalletConfig, resolveWalletPath } = await import('./lib/wallet-config.ts');
+  loadWalletConfig(resolveWalletPath(params.wallet as string | undefined));
 }
 
 // Lazy-import command handlers via static import() paths so bun can bundle them.
@@ -377,14 +398,12 @@ const TOOLS: ToolDef[] = [
       required: ['to', 'amount'],
     },
     async handler(params) {
-      const to = params.to as string;
-      const amount = params.amount as string;
-      const args = buildArgs('transfer', params, to);
-      args.positionals = [amount];
-      delete args.flags.to;
-      delete args.flags.amount;
       const handler = await importHandler('transfer');
-      return captureCommand(handler, args);
+      return captureCommand(handler, transferArgs(params));
+    },
+    async check(params) {
+      const { resolveTransferRequest } = await import('./lib/transfer-request.ts');
+      resolveTransferRequest(transferArgs(params));
     },
   },
   {
@@ -693,6 +712,11 @@ const TOOLS: ToolDef[] = [
       const handler = await importHandler('contract');
       return captureCommand(handler, args);
     },
+    async check(params) {
+      const { resolveContractDeployRequest } = await import('./lib/contract/request.ts');
+      resolveContractDeployRequest(buildArgs('contract', params, 'deploy'));
+      await checkSendingWallet(params);
+    },
   },
   {
     name: 'midnight_contract_call',
@@ -716,6 +740,11 @@ const TOOLS: ToolDef[] = [
       const args = buildArgs('contract', params, 'call');
       const handler = await importHandler('contract');
       return captureCommand(handler, args);
+    },
+    async check(params) {
+      const { resolveContractCallRequest } = await import('./lib/contract/request.ts');
+      resolveContractCallRequest(buildArgs('contract', params, 'call'));
+      await checkSendingWallet(params);
     },
   },
 
@@ -891,6 +920,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   // Step 1 of confirmation: return a pending token instead of executing.
   if (REQUIRES_CONFIRMATION.has(name)) {
+    try {
+      await TOOLS.find((t) => t.name === name)?.check?.(params);
+    } catch (err) {
+      return errorResponse(err instanceof Error ? err : new Error(String(err)));
+    }
     const pending = confirmationStore.create({
       tool: name,
       args: params,

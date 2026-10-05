@@ -1,12 +1,17 @@
 // Minimal argument parser for process.argv
 // No external dependencies — raw argv parsing
 
+import { UsageError } from './errors.ts';
+
 export interface ParsedArgs {
   command: string | undefined;
   subcommand: string | undefined;
   positionals: string[];
   flags: Record<string, string | true>;
 }
+
+/** A token that starts like a flag but is a value: a negative number such as -5 (refused later as an amount, not taken for a flag). */
+const isValueToken = (token: string): boolean => !token.startsWith('-') || /^-\d/.test(token);
 
 /**
  * Parse process.argv into structured command, subcommand, positionals, and flags.
@@ -25,18 +30,18 @@ export function parseArgs(argv?: string[]): ParsedArgs {
     if (arg.startsWith('--')) {
       const key = arg.slice(2);
       const next = args[i + 1];
-      if (next !== undefined && !next.startsWith('-')) {
+      if (next !== undefined && isValueToken(next)) {
         flags[key] = next;
         i += 2;
       } else {
         flags[key] = true;
         i += 1;
       }
-    } else if (arg.startsWith('-') && arg.length === 2) {
+    } else if (!isValueToken(arg) && arg.length === 2) {
       // Short flag like -h
       const key = arg.slice(1);
       const next = args[i + 1];
-      if (next !== undefined && !next.startsWith('-')) {
+      if (next !== undefined && isValueToken(next)) {
         flags[key] = next;
         i += 2;
       } else {
@@ -58,11 +63,15 @@ export function parseArgs(argv?: string[]): ParsedArgs {
 }
 
 /**
- * Get a flag value as string, or undefined if not present.
+ * Get a flag value as string, or undefined if not present. A flag given with
+ * no value (`--network` at the end, or followed by another flag) is a usage
+ * error: reading it as absent fell back to defaults, such as the configured
+ * network, without a word.
  */
 export function getFlag(args: ParsedArgs, name: string): string | undefined {
   const value = args.flags[name];
-  if (value === undefined || value === true) return undefined;
+  if (value === undefined) return undefined;
+  if (value === true) throw new UsageError(`--${name} needs a value, e.g. --${name} <value>`);
   return value;
 }
 
