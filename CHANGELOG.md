@@ -2,6 +2,12 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- **`signData` signs a prefixed message, never the dApp's bytes as given.** The key that signs for `signData` also signs the wallet's unshielded spends, over a transaction's signature data. `mn serve` signed the dApp's bytes as given, so a dApp could send a transaction's signature data as its "message" and get back a valid signature on a spend of the wallet's own NIGHT; the only gate was the approval prompt (which showed hex), and none under `--approve-all`. mn now signs `midnight_signed_message:<byte length>:` followed by the data, as the connector spec requires a prefix. Verifiers must check the signature over that prefixed message. The response's `data` is still the dApp's data.
+
 ## [0.6.0-rc.4] - 2026-10-05
 
 ### Fixed

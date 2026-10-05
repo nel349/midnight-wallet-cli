@@ -11,6 +11,9 @@ import * as rx from 'rxjs';
 import { createDAppConnector, signatureScheme, toHistoryEntry, type DAppConnector } from '../lib/dapp-connector.ts';
 import { startLocalIndexer, type LocalIndexer } from './helpers/local-indexer.ts';
 import { PartlySignedTransactionError } from '../lib/sign-recipe.ts';
+import { signedMessageBytes } from '../lib/sign-data.ts';
+import { createKeystore } from '@midnightntwrk/wallet-sdk/unshielded';
+import { Intent, UnshieldedOffer, verifySignature } from '@midnightntwrk/ledger-v9';
 import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
@@ -573,7 +576,7 @@ describe('dapp-connector', () => {
 
       expect(result.data).toBe('cafebabe');
       expect((bundle.keystore as any).signDataAsync).toHaveBeenCalledWith(
-        new Uint8Array([0xca, 0xfe, 0xba, 0xbe])
+        signedMessageBytes(new Uint8Array([0xca, 0xfe, 0xba, 0xbe]))
       );
     });
 
@@ -593,7 +596,7 @@ describe('dapp-connector', () => {
 
       expect(result.data).toBe(b64Data);
       expect((bundle.keystore as any).signDataAsync).toHaveBeenCalledWith(
-        new Uint8Array(Buffer.from('hello world'))
+        signedMessageBytes(new Uint8Array(Buffer.from('hello world')))
       );
     });
 
@@ -612,8 +615,32 @@ describe('dapp-connector', () => {
 
       expect(result.data).toBe('sign me');
       expect((bundle.keystore as any).signDataAsync).toHaveBeenCalledWith(
-        new Uint8Array(Buffer.from('sign me', 'utf-8'))
+        signedMessageBytes(new Uint8Array(Buffer.from('sign me', 'utf-8')))
       );
+    });
+
+    // The key that signs here also signs the wallet's unshielded spends, over a
+    // transaction's signature data. Signed as given, a dApp could send that
+    // signature data as its message and get back a valid spend signature.
+    it('signs the prefixed message, so a transaction\'s signature data sent as data gives no spend signature', async () => {
+      const keystore = createKeystore({ kind: 'schnorr', secret: new Uint8Array(32).fill(1) }, 'undeployed');
+      const vk = keystore.getPublicKey();
+      expect(vk).toEqual(WALLET_VK);
+      const intent = Intent.new(new Date(Date.UTC(2030, 0, 1)));
+      intent.guaranteedUnshieldedOffer = UnshieldedOffer.new([spend(WALLET_SK, 990n)], [pay(990n)], []);
+      const spendData = intent.signatureData(1);
+      const bundle = createBundleStub();
+      (bundle as any).keystore = keystore;
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      const result = await connector.handlers.signData({
+        data: Buffer.from(spendData).toString('hex'), options: { encoding: 'hex', keyType: 'unshielded' },
+      }, ctx()) as any;
+
+      const signature = { tag: 'schnorr', value: result.signature } as never;
+      expect(verifySignature(vk, spendData, signature)).toBe(false);
+      expect(verifySignature(vk, signedMessageBytes(spendData), signature)).toBe(true);
+      expect(result.data).toBe(Buffer.from(spendData).toString('hex'));
     });
 
     it('throws for unknown encoding', async () => {

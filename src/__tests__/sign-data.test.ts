@@ -2,7 +2,23 @@
 // never signs bytes other than the ones the dApp meant.
 
 import { describe, expect, it } from 'vitest';
-import { decodeSignPayload } from '../lib/sign-data.ts';
+import { decodeSignPayload, signedMessageBytes } from '../lib/sign-data.ts';
+
+describe('signedMessageBytes', () => {
+  it('puts "midnight_signed_message:<byte length>:" before the bytes', () => {
+    expect(Buffer.from(signedMessageBytes(new Uint8Array(32).fill(0xab))).toString('hex'))
+      .toBe(Buffer.from('midnight_signed_message:32:').toString('hex') + 'ab'.repeat(32));
+  });
+
+  it('counts bytes, not characters', () => {
+    const bytes = decodeSignPayload('héllo', 'text');
+    expect(Buffer.from(signedMessageBytes(bytes)).toString('utf-8')).toBe('midnight_signed_message:6:héllo');
+  });
+
+  it('prefixes empty data too', () => {
+    expect(Buffer.from(signedMessageBytes(new Uint8Array())).toString('utf-8')).toBe('midnight_signed_message:0:');
+  });
+});
 
 describe('decodeSignPayload', () => {
   it('decodes hex, base64 and text to the same bytes', () => {

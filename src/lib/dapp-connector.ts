@@ -20,7 +20,7 @@ import { DEFAULT_FEE_LIMITS, feeLimitRefusal, pendingLimitRefusal, type FeeLimit
 import { inspectTxHex } from './tx-inspect.ts';
 import { expiredIntents, feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { PartlySignedTransactionError, assertSignable, signRecipe } from './sign-recipe.ts';
-import { decodeSignPayload } from './sign-data.ts';
+import { decodeSignPayload, signedMessageBytes } from './sign-data.ts';
 import { fetchPartialSuccessSegments, type SegmentResult } from './tx-segments.ts';
 import { walletsBelowLedger9 } from './ledger-guard.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
@@ -881,7 +881,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
 
       // Both come back as { tag, value }: the hex is in `value`, and the
       // tag names the scheme the connector API reports.
-      const signature = await keystore.signDataAsync(payload);
+      const signature = await keystore.signDataAsync(signedMessageBytes(payload));
       const verifyingKey = keystore.getPublicKey();
 
       return {

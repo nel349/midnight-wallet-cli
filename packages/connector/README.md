@@ -114,6 +114,8 @@ getTxHistory(pageNumber: number, pageSize: number): Promise<HistoryEntry[]>
 signData(data: string, options: SignDataOptions): Promise<Signature>
 ```
 
+`mn serve` signs `midnight_signed_message:<byte length>:` followed by the decoded data (from mn 0.6.0-rc.5 and 0.5.4), so verify the signature over that prefixed message. It never signs the data as given: the same key signs the wallet's spends.
+
 **Proving**
 
 ```typescript
