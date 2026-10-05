@@ -2,7 +2,22 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
-## [0.6.0-rc.0] - unreleased
+## [0.6.0-rc.1] - 2026-10-04
+
+Fixes found by exploratory testing on a ledger-9 localnet.
+
+### Fixed
+
+- **Amounts are exact.** `transfer` and `airdrop` turned the amount into a JavaScript number and rounded it to NIGHT's 6 decimals, so `1.0000001` silently sent 1.000000 NIGHT and `1.0000005` would have sent 1.000001. An amount must now be a plain decimal with at most 6 decimals that converts exactly; anything else, including scientific notation like `1e3`, is refused with a message saying why.
+- **`dust register` on a wallet with no NIGHT fails at once.** It used to wait several minutes for Dust that could never come and then suggest running `dust register` again; it now says to fund the wallet first.
+- **`mn serve` only dispatches its own methods.** A JSON-RPC method name such as `toString`, `hasOwnProperty` or `__proto__` reached `Object.prototype` instead of returning "Method not found".
+- **The connector client (`midnight-wallet-connector`) closes its socket when the handshake is refused,** so a program that catches the error can exit, and connection failures are `APIError`s with code `Disconnected`.
+
+### Known issues
+
+- **Registering a small wallet for Dust can outlast mn's wait.** On ledger 9 a registration pays its own fee from the Dust its NIGHT generates, and generation scales with the amount of NIGHT: on a local chain about a minute for 1000 NIGHT, but close to an hour for 20 NIGHT. `dust register` waits up to 10 minutes, so a wallet with under roughly 100 NIGHT fails with "Timeout has occurred" or "Transaction submission error"; running it again later succeeds.
+
+## [0.6.0-rc.0] - 2026-10-02
 
 > **Ledger 9 only.** This prerelease targets the ledger-9 stack: wallet-sdk 2.0.0-rc.0, ledger-v9 1.0.0-rc.5, midnight-js 5.0.0-rc.1, compact-runtime 0.20.0 (contracts compiled with Compact 0.35 / language 0.27), dapp-connector-api 4.1.0-beta.1. It is published under the npm `next` tag (`npm install -g midnight-wallet-cli@next`). Networks still on ledger 8 (preview and preprod today) stay on 0.5.x.
 
@@ -42,10 +57,6 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 - **`getTxHistory` reports how a finalized transaction went.** Every finalized entry used to come back with an empty `executionStatus`, so a failed transaction looked like a success. Now a success reports segment 0 (the guaranteed section) as `Success`, a failure reports it as `Failure`, and a partial success reports each segment's result, read from the indexer. If the indexer can't answer for a partial success, the call fails with `InternalError` instead of guessing.
 - **Waiting for Dust works again.** wallet-sdk 2.0 rejects with an Effect `FiberFailure` that carries the Dust shortage only inside its cause, so mn never recognised it: the dApp connector failed at once instead of waiting for Dust. It now waits, and if no Dust frees up, the error says what holds it and what to do.
 - **`--max-pending` holds under simultaneous requests.** The limit counted only balanced transactions already tracked, so requests arriving together could all pass it. Balances in progress now count too.
-- **Amounts are exact.** `transfer` and `airdrop` turned the amount into a JavaScript number and rounded it to NIGHT's 6 decimals, so `1.0000001` silently sent 1.000000 NIGHT and `1.0000005` would have sent 1.000001. An amount must now be a plain decimal with at most 6 decimals that converts exactly; anything else, including scientific notation like `1e3`, is refused with a message saying why.
-- **`dust register` on a wallet with no NIGHT fails at once.** It used to wait several minutes for Dust that could never come and then suggest running `dust register` again; it now says to fund the wallet first.
-- **`mn serve` only dispatches its own methods.** A JSON-RPC method name such as `toString`, `hasOwnProperty` or `__proto__` reached `Object.prototype` instead of returning "Method not found".
-- **The connector client (`midnight-wallet-connector`) closes its socket when the handshake is refused,** so a program that catches the error can exit, and connection failures are `APIError`s with code `Disconnected`.
 - **An expired dApp transaction is refused up front.** A transaction with an intent whose TTL has passed used to be balanced (reserving Dust and spending the proof) and then refused by the node with a bare "Transaction submission error". `balanceUnsealedTransaction` / `balanceSealedTransaction` now refuse it with `InvalidRequest`, naming the intent and its TTL.
 - **A fee wallet's refusal says why.** On `--approve-fees`, a request it won't approve without the operator now names what the fee wallet does approve, instead of only "User rejected the request".
 - **`mn serve` no longer claims to be ready when its port is taken.** It printed "Server ready" and stayed running even when the port was already bound (often by an older `mn serve` with different approval flags, which then answered clients in its place). It now fails with "Port N is already in use"; the in-process serve that `mn contract` and `mn test` start does the same.
