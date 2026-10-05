@@ -124,6 +124,8 @@ midnight serve --network preview
 midnight serve --network preview --approve-all
 ```
 
+Read methods are auto-approved. Every write prompts in the terminal (and is rejected without one), balancing included: `balanceUnsealedTransaction` / `balanceSealedTransaction` reserve the wallet's coins, sign, and return a finished transaction the dApp could submit through any node itself.
+
 To connect from your DApp, install the connector package:
 
 ```bash

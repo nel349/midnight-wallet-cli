@@ -195,29 +195,30 @@ describe('approval', () => {
       expect(written).toContain('Auto-approved (read-only)');
     });
 
-    it('auto-approves prep methods when autoApproveReads is true', async () => {
-      const prepRequest: ApprovalRequest = {
-        method: 'balanceUnsealedTransaction',
-        network: 'undeployed',
-        details: [],
-      };
-      const result = await promptApproval(prepRequest, { autoApproveReads: true });
-      expect(result).toBe('approve');
-      const written = stripAnsi(stderrOutput.join(''));
-      expect(written).toContain('Auto-approved (prep)');
+    // Balancing signs and returns a finished transaction a dApp can submit
+    // through any node, so it is a write: it prompts unless --approve-all.
+    it.each(['balanceUnsealedTransaction', 'balanceSealedTransaction'])(
+      'prompts for %s even with autoApproveReads (no terminal: rejected), naming the flag that would approve it',
+      async (method) => {
+        const origIsTTY = process.stdin.isTTY;
+        Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+        try {
+          const result = await promptApproval({ method, network: 'undeployed', details: [] }, { autoApproveReads: true });
+          expect(result).toBe('reject');
+          const written = stripAnsi(stderrOutput.join(''));
+          expect(written).not.toContain('Auto-approved');
+          expect(written).toContain('Balancing prompts like any other write: use --approve-all for non-interactive environments');
+        } finally {
+          Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+        }
+      },
+    );
+
+    it.each(['balanceUnsealedTransaction', 'balanceSealedTransaction'])('approves %s with --approve-all', async (method) => {
+      expect(await promptApproval({ method, network: 'undeployed', details: [] }, { approveAll: true, autoApproveReads: true })).toBe('approve');
     });
 
-    it('auto-approves balanceSealedTransaction as prep method', async () => {
-      const prepRequest: ApprovalRequest = {
-        method: 'balanceSealedTransaction',
-        network: 'undeployed',
-        details: [],
-      };
-      const result = await promptApproval(prepRequest, { autoApproveReads: true });
-      expect(result).toBe('approve');
-    });
-
-    it('does not auto-approve prep methods when autoApproveReads is false', async () => {
+    it('does not auto-approve balancing when autoApproveReads is false', async () => {
       const origIsTTY = process.stdin.isTTY;
       Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
 

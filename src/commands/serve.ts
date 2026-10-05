@@ -58,6 +58,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   process.stderr.write(keyValue('Address', formatAddress(address, true)) + '\n');
   process.stderr.write(keyValue('Port', String(port)) + '\n');
   process.stderr.write(keyValue('Auto-approve reads', approveAll || autoApproveReads ? 'yes' : 'no') + '\n');
+  process.stderr.write(keyValue('Auto-approve balancing', approveAll ? 'yes' : 'no') + '\n');
   process.stderr.write(keyValue('Auto-approve writes', approveAll ? 'yes' : 'no') + '\n');
   process.stderr.write('\n');
 

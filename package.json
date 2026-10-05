@@ -1,6 +1,6 @@
 {
   "name": "midnight-wallet-cli",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "type": "module",
   "description": "Git-style CLI wallet for the Midnight blockchain",
   "license": "Apache-2.0",
@@ -85,10 +85,10 @@
     "vitest": "^3.2.4"
   },
   "optionalDependencies": {
-    "@nel349/dust-sync-darwin-arm64": "0.5.2",
-    "@nel349/dust-sync-darwin-x64": "0.5.2",
-    "@nel349/dust-sync-linux-x64": "0.5.2",
-    "@nel349/dust-sync-linux-arm64": "0.5.2",
-    "@nel349/dust-sync-win32-x64": "0.5.2"
+    "@nel349/dust-sync-darwin-arm64": "0.5.3",
+    "@nel349/dust-sync-darwin-x64": "0.5.3",
+    "@nel349/dust-sync-linux-x64": "0.5.3",
+    "@nel349/dust-sync-linux-arm64": "0.5.3",
+    "@nel349/dust-sync-win32-x64": "0.5.3"
   }
 }

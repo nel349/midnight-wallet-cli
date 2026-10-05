@@ -2,6 +2,20 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [0.5.3] - 2026-10-05
+
+### Security
+
+- **`mn serve` prompts before balancing.** `balanceUnsealedTransaction` and `balanceSealedTransaction` were approved without asking by default, as if they were reads. They reserve the wallet's coins, sign, and hand back a finished transaction a dApp could submit through any node itself, never calling `submitTransaction` (the step that prompted). So a dApp connected to plain `mn serve` could get the wallet's signature on a spend of its own NIGHT, or have the wallet fund outputs paying the dApp, with no prompt. They now prompt like other writes, and without a terminal they are rejected; `--approve-all` still approves everything. The serve header shows `Auto-approve balancing`. A dApp that relied on unprompted balancing needs the operator's approval, or a server started with `--approve-all`. `mn contract` and `mn test` start their own server with `--approve-all` and are unaffected.
+
+### Added
+
+- **`mn airdrop` infers `--shielded` from a shielded address.** `mn airdrop --wallet mn_shield-addr_...` now routes to the shielded airdrop instead of asking for `--shielded`. `--shielded` with an `mn_addr_...` address is still an error.
+
+### Fixed
+
+- **Errors and usage hints are flat text, not boxes.** A box wrapped at 66 columns but could not break a long token, so an error naming a full address grew past the terminal width and its borders broke apart. Errors and hints are now plain red or yellow lines that the terminal wraps at any width. The dApp approval prompt keeps its box, which now breaks a full address across lines.
+
 ## [0.5.2] - 2026-09-01
 
 ### Added

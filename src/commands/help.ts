@@ -724,7 +724,9 @@ can connect to it — no browser extension needed.
 
   - Port default: 9932, localhost only
   - Read operations: auto-approved
-  - Write operations: terminal approval prompt (or --approve-all)
+  - Write operations, balancing included (balanceUnsealedTransaction /
+    balanceSealedTransaction sign and return a finished transaction):
+    terminal approval prompt (or --approve-all)
   - --no-auto-approve-reads: require approval for everything
 
 DApp developers connect via the midnight-wallet-connector npm package:

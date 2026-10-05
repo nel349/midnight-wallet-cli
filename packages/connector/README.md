@@ -227,7 +227,7 @@ This is the pattern used by the [bboard-ui example](https://github.com/midnight-
 
 ## Approval Notifications
 
-When `mn serve` is running in interactive mode (without `--approve-all`), write operations pause for terminal approval. Use the callbacks to show a loading state in your UI:
+When `mn serve` is running in interactive mode (without `--approve-all`), write operations pause for terminal approval, balancing included (from mn 0.5.3). Use the callbacks to show a loading state in your UI:
 
 ```typescript
 const wallet = await createWalletClient({

@@ -593,6 +593,32 @@ describe('dapp-connector', () => {
         .rejects.toThrow('ZK proof generation timed out');
     });
 
+    // A dApp connected to plain `mn serve` (no terminal) could get back a
+    // transaction carrying the wallet's signature, and submit it through any node.
+    it.each(['balanceUnsealedTransaction', 'balanceSealedTransaction'] as const)(
+      '%s prompts on a server without --approve-all, so with no terminal nothing is balanced or signed',
+      async (method) => {
+        const balanceUnbound = vi.fn();
+        const balanceFinalized = vi.fn();
+        const signRecipe = vi.fn();
+        connector = createConnector({
+          approvalOptions: { autoApproveReads: true },
+          bundleOverrides: { balanceUnboundTransaction: balanceUnbound, balanceFinalizedTransaction: balanceFinalized, signRecipe },
+        });
+        const origIsTTY = process.stdin.isTTY;
+        Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+        try {
+          const err: any = await connector.handlers[method]({ tx: 'aabb' }, ctx()).catch((e: any) => e);
+          expect(err.code).toBe('Rejected');
+          expect(balanceUnbound).not.toHaveBeenCalled();
+          expect(balanceFinalized).not.toHaveBeenCalled();
+          expect(signRecipe).not.toHaveBeenCalled();
+        } finally {
+          Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
+        }
+      },
+    );
+
     it('returns serialized tx when finalizeRecipe resolves', async () => {
       connector = createConnector({
         approvalOptions: { approveAll: true },

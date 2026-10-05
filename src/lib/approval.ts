@@ -46,7 +46,11 @@ const READ_ONLY_METHODS = new Set([
   'getConnectionStatus',
 ]);
 
-/** Prep-step methods with no on-chain effect — auto-approved only when autoApproveReads is true */
+/**
+ * Balancing methods. Not reads: they reserve the wallet's coins and sign, and
+ * the result is a finished transaction the dApp can submit through any node.
+ * So they prompt like any other write, unless the server runs with --approve-all.
+ */
 const PREP_METHODS = new Set([
   'balanceUnsealedTransaction',
   'balanceSealedTransaction',
@@ -121,15 +125,11 @@ export async function promptApproval(
     return 'approve';
   }
 
-  if (options.autoApproveReads && isPrepMethod(request.method)) {
-    process.stderr.write(dim(`  Auto-approved (prep): ${request.method}`) + '\n');
-    return 'approve';
-  }
-
   // Non-interactive environment — reject by default
   if (!process.stdin.isTTY) {
     process.stderr.write(red('  Cannot prompt for approval: stdin is not a TTY') + '\n');
-    process.stderr.write(dim('  Use --approve-all for non-interactive environments') + '\n');
+    const what = isPrepMethod(request.method) ? 'Balancing prompts like any other write' : `${request.method} needs a terminal to approve`;
+    process.stderr.write(dim(`  ${what}: use --approve-all for non-interactive environments`) + '\n');
     return 'reject';
   }
 
