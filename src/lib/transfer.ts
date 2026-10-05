@@ -131,6 +131,7 @@ export function validateRecipientAddress(address: string, networkConfig: Network
 export { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts';
 import { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts';
 import { DustFeeNotGeneratedError, formatWait, planRegistration } from './dust-registration-plan.ts';
+import { assertChainClockCurrent, fetchChainTime } from './chain-clock.ts';
 import { toDust } from '../ui/format.ts';
 
 /** Format dust specks to human-readable DUST string (e.g. "0.300000"). Lib-layer safe (no UI import). */
@@ -235,6 +236,11 @@ export async function registerNightUtxos(
   const deadline = startTime + DUST_REGISTRATION_TIMEOUT_MS;
   let lastError: Error | undefined;
   let retrying = false;
+
+  // Dust is generated in chain time, the SDK's estimates use this computer's
+  // clock: refuse while the chain's clock lags (unknown when the indexer can't say).
+  const chainTime = bundle.indexerHttpUrl ? await fetchChainTime(bundle.indexerHttpUrl) : null;
+  if (chainTime) assertChainClockCurrent(chainTime, new Date());
 
   // The registration pays its fee from the Dust these UTXOs generate: say up
   // front how long that takes, and don't wait when it outlasts the deadline.

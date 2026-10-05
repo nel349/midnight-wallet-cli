@@ -376,6 +376,26 @@ describe('registerNightUtxos', () => {
     dustGenerationEstimations: [{ dust: { generatedNow, rate: 165_340_000_000n, maxCap: 100_000_000_000_000_000n } }],
   });
 
+  it('refuses before estimating anything while the chain\'s clock lags this computer\'s', async () => {
+    const { startLocalIndexer } = await import('./helpers/local-indexer.ts');
+    const { ChainClockBehindError } = await import('../lib/chain-clock.ts');
+    vi.useRealTimers();
+    const indexer = await startLocalIndexer(() => JSON.stringify({ data: { block: { timestamp: Date.now() - 14 * 3_600_000 } } }));
+    try {
+      const estimateRegistration = vi.fn();
+      const bundle = createBundleStub({ estimateRegistration });
+      (bundle as any).indexerHttpUrl = indexer.url;
+
+      const err: any = await registerNightUtxos(bundle, [NIGHT_UTXO], DUST_ADDRESS).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ChainClockBehindError);
+      expect(err.message).toContain("This chain's clock is about 14 hours behind this computer's");
+      expect(estimateRegistration).not.toHaveBeenCalled();
+    } finally {
+      await indexer.close();
+    }
+  });
+
   it('refuses at once, saying when to retry, when the NIGHT needs longer than mn waits to generate the fee', async () => {
     const registerSpy = vi.fn();
     const waitForGeneratedDust = vi.fn();

@@ -52,6 +52,8 @@ export interface FacadeBundle {
   keepAlive?: rx.Subscription;
   /** Whether the facade was restored from cached state (vs built from scratch). */
   restoredFromCache?: boolean;
+  /** The network's indexer (HTTP), for reads the facade doesn't offer, like the chain's clock. */
+  indexerHttpUrl?: string;
 }
 
 /**
@@ -150,7 +152,7 @@ export async function buildFacade(
   if (!shielded || !dust) {
     throw new Error('Wallet facade was built without its shielded or dust wallet');
   }
-  return { facade, keystore, seeds, seedStartable: { shielded, dust }, restoredFromCache };
+  return { facade, keystore, seeds, seedStartable: { shielded, dust }, restoredFromCache, indexerHttpUrl: networkConfig.indexer };
 }
 
 /**

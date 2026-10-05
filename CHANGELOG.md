@@ -2,10 +2,11 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
-## [Unreleased]
+## [0.6.0-rc.2] - 2026-10-05
 
 ### Fixed
 
+- **`dust register` stops when the chain's clock lags this computer's.** Dust is generated in chain time, but the wallet SDK's estimates use this computer's clock. A local chain whose clock fell behind (about 14 hours, after the machine slept) made them credit Dust the chain didn't recognise yet, and the registration was refused with a bare "Transaction submission error". mn now reads the latest block's timestamp first and, when the chain is more than 2 minutes behind, says so and what to do (exit code 4, error code `CHAIN_CLOCK_BEHIND`). If the indexer can't say, it registers as before.
 - **`dust register` says how long a small wallet must wait.** On ledger 9 a registration pays its fee from the Dust its NIGHT generates, and generation scales with the amount of NIGHT: on a local chain about a minute for 1000 NIGHT, about 53 minutes for 20. mn waited up to 10 minutes and then failed with "Timeout has occurred" or "Transaction submission error". It now works out the wait from the wallet's own generation figures before waiting: within 10 minutes it waits and says how long; beyond that it stops at once (exit code 5, error code `DUST_GENERATING`) and says when the fee will be covered, or that it never will.
 
 ## [0.6.0-rc.1] - 2026-10-04
