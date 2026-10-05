@@ -772,6 +772,9 @@ can connect to it — no browser extension needed.
     "approval":{"reads":"auto","balancing":"fee-only","writes":"fee-only","feeLimits":
     {"maxFeeSpecks":"10000000000000000","maxPending":2}}
   - --no-auto-approve-reads: no effect, kept for old scripts
+  - getTxHistory lists the transactions this server has seen since it
+    started (submitted through it or synced after start); it is kept in
+    memory, so a restart starts it empty
 
 DApp developers connect via the midnight-wallet-connector npm package:
 

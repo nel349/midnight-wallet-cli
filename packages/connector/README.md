@@ -106,6 +106,8 @@ submitTransaction(tx: string): Promise<void>
 getTxHistory(pageNumber: number, pageSize: number): Promise<HistoryEntry[]>
 ```
 
+`mn serve` keeps history in memory: it lists the transactions the server has seen since it started, and a restart starts it empty.
+
 **Signing**
 
 ```typescript
