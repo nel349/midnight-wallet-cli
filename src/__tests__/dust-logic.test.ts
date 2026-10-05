@@ -223,6 +223,22 @@ describe('ensureDust', () => {
     expect(statuses).toContain('Dust available');
   });
 
+  it('fails at once, saying to fund the wallet, when it holds no NIGHT at all', async () => {
+    // Found live: it took the "already registered, waiting" branch and polled until its timeout.
+    const registerSpy = vi.fn();
+    const waitForSyncedStateFn = vi.fn(async () => mockState({ dustBalance: 0n }));
+    const bundle = createBundleStub({
+      stateFn: () => rx.of(mockState({ dustBalance: 0n })),
+      waitForSyncedStateFn,
+      registerNightUtxos: registerSpy,
+    });
+
+    await expect(ensureDust(bundle)).rejects.toThrow('This wallet has no NIGHT, so it generates no Dust to pay fees. Fund it first');
+
+    expect(registerSpy).not.toHaveBeenCalled();
+    expect(waitForSyncedStateFn).toHaveBeenCalledTimes(1);
+  });
+
   it('registers unregistered UTXOs when no dust balance', async () => {
     const submitTransaction = vi.fn().mockResolvedValue('dust-reg-tx-hash');
 

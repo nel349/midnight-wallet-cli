@@ -96,6 +96,23 @@ describe('ws-rpc', () => {
       expect(response.error.message).toContain('nonExistentMethod');
     });
 
+    it.each(['toString', 'hasOwnProperty', 'constructor', '__proto__', 'valueOf', '__defineGetter__'])(
+      'treats %s, inherited from Object.prototype, as an unknown method',
+      async (method) => {
+        const port = nextPort();
+        server = createRpcServer({ port, handlers: { getDustBalance: async () => 'ok' } });
+        const ws = await connectClient(port);
+        clients.push(ws);
+
+        const responsePromise = waitForMessage(ws);
+        sendRpc(ws, 1, method, { a: 1 });
+        const response = await responsePromise;
+
+        expect(response.result).toBeUndefined();
+        expect(response.error).toEqual({ code: -32601, message: `Method not found: ${method}` });
+      },
+    );
+
     it('returns parse error for invalid JSON', async () => {
       const port = nextPort();
       server = createRpcServer({

@@ -55,9 +55,12 @@ export interface EnsureDustResult {
   txHash?: string;
 }
 
+/** NIGHT's smallest unit is 10^-6 NIGHT. */
+const NIGHT_DECIMALS = 6;
+
 /**
  * Convert NIGHT amount to micro-NIGHT (bigint).
- * Validates the amount is positive and not too many decimal places.
+ * Rounds to 6 decimals: amounts from parseAmount never need rounding (it refuses those that would).
  */
 export function nightToMicro(amountNight: number): bigint {
   if (amountNight <= 0) {
@@ -78,16 +81,27 @@ export function nightToMicro(amountNight: number): bigint {
 }
 
 /**
- * Parse and validate amount string from CLI input.
- * Returns the amount as a number (in NIGHT).
+ * Parse and validate amount string from CLI input: a plain decimal with at
+ * most 6 decimals, which a number carries exactly. Returns it in NIGHT.
  */
 export function parseAmount(amountStr: string): number {
-  const amount = Number(amountStr);
-  if (Number.isNaN(amount) || !Number.isFinite(amount)) {
-    throw new Error(`Invalid amount: "${amountStr}" — must be a positive number`);
+  const text = amountStr.trim();
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(text);
+  if (!match || (match[1] === '' && !match[2])) {
+    throw new Error(`Invalid amount: "${amountStr}" — must be a positive number, e.g. 1.5`);
   }
+  const decimals = match[2] ?? '';
+  if (decimals.length > NIGHT_DECIMALS) {
+    throw new Error(`Invalid amount: "${amountStr}" — NIGHT has ${NIGHT_DECIMALS} decimals, this has ${decimals.length}`);
+  }
+  const amount = Number(text);
   if (amount <= 0) {
     throw new Error(`Invalid amount: "${amountStr}" — must be greater than 0`);
+  }
+  // Amounts travel as numbers; refuse one a number can't carry to the exact smallest unit.
+  const exact = BigInt((match[1] || '0') + decimals.padEnd(NIGHT_DECIMALS, '0'));
+  if (nightToMicro(amount) !== exact) {
+    throw new Error(`Invalid amount: "${amountStr}" — too many digits to handle exactly`);
   }
   return amount;
 }
@@ -285,6 +299,14 @@ export async function ensureDust(
   if (hasDustAvailable(state)) {
     onStatus?.('Dust available');
     return { alreadyAvailable: true };
+  }
+
+  // No NIGHT at all, not even in flight: there is nothing to register and no Dust will be generated.
+  if (state.unshielded.availableCoins.length === 0 && (state.unshielded.pendingCoins?.length ?? 0) === 0) {
+    throw new Error(
+      'This wallet has no NIGHT, so it generates no Dust to pay fees. Fund it first '
+      + '(on undeployed: midnight airdrop <amount>), then run: midnight dust register',
+    );
   }
 
   // No dust — check for unregistered NIGHT UTXOs and register them.

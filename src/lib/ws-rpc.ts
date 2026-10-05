@@ -263,7 +263,8 @@ export function createRpcServer(options: RpcServerOptions): RpcServer {
         connection.requestCount++;
         onRequest?.(connection, request);
 
-        const handler = handlers[request.method];
+        // Own entries only: a name like "toString" or "__proto__" must not reach Object.prototype.
+        const handler = Object.hasOwn(handlers, request.method) ? handlers[request.method] : undefined;
         if (!handler) {
           const response: JsonRpcErrorResponse = {
             jsonrpc: '2.0',

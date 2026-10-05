@@ -39,6 +39,28 @@ describe('nightToMicro', () => {
   });
 });
 
+describe('parseAmount: exact amounts only (NIGHT has 6 decimals)', () => {
+  // Found live: "1.0000001" was accepted and 1.000000 NIGHT was sent; the
+  // conversion rounds, so "1.0000005" would have sent 1.000001.
+  it.each(['1.0000001', '1.0000005', '0.0000001'])('refuses %s: more decimals than NIGHT has', (input) => {
+    expect(() => parseAmount(input)).toThrow(`Invalid amount: "${input}" — NIGHT has 6 decimals, this has 7`);
+  });
+
+  it.each(['1e3', '-5', '1,000', '0x10', 'Infinity', '.', '1.2.3', '+1'])('refuses %j: not a plain positive decimal', (input) => {
+    expect(() => parseAmount(input)).toThrow(`Invalid amount: "${input}" — must be a positive number, e.g. 1.5`);
+  });
+
+  it('refuses an amount a number cannot carry to the exact smallest unit', () => {
+    expect(() => parseAmount('24000000000.000001')).toThrow('too many digits to handle exactly');
+  });
+
+  it.each([
+    ['1.000001', 1_000_001n], ['.5', 500_000n], ['1.', 1_000_000n], [' 2 ', 2_000_000n], ['999999999.999999', 999_999_999_999_999n],
+  ] as const)('accepts %j as exactly %s micro-NIGHT', (input, micro) => {
+    expect(nightToMicro(parseAmount(input))).toBe(micro);
+  });
+});
+
 describe('parseAmount', () => {
   it('parses integer amounts', () => {
     expect(parseAmount('100')).toBe(100);
@@ -63,7 +85,7 @@ describe('parseAmount', () => {
   });
 
   it('throws for negative amounts', () => {
-    expect(() => parseAmount('-10')).toThrow('greater than 0');
+    expect(() => parseAmount('-10')).toThrow('Invalid amount: "-10" — must be a positive number');
   });
 
   it('throws for Infinity', () => {
