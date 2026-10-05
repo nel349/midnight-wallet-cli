@@ -97,9 +97,9 @@ async function handleUp(jsonMode: boolean): Promise<void> {
     if (err instanceof Error) {
       if (err.message.includes('is already in use by container')) {
         throw new Error(
-          'Container name conflict — containers with the same names already exist\n' +
-          '(likely from a previous midnight-local-network setup).\n\n' +
-          'Run "midnight localnet clean" to remove them, then try again.'
+          'Container name conflict — containers with the same names already exist.\n\n' +
+          'If an earlier mn localnet created them, "midnight localnet clean" removes them;\n' +
+          'it leaves containers from anything else alone and lists them.'
         );
       }
       if (err.message.includes('address already in use')) {
@@ -249,13 +249,12 @@ async function handleClean(jsonMode: boolean): Promise<void> {
     } else {
       spinner.stop('No conflicting containers found');
     }
-    for (const c of kept) {
-      process.stderr.write(dim(`  Left "${c.name}" alone: it belongs to ${c.project ? `compose project "${c.project}"` : 'no compose project'}, not mn's localnet. Remove it yourself if it is in the way.`) + '\n');
-    }
-
     if (jsonMode) {
       writeJsonResult({ subcommand: 'clean', status: 'cleaned', removed, kept });
       return;
+    }
+    for (const c of kept) {
+      process.stderr.write(dim(`  Left "${c.name}" alone: it belongs to ${c.project ? `compose project "${c.project}"` : 'no compose project'}, not mn's localnet. Remove it yourself if it is in the way.`) + '\n');
     }
   } catch (err) {
     spinner.fail('Failed to clean up');

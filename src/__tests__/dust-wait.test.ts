@@ -3,7 +3,7 @@
 // NIGHT generates it (1000 NIGHT: ~0.0083 DUST/s on a ledger-9 localnet).
 
 import { describe, it, expect, vi } from 'vitest';
-import { DUST_SHORT_WAIT_MS, awaitDustForFee, dustShortError, msUntilDust } from '../lib/dust-wait.ts';
+import { DUST_SHORT_WAIT_MS, awaitDustForFee, dustShortError, msUntilDust, sleep } from '../lib/dust-wait.ts';
 
 const DUST = 10n ** 15n;
 const NOW = new Date('2026-10-05T05:00:00Z');
@@ -39,7 +39,7 @@ describe('awaitDustForFee', () => {
       await vi.advanceTimersByTimeAsync(1_000);
       await waiting;
       expect(done).toBe(true);
-      expect(statuses).toEqual(['Waiting about a minute for Dust to cover the fee (0.660000 of 0.900000 DUST)...']);
+      expect(statuses).toEqual(['Waiting about 29 seconds for Dust to cover the fee (0.660000 of 0.900000 DUST)...']);
     } finally {
       vi.useRealTimers();
     }
@@ -77,5 +77,27 @@ describe('awaitDustForFee', () => {
 describe('dustShortError', () => {
   it('says registered NIGHT will not generate it within a day when it will not', () => {
     expect(dustShortError(1n, NEEDED, null).message).toContain("won't generate that within a day: register more NIGHT (midnight dust register)");
+  });
+});
+
+describe('sleep', () => {
+  it('rejects at once when the signal has already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(sleep(60_000, controller.signal)).rejects.toThrow('Operation cancelled');
+  });
+
+  it('resolves after the wait and stops listening to the signal', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const removed = vi.spyOn(controller.signal, 'removeEventListener');
+      const done = sleep(1_000, controller.signal);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(done).resolves.toBeUndefined();
+      expect(removed).toHaveBeenCalledWith('abort', expect.any(Function));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

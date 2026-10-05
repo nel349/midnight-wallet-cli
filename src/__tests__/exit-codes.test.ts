@@ -70,3 +70,13 @@ describe('classifyError: typed setup errors keep their own code', () => {
     expect(classifyError(err).errorCode).toBe(ERROR_CODES.UNKNOWN);
   });
 });
+
+describe('classifyError: usage errors', () => {
+  it('classifies any UsageError as INVALID_ARGS (exit 2), whatever its text, so MCP agents get INVALID_ARGS too', async () => {
+    const { UsageError } = await import('../lib/errors.ts');
+    expect(classifyError(new UsageError('A contract address is 64 hex characters (32 bytes); got "deadbeef" (8 characters).')))
+      .toEqual({ exitCode: 2, errorCode: 'INVALID_ARGS' });
+    expect(classifyError(new UsageError('increment takes 0 arguments; --args gave 3.')))
+      .toEqual({ exitCode: 2, errorCode: 'INVALID_ARGS' });
+  });
+});

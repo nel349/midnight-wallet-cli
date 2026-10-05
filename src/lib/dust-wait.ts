@@ -55,8 +55,15 @@ export async function awaitDustForFee(
   const waitMs = msUntilDust(dust, needed, now, LOOK_AHEAD_MS);
   if (waitMs === null || waitMs > DUST_SHORT_WAIT_MS) throw dustShortError(have, needed, waitMs);
   onStatus?.(`Waiting ${formatWait(waitMs)} for Dust to cover the fee (${toDust(have)} of ${toDust(needed)} DUST)...`);
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, waitMs);
-    signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('Operation cancelled')); }, { once: true });
+  await sleep(waitMs, signal);
+}
+
+/** Wait `ms`; reject with "Operation cancelled" if `signal` aborts first (or already has). */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error('Operation cancelled'));
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => { clearTimeout(timer); reject(new Error('Operation cancelled')); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }

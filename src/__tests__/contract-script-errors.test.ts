@@ -38,6 +38,12 @@ await Promise.reject(new TypeError('Expected an input string with byte length of
     expect(scriptFailureMessage(stderr, status)).toBe('No contract found at address ab');
   });
 
+  it('reads a long error intact (the runner keeps stderr whole, however the pipe split it)', () => {
+    const long = 'x'.repeat(5_000);
+    const { stderr, status } = runScript(`throw new Error('${long}');`);
+    expect(scriptFailureMessage(stderr, status)).toBe(long);
+  });
+
   it('falls back to the whole stderr, then the exit code, when the script reported nothing', () => {
     expect(scriptFailureMessage('Segmentation fault\n', 139)).toBe('Segmentation fault');
     expect(scriptFailureMessage('', 2)).toBe('Script exited with code 2');

@@ -292,15 +292,21 @@ export function partitionLocalnetContainers(found: readonly NamedContainer[]): {
 export function removeConflictingContainers(): { removed: string[]; kept: NamedContainer[] } {
   const found: NamedContainer[] = [];
   for (const name of CONTAINER_NAMES) {
+    // `docker ps` lists containers only (an image named "node" is not one) and
+    // prints nothing when no container has the name.
+    let listed: string;
     try {
-      const project = execSync(
-        `docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "${name}"`,
+      listed = execSync(
+        `docker ps -a --filter "name=^/${name}$" --format '{{.Names}}|{{.Label "com.docker.compose.project"}}'`,
         { ...EXEC_OPTIONS, timeout: 10_000 },
-      ).toString().trim();
-      found.push({ name, project: project === '<no value>' ? '' : project });
+      ).toString();
     } catch {
-      // No container with that name — fine
+      // Docker couldn't say: report the name as left alone rather than guess.
+      found.push({ name, project: '(unknown: docker ps failed)' });
+      continue;
     }
+    const line = listed.split('\n').find((l) => l.startsWith(`${name}|`));
+    if (line) found.push({ name, project: line.slice(name.length + 1).trim() });
   }
   const { remove, keep } = partitionLocalnetContainers(found);
   const removed: string[] = [];

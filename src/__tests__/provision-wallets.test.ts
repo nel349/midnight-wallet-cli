@@ -24,11 +24,13 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-function recordingSteps(calls: string[]): ProvisionSteps {
+/** Records each step; `unregistered` lists existing wallets that still need Dust. */
+function recordingSteps(calls: string[], unregistered: string[] = []): ProvisionSteps {
   return {
     generate: async (name) => { calls.push(`generate ${name}`); },
     airdrop: async (name, amount) => { calls.push(`airdrop ${name} ${amount}`); },
     registerDust: async (name) => { calls.push(`register ${name}`); },
+    needsDust: async (name) => { calls.push(`check ${name}`); return unregistered.includes(name); },
   };
 }
 
@@ -47,6 +49,7 @@ describe('provisionDevWallets', () => {
 
     expect(calls).toEqual([
       'generate dev-alice', 'airdrop dev-alice 1000',
+      'check dev-bob',
       'generate dev-carol', 'airdrop dev-carol 1000',
       'register dev-alice', 'register dev-carol',
     ]);
@@ -59,6 +62,16 @@ describe('provisionDevWallets', () => {
       'dev-alice:creating', 'dev-alice:funding', 'dev-bob:done', 'dev-carol:creating', 'dev-carol:funding',
       'dev-alice:dust', 'dev-alice:done', 'dev-carol:dust', 'dev-carol:done',
     ]);
+  });
+
+  it('finishes an existing wallet whose setup stopped after funding: registers it, without funding it again', async () => {
+    writeFileSync(join(home, '.midnight', 'wallets', 'dev-alice.json'), '{}');
+    const calls: string[] = [];
+
+    const result = await provisionDevWallets({ names: ['dev-alice'], amountNight: 1000, steps: recordingSteps(calls, ['dev-alice']) });
+
+    expect(calls).toEqual(['check dev-alice', 'register dev-alice']);
+    expect(result).toEqual([{ name: 'dev-alice', state: 'created' }]);
   });
 
   it('stops before registering when cancelled after funding', async () => {

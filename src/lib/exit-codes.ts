@@ -1,3 +1,4 @@
+import { isUsageError } from './errors.ts';
 // Structured exit codes and error classification for CLI
 // Used by both JSON mode and non-JSON error reporting
 
@@ -66,6 +67,11 @@ interface ClassifiedError {
  * Order matters: more specific patterns are checked before broader ones.
  */
 export function classifyError(err: Error): ClassifiedError {
+  // A usage error is the caller's to fix, whatever its text (the CLI and MCP agree on this).
+  // (Tested through `unknown`: UsageError has Error's shape, so narrowing `err` itself would leave `never`.)
+  if (isUsageError(err as unknown)) {
+    return { exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.INVALID_ARGS };
+  }
   const code = (err as { code?: unknown }).code;
   if (typeof code === 'string' && SETUP_ERROR_CODES.has(code)) {
     return { exitCode: EXIT_NETWORK_ERROR, errorCode: code as ErrorCode };

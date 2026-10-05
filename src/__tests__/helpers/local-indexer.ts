@@ -31,3 +31,18 @@ export async function startLocalIndexer(respond: (request: { query: string; vari
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
+
+/**
+ * A local indexer serving a ledger-9 localnet's latest block (protocol version
+ * and ledger parameters), and the endpoint flags that point a command at it.
+ */
+export async function localIndexerFlags(): Promise<{ flags: string[]; close: () => Promise<void> }> {
+  const { LEDGER9_PARAMETERS_HEX } = await import('../fixtures/ledger9-parameters.ts');
+  const indexer = await startLocalIndexer(() =>
+    JSON.stringify({ data: { block: { height: 26919, protocolVersion: 2001000, ledgerParameters: LEDGER9_PARAMETERS_HEX } } }));
+  const ws = indexer.url.replace(/^http:/, 'ws:') + '/ws';
+  return {
+    flags: ['--network', 'undeployed', '--indexer-ws', ws, '--node', 'ws://127.0.0.1:9', '--proof-server', 'http://127.0.0.1:9'],
+    close: indexer.close,
+  };
+}

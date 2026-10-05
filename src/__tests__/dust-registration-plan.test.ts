@@ -37,7 +37,7 @@ describe('planRegistration', () => {
 });
 
 describe('formatWait', () => {
-  it.each([[1, 'about a minute'], [60_000, 'about a minute'], [61_000, 'about 2 minutes'], [119 * 60_000, 'about 119 minutes'],
+  it.each([[1, 'about 1 second'], [29_000, 'about 29 seconds'], [60_000, 'about a minute'], [61_000, 'about 2 minutes'], [119 * 60_000, 'about 119 minutes'],
     [120 * 60_000, 'about 2 hours'], [3.5 * 3_600_000, 'about 4 hours']])('%i ms is %s', (ms, words) => {
     expect(formatWait(ms)).toBe(words);
   });

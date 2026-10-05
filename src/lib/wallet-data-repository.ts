@@ -54,7 +54,7 @@ import { verbose } from './verbose.ts';
 import { callNodeRpc } from './node-rpc.ts';
 import { deriveDustSeed } from './derivation.ts';
 import { deriveUnshieldedAddress } from './derive-address.ts';
-import { fetchEventTip, isCursorBeyondTip } from './event-tip.ts';
+import { fetchEventTip, isCursorBeyondTip, type LedgerEventStream } from './event-tip.ts';
 
 // ── Public types ──────────────────────────────────────────
 
@@ -179,6 +179,8 @@ export interface RepoDeps {
   ) => Promise<DustDirectResult>;
   /** Chain genesis-hash fetcher (cache chain-reset guard). Default: `getChainGenesisHash`. */
   fetchChainId?: (nodeWsUrl: string) => Promise<string | null>;
+  /** A ledger event stream's latest id, for the chain-reset check. Default: indexer subscription. */
+  fetchEventTip?: (indexerWS: string, stream: LedgerEventStream) => Promise<number | null>;
   /** Chain protocol-version fetcher (ledger-9-only guard). Default: indexer `block { protocolVersion }`. */
   fetchProtocolVersion?: (indexerHttpUrl: string) => Promise<bigint | null>;
   /** Override cache directory (tests use a tmp dir). */
@@ -222,6 +224,7 @@ export class WalletDataRepository {
   private readonly fetchUnshielded: NonNullable<RepoDeps['fetchUnshielded']>;
   private readonly fetchDust: NonNullable<RepoDeps['fetchDust']>;
   private readonly fetchChainId: NonNullable<RepoDeps['fetchChainId']>;
+  private readonly fetchEventTip: NonNullable<RepoDeps['fetchEventTip']>;
   private readonly fetchProtocolVersion: NonNullable<RepoDeps['fetchProtocolVersion']>;
   private readonly cacheDir: string | undefined;
 
@@ -235,6 +238,7 @@ export class WalletDataRepository {
     this.fetchUnshielded = deps.fetchUnshielded ?? defaultUnshieldedFetcher;
     this.fetchDust = deps.fetchDust ?? nativeOrWasmDustFetcher;
     this.fetchChainId = deps.fetchChainId ?? getChainGenesisHash;
+    this.fetchEventTip = deps.fetchEventTip ?? fetchEventTip;
     this.fetchProtocolVersion = deps.fetchProtocolVersion ?? fetchProtocolVersion;
     this.cacheDir = deps.cacheDir;
   }
@@ -263,7 +267,7 @@ export class WalletDataRepository {
     let cached = opts.forceFresh ? null : loadDustCache(networkName, pubkeyHex, this.cacheDir);
     // A cursor past the chain's latest event: the chain was reset under the
     // cache (the genesis check above can't tell when the hash is reused).
-    if (cached && isCursorBeyondTip(cached.lastAppliedEventId, await fetchEventTip(network.indexerWS, 'dust'))) {
+    if (cached && isCursorBeyondTip(cached.lastAppliedEventId, await this.fetchEventTip(network.indexerWS, 'dust'))) {
       clearDustDirectCache(networkName, pubkeyHex, this.cacheDir);
       cached = null;
     }

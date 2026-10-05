@@ -38,8 +38,12 @@ export function planRegistration(fee: bigint, estimates: readonly DustGeneration
   return { fee, generated, ratePerSecond, cap, waitMs };
 }
 
-/** A wait in words: "about 19 minutes", "about 3 hours". */
+/** A wait in words: "about 29 seconds", "about 19 minutes", "about 3 hours". */
 export function formatWait(ms: number): string {
+  if (ms < 60_000) {
+    const seconds = Math.max(1, Math.ceil(ms / 1000));
+    return `about ${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
   const minutes = Math.ceil(ms / 60_000);
   if (minutes < 2) return 'about a minute';
   if (minutes < 120) return `about ${minutes} minutes`;

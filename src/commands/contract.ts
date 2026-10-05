@@ -8,6 +8,14 @@ import { writeJsonResult } from '../lib/json-output.ts';
 import { header, keyValue } from '../ui/format.ts';
 import { bold, dim, teal, yellow, green } from '../ui/colors.ts';
 import { start as startSpinner, type Spinner } from '../ui/spinner.ts';
+import { validateCallRequest, validateContractAddress } from '../lib/contract/validate.ts';
+import {
+  findContractInfo,
+  formatCircuitSignature,
+  formatCircuitFlags,
+  formatWitnessSignature,
+  toJsonOutput,
+} from '../lib/contract/inspect.ts';
 
 /**
  * No-op spinner for `--json` callers. Suppresses chrome on stderr so
@@ -17,14 +25,6 @@ import { start as startSpinner, type Spinner } from '../ui/spinner.ts';
 function silentSpinner(): Spinner {
   return { update() {}, stop() {}, fail() {}, log() {} };
 }
-import { validateCallRequest, validateContractAddress } from '../lib/contract/validate.ts';
-import {
-  findContractInfo,
-  formatCircuitSignature,
-  formatCircuitFlags,
-  formatWitnessSignature,
-  toJsonOutput,
-} from '../lib/contract/inspect.ts';
 
 const VALID_SUBCOMMANDS = ['inspect', 'deploy', 'call', 'state'] as const;
 type Subcommand = typeof VALID_SUBCOMMANDS[number];

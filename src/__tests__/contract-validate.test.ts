@@ -13,6 +13,7 @@ const COUNTER: ContractInfo = {
   circuits: [
     { name: 'increment', pure: false, proof: true, arguments: [], 'result-type': { 'type-name': 'Tuple', types: [] } as never },
     { name: 'add', pure: false, proof: true, arguments: [{ name: 'x', type: UINT }, { name: 'y', type: UINT }], 'result-type': UINT },
+    { name: 'double', pure: true, proof: false, arguments: [{ name: 'x', type: UINT }], 'result-type': UINT },
   ],
   witnesses: [], siblings: [],
 } as ContractInfo;
@@ -20,12 +21,16 @@ const COUNTER: ContractInfo = {
 describe('validateCallRequest', () => {
   it('names the circuits there are when the circuit is unknown', () => {
     expect(() => validateCallRequest(COUNTER, 'no_such_circuit', [])).toThrow(UsageError);
-    expect(() => validateCallRequest(COUNTER, 'no_such_circuit', [])).toThrow('counter has no circuit "no_such_circuit". Its circuits: increment, add.');
+    expect(() => validateCallRequest(COUNTER, 'no_such_circuit', [])).toThrow('counter has no circuit "no_such_circuit". Its callable circuits: increment, add.');
   });
 
   it('says how many arguments a circuit takes, counting only the caller\'s', () => {
     expect(() => validateCallRequest(COUNTER, 'increment', [1, 2, 3])).toThrow('increment takes 0 arguments; --args gave 3.');
     expect(() => validateCallRequest(COUNTER, 'add', [1])).toThrow('add takes 2 arguments (x, y); --args gave 1.');
+  });
+
+  it('refuses a pure circuit, which makes no transaction', () => {
+    expect(() => validateCallRequest(COUNTER, 'double', [1])).toThrow('double is a pure circuit of counter: it runs locally and makes no transaction');
   });
 
   it('accepts a known circuit with the right number of arguments', () => {

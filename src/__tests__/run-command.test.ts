@@ -13,6 +13,7 @@ import genesisAddressCommand from '../commands/genesis-address.ts';
 import inspectCostCommand from '../commands/inspect-cost.ts';
 import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
 import { deriveAllAddresses } from '../lib/derive-address.ts';
+import { localIndexerFlags } from './helpers/local-indexer.ts';
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-run-cmd-test-${process.pid}`);
 const TEST_SEED = '0000000000000000000000000000000000000000000000000000000000000002';
@@ -149,12 +150,3 @@ describe('captureCommand', () => {
     });
   });
 });
-
-/** A local indexer serving real ledger-9 parameters, and the endpoint flags that point inspect-cost at it. */
-async function localIndexerFlags(): Promise<{ flags: string[]; close: () => Promise<void> }> {
-  const { startLocalIndexer } = await import('./helpers/local-indexer.ts');
-  const { LEDGER9_PARAMETERS_HEX } = await import('./fixtures/ledger9-parameters.ts');
-  const indexer = await startLocalIndexer(() => JSON.stringify({ data: { block: { height: 26919, ledgerParameters: LEDGER9_PARAMETERS_HEX } } }));
-  const ws = indexer.url.replace(/^http:/, 'ws:') + '/ws';
-  return { flags: ['--network', 'undeployed', '--indexer-ws', ws, '--node', 'ws://127.0.0.1:9', '--proof-server', 'http://127.0.0.1:9'], close: indexer.close };
-}

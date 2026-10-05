@@ -29,6 +29,8 @@ export interface ProvisionSteps {
   generate: (name: string, signal?: AbortSignal) => Promise<void>;
   airdrop: (name: string, amountNight: number, signal?: AbortSignal) => Promise<void>;
   registerDust: (name: string, signal?: AbortSignal) => Promise<void>;
+  /** Whether an existing wallet still has no NIGHT registered for Dust (a setup interrupted after funding). */
+  needsDust: (name: string, signal?: AbortSignal) => Promise<boolean>;
 }
 
 export interface ProvisionOptions {
@@ -43,6 +45,7 @@ const COMMAND_STEPS: ProvisionSteps = {
   generate: invokeWalletGenerate,
   airdrop: invokeAirdrop,
   registerDust: invokeDustRegister,
+  needsDust: invokeNeedsDust,
 };
 
 /**
@@ -69,6 +72,12 @@ export async function provisionDevWallets(opts: ProvisionOptions): Promise<Provi
       opts.signal?.throwIfAborted();
 
       if (walletExists(name)) {
+        // Funded but never registered (setup stopped between funding and
+        // registering): finish it below rather than reuse it as is.
+        if (await steps.needsDust(name, opts.signal)) {
+          created.push(name);
+          continue;
+        }
         opts.onProgress?.(name, 'done', 'reused');
         results.push({ name, state: 'reused' });
         continue;
@@ -140,6 +149,18 @@ async function invokeAirdrop(name: string, amountNight: number, signal: AbortSig
   };
   const { default: handler } = await import('../../commands/airdrop.ts');
   await captureCommand(handler, args, signal);
+}
+
+async function invokeNeedsDust(name: string, signal: AbortSignal | undefined): Promise<boolean> {
+  const args: ParsedArgs = {
+    command: 'dust',
+    subcommand: 'status',
+    positionals: [],
+    flags: { wallet: name, network: 'undeployed' },
+  };
+  const { default: handler } = await import('../../commands/dust.ts');
+  const status = await captureCommand(handler, args, signal) as { registered?: unknown; unregisteredUtxos?: unknown };
+  return status.registered === false && typeof status.unregisteredUtxos === 'number' && status.unregisteredUtxos > 0;
 }
 
 async function invokeDustRegister(name: string, signal: AbortSignal | undefined): Promise<void> {

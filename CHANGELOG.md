@@ -2,19 +2,25 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
-## [Unreleased]
+## [0.6.0-rc.3] - 2026-10-05
 
 ### Fixed
 
 - **A transfer right after registering for Dust waits for the fee instead of crashing.** Straight after registering, a wallet holds less Dust than a transfer's fee (about 0.6 against 0.85 DUST for 1000 NIGHT). The SDK's Dust shortage was taken for its cold-start race, so mn rebuilt the wallet up to five times; on a ledger-9 localnet that ran for 9 minutes and ended in a ledger WASM crash ("unreachable"). A Dust shortage now goes to the Dust path: mn waits when the fee is covered within 2 minutes, saying how long, and otherwise fails at once saying how long it would take.
 - **`inspect-cost` reports the chain's block limits.** It derived them from the built-in initial ledger parameters; it now reads the parameters of the chain's latest block (on a ledger-9 localnet the read-time and block-usage limits are 2x and 5x the initial ones), and `--json` adds the network and block height. It takes `--network` and the endpoint flags.
-- **The Dust and shielded caches notice a chain reset.** A local chain restarted with the same genesis hash passed the chain-id check, so a cache could resume past the chain's last event and serve its old state as current. mn now compares each cache's last event with the indexer's latest one and re-syncs when the cache is ahead (the unshielded cache already had this check).
+- **The Dust and shielded caches notice a chain reset to a shorter chain.** A local chain restarted with the same genesis hash passed the chain-id check, so a cache could resume past the chain's last event and serve its old state as current. mn now compares each cache's last event with the indexer's latest one and re-syncs when the cache is ahead (the unshielded cache already had this check). A reset chain that has already grown past the cache's position, or has no events yet, is not detected this way; `mn cache clear` covers it.
 - **`mn dev` is ready sooner.** It airdropped and registered each dev wallet in turn, and each ledger-9 registration waits for its NIGHT to generate the fee; it now funds every new wallet first, so their waits overlap.
 - **`localnet up` says it is refused on ledger 9 even without Docker.** It checked Docker first and asked to install Docker Compose.
 - **`localnet clean` removes only mn's own containers.** It force-removed any container named `node`, `indexer` or `proof-server`, whatever created it; it now removes only those of mn's compose project and lists the others it left alone.
 - **`dust export --json` keeps stderr quiet.** polkadot-js "RPC-CORE" messages from the chain-id check reached stderr.
 - **`config get/set/unset` take `--network` for the endpoint keys,** so a node, indexer or proof server can be set for a network other than the selected one (also on the MCP config tools).
 - **Contract errors are the error.** A failed contract script reported its whole stderr (progress, the witnesses warning, Node's source dump); it now reports the error alone. `contract call` and `contract state` also check the address (64 hex characters), the circuit name and its argument count against the compiled contract before doing anything, and say what is expected.
+- **A transfer whose fee is above the threshold waits for Dust instead of rebuilding back to back.** When the SDK still finds the Dust short with the balance above 0.9 DUST (more inputs, other fee prices), the retry waits 10 seconds for Dust to grow; the wait after registering is time-boxed and honours Ctrl+C.
+- **`inspect-cost` refuses a ledger-8 chain** like the other chain reads, and the MCP `midnight_inspect_cost` tool takes a `network`.
+- **`contract call` refuses a pure circuit,** which makes no transaction (only provable circuits can be called), and lists the callable ones.
+- **Usage errors are `INVALID_ARGS` everywhere.** MCP reported the new usage errors (a malformed contract address, an unknown circuit, a wrong argument count, `--network` on a key that isn't per network) as `UNKNOWN`.
+- **`mn dev` finishes a dev wallet whose setup stopped after funding:** an existing dev wallet with NIGHT but no Dust registration is registered instead of reused as is.
+- **The agent manual lists every error code** (`mn help --agent`), and `mn test` accepts the endpoint flags it already used.
 - **The transfer Dust threshold matches ledger 9.** A 1 NIGHT transfer cost about 0.85 DUST on a ledger-9 localnet, so the pre-flight minimum is 0.9 DUST (it was 0.8, measured on ledger 8).
 
 ## [0.6.0-rc.2] - 2026-10-05

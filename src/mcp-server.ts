@@ -328,14 +328,16 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_inspect_cost',
-    description: 'Block limits.',
+    description: 'The chain\'s current block limits, from its latest block\'s ledger parameters.',
     annotations: { readOnlyHint: true, idempotentHint: true },
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        network: { type: 'string', description: 'Network to read (default: the selected one)' },
+      },
     },
-    async handler() {
-      const args = buildArgs('inspect-cost', {});
+    async handler(params) {
+      const args = buildArgs('inspect-cost', params.network ? { network: params.network } : {});
       const handler = await importHandler('inspect-cost');
       return captureCommand(handler, args);
     },

@@ -171,12 +171,19 @@ const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'inspect-cost',
-    description: 'Display current block limits derived from LedgerParameters',
-    usage: 'midnight inspect-cost',
+    description: "Display the chain's current block limits, from its latest block's ledger parameters",
+    usage: 'midnight inspect-cost [--network <name>] [--node <url>] [--indexer-ws <url>] [--proof-server <url>]',
+    flags: [
+      '--network <name>              Network to read (default: the selected one)',
+      '--indexer-ws <url>            Indexer to read the latest block from',
+    ],
     examples: [
       'midnight inspect-cost',
+      'midnight inspect-cost --network undeployed --json',
     ],
     jsonFields: {
+      network: 'Network the limits were read from',
+      height: 'Block whose ledger parameters the limits come from',
       readTime: 'Read time limit (picoseconds)',
       computeTime: 'Compute time limit (picoseconds)',
       blockUsage: 'Block usage limit (bytes)',
@@ -276,7 +283,7 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'config',
     description: 'Manage persistent config (default network, endpoints, etc.)',
-    usage: 'midnight config <get|set|unset> <key> [value]',
+    usage: 'midnight config <get|set|unset> <key> [value] [--network <name>]',
     flags: [
       'get <key>           Read a config value',
       'set <key> <value>   Write a config value',
@@ -284,9 +291,9 @@ const COMMAND_SPECS: CommandSpec[] = [
       '',
       'Keys: network, wallet, proof-server, node, indexer-ws',
       '',
-      'Endpoint keys (proof-server, node, indexer-ws) are scoped to the',
-      'network configured at set time — a preprod node URL never applies',
-      "to --network undeployed runs. get/unset use the current network's value.",
+      'Endpoint keys (proof-server, node, indexer-ws) are scoped to a',
+      'network: the selected one, or the one given with --network — a',
+      'preprod node URL never applies to --network undeployed runs.',
     ],
     examples: [
       'midnight config get network',
@@ -473,7 +480,8 @@ const COMMAND_SPECS: CommandSpec[] = [
       'down            Full teardown: containers, networks, volumes, + undeployed wallet cache',
       'status          Show service status and ports',
       'logs            Stream service logs (Ctrl+C to stop)',
-      'clean           Remove conflicting containers from other setups',
+      "clean           Remove mn's own localnet containers (any others named",
+      '                node / indexer / proof-server are left alone and listed)',
     ],
     examples: [
       'midnight localnet status',
@@ -486,6 +494,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       services: 'Array of { name, state, port, health? } (up/status only)',
       status: 'Operation result message (stop/down/clean)',
       removed: 'Array of removed container names (clean only)',
+      kept: "Array of { name, project } containers with those names that are not mn's, left alone (clean only)",
     },
   },
   // {

@@ -17,12 +17,18 @@ export function validateContractAddress(address: string): void {
 
 /** The circuit exists in the compiled contract and is given as many arguments as it takes. */
 export function validateCallRequest(info: ContractInfo, circuitName: string, args: readonly unknown[]): void {
-  const circuit = info.circuits.find((c) => c.name === circuitName);
+  // Only provable circuits make transactions (midnight-js builds callTx from the
+  // contract's provable circuits); a pure one runs locally and has no call.
+  const callable = info.circuits.filter((c) => c.proof);
+  const circuit = callable.find((c) => c.name === circuitName);
   if (!circuit) {
-    const names = info.circuits.map((c) => c.name);
+    if (info.circuits.some((c) => c.name === circuitName)) {
+      throw new UsageError(`${circuitName} is a pure circuit of ${info.name}: it runs locally and makes no transaction, so it can't be called.`);
+    }
+    const names = callable.map((c) => c.name);
     throw new UsageError(
       `${info.name} has no circuit "${circuitName}". `
-      + (names.length > 0 ? `Its circuits: ${names.join(', ')}.` : 'It has no circuits to call.'),
+      + (names.length > 0 ? `Its callable circuits: ${names.join(', ')}.` : 'It has no circuits to call.'),
     );
   }
   const takes = circuit.arguments.length;

@@ -28,6 +28,8 @@ export const DUST_FEE_BLOCKS_MARGIN = 5;
 // a 1 NIGHT unshielded transfer cost ~0.85 DUST on a ledger-9 localnet
 // (2026-10-05), so 0.9 DUST. Used as a pre-flight check: below it the transfer
 // waits for Dust that is moments away, or fails fast with how long it takes.
+// Measured on a localnet only; a transaction whose fee is higher (more inputs,
+// other fee prices) is caught by the transfer retry, which waits for Dust to grow.
 export const MIN_DUST_FOR_TRANSFER = 900_000_000_000_000n;
 
 // Initial dust-accrual parameters (protocol constants, matching the ledger's

@@ -184,6 +184,49 @@ describe('WalletDataRepository — dust reads', () => {
     expect(fetchCalls).toBe(1);
   });
 
+  it('drops a Dust cache whose last event is past the chain\'s latest (a reset that kept the genesis hash)', async () => {
+    const deps = (eventTip: number | null, startIds: number[], lastId: number): RepoDeps => ({
+      fetchProtocolVersion: LEDGER9_PROTOCOL,
+      fetchTip: async () => `tip-${lastId}`,
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchChainId: async () => null,
+      fetchEventTip: async () => eventTip,
+      fetchDust: async (_seed, _net, opts) => {
+        startIds.push(opts.startFromId);
+        return fakeDustResult({ lastAppliedEventId: lastId, eventCount: lastId + 1 - opts.startFromId });
+      },
+      cacheDir: TMP,
+    });
+    // Before the reset: the cache reaches event 500.
+    await new WalletDataRepository(deps(null, [], 500)).dust(SEED, NETWORK);
+
+    // After it: the chain's latest event is 106, so the cache can't be from this chain.
+    const startIds: number[] = [];
+    const view = await new WalletDataRepository(deps(106, startIds, 106)).dust(SEED, NETWORK);
+
+    expect(startIds).toEqual([0]);
+    expect(view.fromCache).toBe(false);
+    const files = readdirSync(join(TMP, 'undeployed')).filter((f) => f.startsWith('dust-'));
+    expect(files).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(TMP, 'undeployed', files[0]!), 'utf-8')).lastAppliedEventId).toBe(106);
+  });
+
+  it('resumes a Dust cache that is behind or at the chain\'s latest event', async () => {
+    const startIds: number[] = [];
+    const deps = (eventTip: number | null, lastId: number): RepoDeps => ({
+      fetchProtocolVersion: LEDGER9_PROTOCOL,
+      fetchTip: async () => `tip-${lastId}`,
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchChainId: async () => null,
+      fetchEventTip: async () => eventTip,
+      fetchDust: async (_seed, _net, opts) => { startIds.push(opts.startFromId); return fakeDustResult({ lastAppliedEventId: lastId }); },
+      cacheDir: TMP,
+    });
+    await new WalletDataRepository(deps(null, 100)).dust(SEED, NETWORK);
+    await new WalletDataRepository(deps(150, 150)).dust(SEED, NETWORK);
+    expect(startIds).toEqual([0, 101]);
+  });
+
   it('auto-resumes when fetchDust returns partial: true (cold preprod path)', async () => {
     // Simulate: indexer streams 250 events per call, returns partial: true
     // until we've consumed 1000 events worth (4 calls). Each returns the

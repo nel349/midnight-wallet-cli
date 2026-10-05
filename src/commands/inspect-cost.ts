@@ -9,6 +9,7 @@ import { bold, dim } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { fetchLedgerParameters } from '../lib/chain-params.ts';
+import { assertLedgerSupported } from '../lib/ledger-guard.ts';
 
 interface SyntheticCost {
   readTime: bigint;
@@ -62,6 +63,8 @@ const UNITS: Record<string, string> = {
 
 export default async function inspectCostCommand(args: ParsedArgs): Promise<void> {
   const { name: networkName, config } = resolveNetwork({ args });
+  // A ledger-8 chain's parameters aren't ledger-9 ones: refuse it like every other chain read.
+  await assertLedgerSupported(networkName, config);
   const { height, params } = await fetchLedgerParameters(config.indexer);
   const limits = deriveBlockLimits(params);
 

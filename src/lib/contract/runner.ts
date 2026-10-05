@@ -622,24 +622,23 @@ async function executeScript(
     });
 
     let stdout = '';
-    let stderr = '';
+    // Untrimmed, so a marked error line split across two pipe reads stays whole.
+    let stderrRaw = '';
 
     child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
     });
 
     child.stderr?.on('data', (chunk: Buffer) => {
+      stderrRaw += chunk.toString();
       const line = chunk.toString().trim();
-      if (line) {
-        stderr += line + '\n';
-        if (!line.includes(SCRIPT_ERROR_MARKER)) onMessage?.(line);
-      }
+      if (line && !line.includes(SCRIPT_ERROR_MARKER)) onMessage?.(line);
     });
 
     child.on('close', (code) => {
       cleanup();
       if (code !== 0) {
-        reject(new Error(scriptFailureMessage(stderr, code)));
+        reject(new Error(scriptFailureMessage(stderrRaw, code)));
         return;
       }
       resolve(stdout.trim());

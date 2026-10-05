@@ -132,7 +132,10 @@ export { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts
 import { isColdStartRace, isDustRelatedError } from './sdk-errors.ts';
 import { DustFeeNotGeneratedError, formatWait, planRegistration } from './dust-registration-plan.ts';
 import { assertChainClockCurrent, fetchChainTime } from './chain-clock.ts';
-import { awaitDustForFee } from './dust-wait.ts';
+import { awaitDustForFee, sleep } from './dust-wait.ts';
+
+/** How long the transfer retry waits for Dust to grow when the fee is above the pre-flight threshold. */
+const DUST_GROW_WAIT_MS = 10_000;
 import { toDust } from '../ui/format.ts';
 
 
@@ -382,6 +385,7 @@ async function buildAndSubmitTransfer(
   onSubmitting?: () => void,
   onDust?: (status: string) => void,
   onSubmittingTick?: (elapsedMs: number) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   const startTime = Date.now();
   // Use DUST_TIMEOUT_MS (2 min) not DUST_REGISTRATION_TIMEOUT_MS (10 min) —
@@ -472,7 +476,14 @@ async function buildAndSubmitTransfer(
         try {
           const freshState = await quickSync(bundle, 'lite');
           // Below the fee threshold: wait when the Dust is moments away, else fail fast.
-          await awaitDustForFee(freshState.dust, MIN_DUST_FOR_TRANSFER, onDust);
+          await awaitDustForFee(freshState.dust, MIN_DUST_FOR_TRANSFER, onDust, signal);
+          // At or above it, this transaction's fee is higher than the threshold
+          // (more inputs, other fee prices): give the Dust time to grow rather
+          // than rebuilding back to back.
+          if (freshState.dust.balance(new Date()) >= MIN_DUST_FOR_TRANSFER) {
+            onDust?.(`Dust is short of this transaction's fee; waiting ${DUST_GROW_WAIT_MS / 1000} s for more...`);
+            await sleep(DUST_GROW_WAIT_MS, signal);
+          }
           await ensureDust(bundle, onDust, freshState);
         } catch (retryErr: any) {
           // Re-throw "Insufficient dust" immediately — not retryable
@@ -549,10 +560,18 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
         if (signal?.aborted) throw new Error('Operation cancelled');
 
         verbose('transfer', 'Ensuring dust availability...');
-        await ensureDust(bundle, onDust, state);
-        // ensureDust returns once any Dust shows (right after registering
-        // that can be less than the fee): wait for the fee on current state.
-        await awaitDustForFee((await bundle.facade.waitForSyncedState()).dust, MIN_DUST_FOR_TRANSFER, onDust, signal);
+        const dustResult = await ensureDust(bundle, onDust, state);
+        // When ensureDust had to wait, it returned once any Dust showed (right
+        // after registering that can be less than the fee): wait for the fee on
+        // current state. Time-boxed like every other sync wait; skipped on timeout.
+        if (!dustResult.alreadyAvailable) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const current = await Promise.race([
+            bundle.facade.waitForSyncedState(),
+            new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), SYNC_ATTEMPT_TIMEOUT_MS); }),
+          ]).finally(() => clearTimeout(timer));
+          if (current) await awaitDustForFee(current.dust, MIN_DUST_FOR_TRANSFER, onDust, signal);
+        }
         verbose('transfer', 'Dust available');
 
         if (signal?.aborted) throw new Error('Operation cancelled');
@@ -566,6 +585,7 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
           onSubmitting,
           onDust,
           onSubmittingTick,
+          signal,
         );
         return { txHash, amountMicroNight: amount };
       },

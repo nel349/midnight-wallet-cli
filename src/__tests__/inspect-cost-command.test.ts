@@ -13,8 +13,9 @@ import { LEDGER9_PARAMETERS_HEX } from './fixtures/ledger9-parameters.ts';
 let io: CapturedOutput;
 let indexer: LocalIndexer | undefined;
 
-const servesBlock = (height: number, ledgerParameters: string) => () =>
-  JSON.stringify({ data: { block: { height, ledgerParameters } } });
+/** The latest block as the indexer serves it, to both the ledger check and the parameters read. */
+const servesBlock = (height: number, ledgerParameters: string, protocolVersion = 2001000) => () =>
+  JSON.stringify({ data: { block: { height, ledgerParameters, protocolVersion } } });
 
 /** inspect-cost against the local indexer, with explicit endpoints so no config or detection is involved. */
 async function run(extra: string[] = []): Promise<void> {
@@ -49,7 +50,7 @@ describe('inspect-cost reads the chain\'s ledger parameters', () => {
     const initial = ledger.LedgerParameters.initialParameters()
       .normalizeFullness({ readTime: 1_000_000_000n, computeTime: 0n, blockUsage: 10_000n, bytesWritten: 0n, bytesChurned: 0n } as unknown as ledger.SyntheticCost) as unknown as Record<string, number>;
     expect(Math.round(10_000 / initial.blockUsage!)).toBe(200_000);
-    expect(indexer.requests).toEqual([{ query: '{ block { height ledgerParameters } }' }]);
+    expect(indexer.requests).toEqual([{ query: '{ block { protocolVersion } }' }, { query: '{ block { height ledgerParameters } }' }]);
   });
 
   it('--json includes the network and the block the limits come from', async () => {
@@ -68,6 +69,12 @@ describe('inspect-cost reads the chain\'s ledger parameters', () => {
     expect(err).toContain('From the ledger parameters of block 26919 on undeployed');
     expect(err).toContain('picoseconds');
     expect(err).toContain('tightest constraint');
+  });
+
+  it('refuses a ledger-8 chain before reading its parameters', async () => {
+    indexer = await startLocalIndexer(servesBlock(26919, LEDGER9_PARAMETERS_HEX, 1000300));
+    await expect(run()).rejects.toMatchObject({ code: 'UNSUPPORTED_LEDGER' });
+    expect(indexer.requests).toEqual([{ query: '{ block { protocolVersion } }' }]);
   });
 
   it('fails, naming the cause, when the indexer has no parameters to give', async () => {
