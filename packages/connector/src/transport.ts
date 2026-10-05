@@ -1,7 +1,7 @@
 // WebSocket JSON-RPC 2.0 transport
 // Works in both browser (globalThis.WebSocket) and Node.js (dynamic import('ws'))
 
-import { reconstructError, type JsonRpcError } from './errors.ts';
+import { createAPIError, reconstructError, type JsonRpcError } from './errors.ts';
 
 // ── WebSocket abstraction (works with both browser WebSocket and Node ws) ──
 
@@ -79,11 +79,11 @@ export async function createTransport(options: TransportOptions): Promise<RpcTra
     const onError = (ev: any) => {
       cleanup();
       const msg = ev?.message ?? ev?.error?.message ?? `Failed to connect to ${url}`;
-      reject(new Error(msg));
+      reject(createAPIError('Disconnected', msg));
     };
     const onClose = () => {
       cleanup();
-      reject(new Error(`Connection to ${url} was closed before opening`));
+      reject(createAPIError('Disconnected', `Connection to ${url} was closed before opening`));
     };
 
     const cleanup = () => {
@@ -133,7 +133,7 @@ export async function createTransport(options: TransportOptions): Promise<RpcTra
     closed = true;
     for (const [id, call] of pending) {
       clearTimeout(call.timer);
-      call.reject(new Error('WebSocket connection closed'));
+      call.reject(createAPIError('Disconnected', 'WebSocket connection closed'));
       pending.delete(id);
     }
     onDisconnect?.();
@@ -141,7 +141,7 @@ export async function createTransport(options: TransportOptions): Promise<RpcTra
 
   function call(method: string, params?: Record<string, unknown>): Promise<unknown> {
     if (closed || ws.readyState !== 1 /* OPEN */) {
-      return Promise.reject(new Error('WebSocket is not connected'));
+      return Promise.reject(createAPIError('Disconnected', 'WebSocket is not connected'));
     }
 
     const id = nextId++;
@@ -149,7 +149,7 @@ export async function createTransport(options: TransportOptions): Promise<RpcTra
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
-        reject(new Error(`RPC call "${method}" timed out after ${timeout}ms`));
+        reject(createAPIError('InternalError', `RPC call "${method}" timed out after ${timeout}ms`));
       }, timeout);
 
       pending.set(id, { resolve, reject, timer });
@@ -170,7 +170,7 @@ export async function createTransport(options: TransportOptions): Promise<RpcTra
     closed = true;
     for (const [id, pendingCall] of pending) {
       clearTimeout(pendingCall.timer);
-      pendingCall.reject(new Error('Transport closed'));
+      pendingCall.reject(createAPIError('Disconnected', 'Transport closed'));
       pending.delete(id);
     }
     ws.close(1000, 'Client disconnect');

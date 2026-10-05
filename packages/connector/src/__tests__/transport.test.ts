@@ -131,6 +131,8 @@ describe('createTransport', () => {
       expect.fail('Should have thrown');
     } catch (err: any) {
       expect(err.message).toContain('timed out');
+      expect(err.type).toBe('DAppConnectorAPIError');
+      expect(err.code).toBe('InternalError');
     }
     transport.close();
   });
@@ -146,6 +148,8 @@ describe('createTransport', () => {
       expect.fail('Should have thrown');
     } catch (err: any) {
       expect(err.message).toContain('not connected');
+      expect(err.type).toBe('DAppConnectorAPIError');
+      expect(err.code).toBe('Disconnected');
     }
   });
 
@@ -168,12 +172,14 @@ describe('createTransport', () => {
     transport.close();
   });
 
-  it('rejects with error when connection fails', async () => {
+  it('rejects with a Disconnected APIError when the connection fails', async () => {
     try {
       await createTransport({ url: 'ws://127.0.0.1:1' });
       expect.fail('Should have thrown');
     } catch (err: any) {
       expect(err).toBeInstanceOf(Error);
+      expect(err.type).toBe('DAppConnectorAPIError');
+      expect(err.code).toBe('Disconnected');
     }
   });
 
@@ -239,6 +245,7 @@ describe('createTransport', () => {
       expect.fail('Should have thrown');
     } catch (err: any) {
       expect(err.message).toBe('WebSocket connection closed');
+      expect(err.code).toBe('Disconnected');
     }
     transport.close();
   });

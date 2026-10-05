@@ -35,9 +35,14 @@ export function reconstructError(rpcError: JsonRpcError): APIError {
     errorCode = RPC_CODE_TO_ERROR[rpcError.code] ?? 'InternalError';
   }
 
-  const error = new Error(rpcError.message) as APIError;
+  return createAPIError(errorCode, rpcError.message);
+}
+
+/** An APIError raised on this side of the connection: the server is unreachable, gone, or too slow. */
+export function createAPIError(code: ErrorCode, reason: string): APIError {
+  const error = new Error(reason) as APIError;
   error.type = 'DAppConnectorAPIError';
-  error.code = errorCode;
-  error.reason = rpcError.message;
+  error.code = code;
+  error.reason = reason;
   return error;
 }

@@ -76,7 +76,13 @@ async function createWebSocketClient(options: WalletClientOptions & { url: strin
     },
   });
 
-  await transport.call('connect', { networkId });
+  try {
+    await transport.call('connect', { networkId });
+  } catch (err) {
+    // A refused handshake (e.g. the wrong network) leaves no client to disconnect, so close the socket here.
+    transport.close();
+    throw err;
+  }
 
   const client: WalletClient = {
     async getUnshieldedBalances() {

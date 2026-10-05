@@ -155,6 +155,18 @@ describe('createWalletClient', () => {
     }
   });
 
+  it('closes its socket when the connect handshake is refused, so the caller\'s process can exit', async () => {
+    server = createMockServer({ networkId: 'Undeployed' });
+    const closed = new Promise<void>((resolve) => {
+      server!.wss.on('connection', (ws) => ws.on('close', () => resolve()));
+    });
+
+    await expect(createWalletClient({ url: server.url, networkId: 'PreProd' })).rejects.toMatchObject({ code: 'InvalidRequest' });
+
+    await closed;
+    expect([...server.wss.clients].filter((c) => c.readyState === c.OPEN)).toHaveLength(0);
+  });
+
   // ── Balance methods — bigint round-trip ──
 
   it('getUnshieldedBalances returns native bigint values', async () => {
