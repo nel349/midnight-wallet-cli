@@ -433,6 +433,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         key: { type: 'string' },
+        network: { type: 'string', description: 'For node / indexer-ws / proof-server: the network to read or write them for (default: the selected network)' },
       },
       required: ['key'],
     },
@@ -442,7 +443,7 @@ const TOOLS: ToolDef[] = [
         command: 'config',
         subcommand: 'get',
         positionals: [key],
-        flags: { json: true },
+        flags: { json: true, ...(params.network ? { network: params.network as string } : {}) },
       };
       const handler = await importHandler('config');
       return captureCommand(handler, args);
@@ -456,6 +457,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         key: { type: 'string' },
+        network: { type: 'string', description: 'For node / indexer-ws / proof-server: the network to read or write them for (default: the selected network)' },
         value: { type: 'string' },
       },
       required: ['key', 'value'],
@@ -467,7 +469,7 @@ const TOOLS: ToolDef[] = [
         command: 'config',
         subcommand: 'set',
         positionals: [key, value],
-        flags: { json: true },
+        flags: { json: true, ...(params.network ? { network: params.network as string } : {}) },
       };
       const handler = await importHandler('config');
       return captureCommand(handler, args);
@@ -498,6 +500,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         key: { type: 'string' },
+        network: { type: 'string', description: 'For node / indexer-ws / proof-server: the network to read or write them for (default: the selected network)' },
       },
       required: ['key'],
     },
@@ -507,7 +510,7 @@ const TOOLS: ToolDef[] = [
         command: 'config',
         subcommand: 'unset',
         positionals: [key],
-        flags: { json: true },
+        flags: { json: true, ...(params.network ? { network: params.network as string } : {}) },
       };
       const handler = await importHandler('config');
       return captureCommand(handler, args);

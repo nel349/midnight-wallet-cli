@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import { type ParsedArgs, hasFlag, getFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import {
+  assertLocalnetCanStart,
   checkDockerAvailable,
   ensureComposeFile,
   dockerCompose,
@@ -240,17 +241,20 @@ async function handleClean(jsonMode: boolean): Promise<void> {
     // First try compose down to clean up any compose-managed resources
     try { dockerCompose('down'); } catch { /* may fail if compose file doesn't match */ }
 
-    // Force-remove containers by name regardless of origin
-    const removed = removeConflictingContainers();
+    // Remove containers with mn's names that mn's compose project created
+    const { removed, kept } = removeConflictingContainers();
 
     if (removed.length > 0) {
       spinner.stop(`Removed ${removed.length} container${removed.length > 1 ? 's' : ''}: ${removed.join(', ')}`);
     } else {
       spinner.stop('No conflicting containers found');
     }
+    for (const c of kept) {
+      process.stderr.write(dim(`  Left "${c.name}" alone: it belongs to ${c.project ? `compose project "${c.project}"` : 'no compose project'}, not mn's localnet. Remove it yourself if it is in the way.`) + '\n');
+    }
 
     if (jsonMode) {
-      writeJsonResult({ subcommand: 'clean', status: 'cleaned', removed });
+      writeJsonResult({ subcommand: 'clean', status: 'cleaned', removed, kept });
       return;
     }
   } catch (err) {
@@ -326,6 +330,9 @@ export default async function localnetCommand(args: ParsedArgs): Promise<void> {
       `Example: midnight localnet status`
     );
   }
+
+  // `up` is refused on this build whatever Docker's state: say that, not "install Docker".
+  if (subcommand === 'up') assertLocalnetCanStart();
 
   // Check Docker is available before any operation
   checkDockerAvailable();

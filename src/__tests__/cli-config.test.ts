@@ -460,3 +460,23 @@ describe('per-network endpoint scoping', () => {
     expect((config.networks as Record<string, unknown> | undefined)?.bogusnet).toBeUndefined();
   });
 });
+
+describe('endpoint keys for a network other than the selected one (--network)', () => {
+  it('sets, reads and unsets a node for preprod while undeployed stays selected and untouched', () => {
+    setConfigValue('node', 'ws://undeployed-node:9944', TEST_DIR);
+    setConfigValue('node', 'wss://preprod-node.example', TEST_DIR, 'preprod');
+
+    expect(getConfigValue('network', TEST_DIR)).toBe('undeployed');
+    expect(getConfigValue('node', TEST_DIR)).toBe('ws://undeployed-node:9944');
+    expect(getConfigValue('node', TEST_DIR, 'preprod')).toBe('wss://preprod-node.example');
+
+    unsetConfigValue('node', TEST_DIR, 'preprod');
+    expect(getConfigValue('node', TEST_DIR, 'preprod')).toBe('(not set)');
+    expect(getConfigValue('node', TEST_DIR)).toBe('ws://undeployed-node:9944');
+  });
+
+  it('refuses --network on a key that is not per network', () => {
+    expect(() => setConfigValue('wallet', 'alice', TEST_DIR, 'preprod')).toThrow('--network only applies to the endpoint keys');
+    expect(() => getConfigValue('network', TEST_DIR, 'preprod')).toThrow('--network only applies to the endpoint keys');
+  });
+});

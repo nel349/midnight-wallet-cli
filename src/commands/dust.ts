@@ -52,7 +52,13 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   // export: standalone path. Accepts a raw --seed (so a dApp operator can export a
   // snapshot for its own seed with no named wallet) or falls back to a named wallet.
   if (subcommand === 'export') {
-    await dustExport(resolveSeed(args), networkName, networkConfig, isJson, minimal, signal);
+    // The chain-id check connects to the node; keep polkadot-js's RPC-CORE noise off stderr.
+    const restoreRpc = suppressRpcNoise();
+    try {
+      await dustExport(resolveSeed(args), networkName, networkConfig, isJson, minimal, signal);
+    } finally {
+      restoreRpc();
+    }
     return;
   }
 

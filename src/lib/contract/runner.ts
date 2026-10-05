@@ -353,6 +353,32 @@ const providers = {
  */
 const ARG_COERCE_FN = `\nconst coerceArg = (${coerceArg.toString()});\n`;
 
+/** Marks the line a generated script reports its failure on, so mn can tell it from progress and warnings. */
+export const SCRIPT_ERROR_MARKER = '__MN_ERROR__';
+
+/**
+ * First in every generated script: report any failure (a rejected top-level
+ * await included) as one marked line, then exit 1. Without it Node prints the
+ * uncaught exception with its source context, and that became mn's error.
+ */
+export const SCRIPT_PRELUDE = `
+const fail = (e) => {
+  process.stderr.write('\\n${SCRIPT_ERROR_MARKER} ' + JSON.stringify(String(e?.message ?? e)) + '\\n');
+  process.exit(1);
+};
+process.on('uncaughtException', fail);
+process.on('unhandledRejection', fail);
+`;
+
+/** The failure a generated script reported, or its whole stderr when it reported none. */
+export function scriptFailureMessage(stderr: string, exitCode: number | null): string {
+  const marked = new RegExp(`^${SCRIPT_ERROR_MARKER} (.*)$`, 'm').exec(stderr);
+  if (marked) {
+    try { return JSON.parse(marked[1]!) as string; } catch { return marked[1]!; }
+  }
+  return stderr.trim() || `Script exited with code ${exitCode}`;
+}
+
 export function generateDeployScript(opts: DeployOptions): string {
   const privateStateKey = opts.privateStateKey ?? `${opts.contractName}PrivateState`;
   // Constructor args are pre-serialized to JSON here (still in our process)
@@ -361,7 +387,7 @@ export function generateDeployScript(opts: DeployOptions): string {
   // two coercions Compact circuits invariably need.
   const argsLiteral = JSON.stringify(opts.args ?? []);
 
-  return `
+  return `${SCRIPT_PRELUDE}
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 setNetworkId(${JSON.stringify(opts.networkConfig.networkId.toLowerCase())});
 
@@ -400,7 +426,7 @@ process.exit(0);
 export function generateCallScript(opts: CallOptions): string {
   const privateStateKey = opts.privateStateKey ?? `${opts.contractName}PrivateState`;
 
-  return `
+  return `${SCRIPT_PRELUDE}
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 setNetworkId(${JSON.stringify(opts.networkConfig.networkId.toLowerCase())});
 
@@ -437,7 +463,7 @@ process.exit(0);
 }
 
 export function generateStateScript(opts: StateOptions): string {
-  return `
+  return `${SCRIPT_PRELUDE}
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 setNetworkId(${JSON.stringify(opts.networkConfig.networkId.toLowerCase())});
 
@@ -451,8 +477,7 @@ const MANAGED_DIR = ${JSON.stringify(opts.managedDir)};
 const contractMod = await import(pathToFileURL(resolve(MANAGED_DIR, 'contract', 'index.js')).href);
 
 if (typeof contractMod.ledger !== 'function') {
-  console.error('Contract module does not export a ledger() function');
-  process.exit(1);
+  fail(new Error('Contract module does not export a ledger() function'));
 }
 
 process.stderr.write('Querying contract state...\\n');
@@ -463,8 +488,7 @@ const provider = indexerPublicDataProvider({
 
 const contractState = await provider.queryContractState(${JSON.stringify(opts.contractAddress)});
 if (!contractState) {
-  console.error('No contract found at address ${opts.contractAddress}');
-  process.exit(1);
+  fail(new Error('No contract found at address ${opts.contractAddress}'));
 }
 
 process.stderr.write('Parsing ledger state...\\n');
@@ -608,14 +632,14 @@ async function executeScript(
       const line = chunk.toString().trim();
       if (line) {
         stderr += line + '\n';
-        onMessage?.(line);
+        if (!line.includes(SCRIPT_ERROR_MARKER)) onMessage?.(line);
       }
     });
 
     child.on('close', (code) => {
       cleanup();
       if (code !== 0) {
-        reject(new Error(stderr.trim() || `Script exited with code ${code}`));
+        reject(new Error(scriptFailureMessage(stderr, code)));
         return;
       }
       resolve(stdout.trim());

@@ -24,20 +24,41 @@ export interface ProvisionedWallet {
   state: WalletProvisionState;
 }
 
+/** The three steps of setting up a wallet; the defaults run mn's own commands. */
+export interface ProvisionSteps {
+  generate: (name: string, signal?: AbortSignal) => Promise<void>;
+  airdrop: (name: string, amountNight: number, signal?: AbortSignal) => Promise<void>;
+  registerDust: (name: string, signal?: AbortSignal) => Promise<void>;
+}
+
 export interface ProvisionOptions {
   names: readonly string[];
   amountNight: number;
   onProgress?: (wallet: string, phase: 'creating' | 'funding' | 'dust' | 'done', state: WalletProvisionState) => void;
   signal?: AbortSignal;
+  steps?: ProvisionSteps;
 }
+
+const COMMAND_STEPS: ProvisionSteps = {
+  generate: invokeWalletGenerate,
+  airdrop: invokeAirdrop,
+  registerDust: invokeDustRegister,
+};
 
 /**
  * Ensure each wallet exists, is funded from genesis, and is dust-registered.
  * Only runs create → airdrop → dust for brand-new wallets; reuses existing ones as-is.
  * Always targets the `undeployed` network — airdrop is localnet-only.
+ *
+ * Every new wallet is funded before any registers: a ledger-9 registration
+ * waits for its NIGHT to generate the fee (about a minute for 1000 NIGHT),
+ * and generation starts at the airdrop, so the later wallets' waits run
+ * while the earlier ones register instead of one after another.
  */
 export async function provisionDevWallets(opts: ProvisionOptions): Promise<ProvisionedWallet[]> {
+  const steps = opts.steps ?? COMMAND_STEPS;
   const results: ProvisionedWallet[] = [];
+  const created: string[] = [];
 
   // `wallet generate` sets the new wallet as active — remember the user's
   // current active wallet so we can restore it after provisioning.
@@ -54,13 +75,17 @@ export async function provisionDevWallets(opts: ProvisionOptions): Promise<Provi
       }
 
       opts.onProgress?.(name, 'creating', 'created');
-      await invokeWalletGenerate(name, opts.signal);
+      await steps.generate(name, opts.signal);
 
       opts.onProgress?.(name, 'funding', 'created');
-      await invokeAirdrop(name, opts.amountNight, opts.signal);
+      await steps.airdrop(name, opts.amountNight, opts.signal);
+      created.push(name);
+    }
 
+    for (const name of created) {
+      opts.signal?.throwIfAborted();
       opts.onProgress?.(name, 'dust', 'created');
-      await invokeDustRegister(name, opts.signal);
+      await steps.registerDust(name, opts.signal);
 
       opts.onProgress?.(name, 'done', 'created');
       results.push({ name, state: 'created' });
@@ -69,7 +94,7 @@ export async function provisionDevWallets(opts: ProvisionOptions): Promise<Provi
     restoreActiveWallet(previousActive);
   }
 
-  return results;
+  return opts.names.flatMap((name) => results.filter((r) => r.name === name));
 }
 
 function safeGetActiveWallet(): string | null {

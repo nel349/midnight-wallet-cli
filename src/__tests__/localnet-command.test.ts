@@ -223,3 +223,32 @@ describe('help integration', () => {
     expect(localnetBrief![1]).toContain('local network');
   });
 });
+
+describe('localnet up on this ledger-9 build', () => {
+  it('refuses with LOCALNET_UNAVAILABLE even without Docker, rather than asking to install Docker', async () => {
+    const originalPath = process.env.PATH;
+    process.env.PATH = '/nonexistent'; // no docker binary to find
+    try {
+      const err: any = await localnetCommand(parseArgs(['localnet', 'up'])).catch((e) => e);
+      expect(err.code).toBe('LOCALNET_UNAVAILABLE');
+      expect(err.message).not.toContain('Docker Compose v2 is required');
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+});
+
+describe('localnet clean: which containers are mn\'s', () => {
+  it('removes only containers from mn\'s compose project, keeping any other with the same generic name', async () => {
+    const { partitionLocalnetContainers, LOCALNET_PROJECT } = await import('../lib/localnet.ts');
+    expect(LOCALNET_PROJECT).toBe('localnet');
+    expect(partitionLocalnetContainers([
+      { name: 'node', project: 'localnet' },          // mn's (also an older mn's ledger-8 localnet)
+      { name: 'indexer', project: 'my-app' },         // someone else's compose service
+      { name: 'proof-server', project: '' },          // a plain docker run
+    ])).toEqual({
+      remove: ['node'],
+      keep: [{ name: 'indexer', project: 'my-app' }, { name: 'proof-server', project: '' }],
+    });
+  });
+});

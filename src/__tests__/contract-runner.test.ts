@@ -30,6 +30,7 @@ import {
   generateDeployScript,
   generateCallScript,
   generateStateScript,
+  SCRIPT_PRELUDE,
 } from '../lib/contract/runner.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 
@@ -201,6 +202,12 @@ describe('generated scripts', () => {
       contractName: 'counter', contractAddress: 'ab'.repeat(32),
     }),
   };
+
+  it('starts every script with the prelude that reports failures as one marked line', () => {
+    for (const script of Object.values(scripts)) {
+      expect(script.startsWith(SCRIPT_PRELUDE)).toBe(true);
+    }
+  });
 
   it('includes the provider imports in deploy and call scripts', () => {
     expect(scripts.deploy).toContain(PROVIDER_IMPORTS);

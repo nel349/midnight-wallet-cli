@@ -3,6 +3,7 @@ import * as path from 'path';
 import { homedir } from 'os';
 import { MIDNIGHT_DIR, DEFAULT_CONFIG_FILENAME, DIR_MODE, FILE_MODE, isValidWalletName } from './constants.ts';
 import { type NetworkName, isValidNetworkName } from './network.ts';
+import { UsageError } from './errors.ts';
 
 /** Endpoint overrides for one network. Keys mirror the flag/config names. */
 export interface NetworkEndpointOverrides {
@@ -175,14 +176,15 @@ export function saveCliConfig(config: CliConfig, configDir?: string): void {
  * Endpoint keys are network-scoped: returns the value that applies to the
  * currently configured network (scoped entry first, then the legacy flat key).
  */
-export function getConfigValue(key: string, configDir?: string): string {
+export function getConfigValue(key: string, configDir?: string, scope?: NetworkName): string {
   const canonical = resolveConfigKey(key);
   const config = loadCliConfig(configDir);
+  assertScopeApplies(canonical, scope);
 
   if (canonical === 'network') return config.network;
   if (canonical === 'wallet') return config.wallet ?? '(not set)';
   if (ENDPOINT_KEYS.has(canonical)) {
-    const overrides = getEndpointOverridesForNetwork(config, config.network);
+    const overrides = getEndpointOverridesForNetwork(config, scope ?? config.network);
     const value = overrides[canonical as keyof NetworkEndpointOverrides];
     return typeof value === 'string' ? value : '(not set)';
   }
@@ -222,9 +224,10 @@ function migrateFlatEndpointsToScope(config: CliConfig, networkName: NetworkName
  * two can't diverge. Switching `network` first migrates legacy flat endpoint
  * keys into the old network's scope — they were set while using it.
  */
-export function setConfigValue(key: string, value: string, configDir?: string): void {
+export function setConfigValue(key: string, value: string, configDir?: string, scope?: NetworkName): void {
   const canonical = resolveConfigKey(key);
   const config = loadCliConfig(configDir);
+  assertScopeApplies(canonical, scope);
 
   if (canonical === 'network') {
     if (!isValidNetworkName(value)) {
@@ -248,10 +251,12 @@ export function setConfigValue(key: string, value: string, configDir?: string): 
       );
     }
     const k = canonical as keyof NetworkEndpointOverrides;
-    const scoped: NetworkEndpointOverrides = { ...(config.networks?.[config.network] ?? {}) };
+    const target = scope ?? config.network;
+    const scoped: NetworkEndpointOverrides = { ...(config.networks?.[target] ?? {}) };
     scoped[k] = value;
-    config.networks = { ...(config.networks ?? {}), [config.network]: scoped };
-    delete config[k];
+    config.networks = { ...(config.networks ?? {}), [target]: scoped };
+    // A legacy flat key applies to the selected network only.
+    if (target === config.network) delete config[k];
   } else {
     throw new Error(
       `Unknown config key: "${key}"\nValid keys: ${VALID_CONFIG_KEYS.join(', ')}`
@@ -268,9 +273,10 @@ export function setConfigValue(key: string, value: string, configDir?: string): 
  * legacy flat key (so one unset reliably clears whatever was applying).
  * For other optional keys: removes the key entirely.
  */
-export function unsetConfigValue(key: string, configDir?: string): void {
+export function unsetConfigValue(key: string, configDir?: string, scope?: NetworkName): void {
   const canonical = resolveConfigKey(key);
   const config = loadCliConfig(configDir);
+  assertScopeApplies(canonical, scope);
 
   if (canonical === 'network') {
     config.network = DEFAULT_CLI_CONFIG.network;
@@ -278,12 +284,13 @@ export function unsetConfigValue(key: string, configDir?: string): void {
     delete config.wallet;
   } else if (ENDPOINT_KEYS.has(canonical)) {
     const k = canonical as keyof NetworkEndpointOverrides;
-    delete config[k];
-    const scoped = config.networks?.[config.network];
+    const target = scope ?? config.network;
+    if (target === config.network) delete config[k];
+    const scoped = config.networks?.[target];
     if (scoped) {
       delete scoped[k];
       if (Object.keys(scoped).length === 0) {
-        delete config.networks![config.network];
+        delete config.networks![target];
         if (Object.keys(config.networks!).length === 0) delete config.networks;
       }
     }
@@ -294,6 +301,13 @@ export function unsetConfigValue(key: string, configDir?: string): void {
   }
 
   saveCliConfig(config, configDir);
+}
+
+/** A network scope (`--network`) only means something for the per-network endpoint keys. */
+function assertScopeApplies(canonical: string, scope: NetworkName | undefined): void {
+  if (scope !== undefined && !ENDPOINT_KEYS.has(canonical)) {
+    throw new UsageError(`--network only applies to the endpoint keys (${[...ENDPOINT_KEYS].join(', ')}), not "${canonical}".`);
+  }
 }
 
 export function getValidConfigKeys(): readonly string[] {

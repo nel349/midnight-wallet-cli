@@ -144,6 +144,11 @@ export class LocalnetUnavailableError extends Error {
   }
 }
 
+/** Throw LocalnetUnavailableError when this build can't start a local network (ledger 9: it can't). */
+export function assertLocalnetCanStart(): void {
+  if (!LOCALNET_CAN_START) throw new LocalnetUnavailableError();
+}
+
 /**
  * Write compose.yml to LOCALNET_DIR if it doesn't exist or the version has changed.
  * Returns true if the file was written, false if it was already up to date.
@@ -152,7 +157,7 @@ export class LocalnetUnavailableError extends Error {
  * ledger-9 build refuses, before anything is written or started.
  */
 export function ensureComposeFile(): boolean {
-  if (!LOCALNET_CAN_START) throw new LocalnetUnavailableError();
+  assertLocalnetCanStart();
   const versionMatches =
     existsSync(VERSION_PATH) &&
     existsSync(COMPOSE_PATH) &&
@@ -262,19 +267,50 @@ export function getComposePath(): string {
 // Container names used in compose.yml — these are the hardcoded container_name values
 export const CONTAINER_NAMES = ['node', 'indexer', 'proof-server'] as const;
 
+/** The compose project mn's localnet containers belong to: compose names it after the compose file's directory. */
+export const LOCALNET_PROJECT = LOCALNET_DIR_NAME;
+
+/** A container with one of mn's container names, and the compose project that created it ('' if none). */
+export interface NamedContainer {
+  name: string;
+  project: string;
+}
+
+/** Which of the containers bearing mn's names are mn's to remove: only those of mn's own compose project. */
+export function partitionLocalnetContainers(found: readonly NamedContainer[]): { remove: string[]; keep: NamedContainer[] } {
+  return {
+    remove: found.filter((c) => c.project === LOCALNET_PROJECT).map((c) => c.name),
+    keep: found.filter((c) => c.project !== LOCALNET_PROJECT),
+  };
+}
+
 /**
- * Force-remove containers by name, regardless of which compose project created them.
- * Returns the names of containers that were actually removed.
+ * Remove the containers named like mn's localnet services that mn's compose
+ * project created (also from an older mn). A container with one of those
+ * generic names from anything else is left alone and returned in `kept`.
  */
-export function removeConflictingContainers(): string[] {
-  const removed: string[] = [];
+export function removeConflictingContainers(): { removed: string[]; kept: NamedContainer[] } {
+  const found: NamedContainer[] = [];
   for (const name of CONTAINER_NAMES) {
+    try {
+      const project = execSync(
+        `docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "${name}"`,
+        { ...EXEC_OPTIONS, timeout: 10_000 },
+      ).toString().trim();
+      found.push({ name, project: project === '<no value>' ? '' : project });
+    } catch {
+      // No container with that name — fine
+    }
+  }
+  const { remove, keep } = partitionLocalnetContainers(found);
+  const removed: string[] = [];
+  for (const name of remove) {
     try {
       execSync(`docker rm -f "${name}"`, { ...EXEC_OPTIONS, timeout: 10_000 });
       removed.push(name);
     } catch {
-      // Container doesn't exist or already removed — fine
+      // Already gone — fine
     }
   }
-  return removed;
+  return { removed, kept: keep };
 }

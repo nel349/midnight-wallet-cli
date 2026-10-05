@@ -17,6 +17,7 @@ import { start as startSpinner, type Spinner } from '../ui/spinner.ts';
 function silentSpinner(): Spinner {
   return { update() {}, stop() {}, fail() {}, log() {} };
 }
+import { validateCallRequest, validateContractAddress } from '../lib/contract/validate.ts';
 import {
   findContractInfo,
   formatCircuitSignature,
@@ -385,6 +386,8 @@ async function handleCall(args: ParsedArgs): Promise<void> {
       throw new UsageError(`Invalid --args JSON: ${(err as Error).message}`);
     }
   }
+  validateContractAddress(address);
+  validateCallRequest(info, circuit, callArgs);
 
   const target = await contractNetwork(args, 'call');
   const { network, networkConfig } = target;
@@ -443,6 +446,7 @@ async function handleState(args: ParsedArgs): Promise<void> {
   const scanDir = resolveScanDir(args);
   const contractName = getFlag(args, 'name');
   const address = requireFlag(args, 'address', 'contract address');
+  validateContractAddress(address);
 
   const { runState } = await import('../lib/contract/runner.ts');
 
