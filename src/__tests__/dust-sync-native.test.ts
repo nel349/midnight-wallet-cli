@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -50,9 +50,12 @@ describe('adaptResult (sidecar checkpoint → DustDirectResult)', () => {
   });
 
   it('maps a real funded dust state to the correct balance, coins, and retention', () => {
-    const r = adaptResult(cpFor(DUST_STATE_OWNED_HEX));
-    // Real fixture: one capped dust UTXO worth 500 (5e17 atomic).
-    expect(r.balance).toBe(500_000_000_000_000_000n);
+    // Real ledger-9 fixture: one dust UTXO still generating, so its balance
+    // depends on time; read it at the state's own sync time.
+    vi.useFakeTimers({ now: new Date('2026-10-05T06:14:30.000Z') });
+    let r: ReturnType<typeof adaptResult>;
+    try { r = adaptResult(cpFor(DUST_STATE_OWNED_HEX)); } finally { vi.useRealTimers(); }
+    expect(r.balance).toBe(1_436_566_695_496_744n);
     expect(r.availableCoins).toBe(1);
     expect(r.ownedUtxoCount).toBe(1);
     // Metadata passes through unchanged.
