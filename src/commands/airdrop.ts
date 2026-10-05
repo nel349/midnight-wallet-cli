@@ -238,8 +238,8 @@ async function unshieldedAirdrop(
     process.stderr.write('\n' + divider() + '\n');
     process.stderr.write(dim('  Verify:         midnight balance') + '\n');
     process.stderr.write(dim('  Register dust:  midnight dust register') + '\n');
-    process.stderr.write(dim('  Note: Dust generation takes a few minutes on a fresh wallet.') + '\n');
-    process.stderr.write(dim('        It will happen automatically on your first transfer.') + '\n\n');
+    process.stderr.write(dim('  Note: registering pays its fee from Dust this NIGHT generates, so it waits longer the less NIGHT')
+      + '\n' + dim('        there is (about a minute for 1000 NIGHT). dust register says how long.') + '\n\n');
   } catch (err) {
     spinner.fail('Failed');
     if (err instanceof Error && err.message.toLowerCase().includes('dust')) {

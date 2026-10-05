@@ -27,6 +27,8 @@ export const ERROR_CODES = {
   /** Chain rejected the dust spend proof as malformed (substrate "Custom error 170" / `InvalidDustSpendProof`). Almost always a stale commitment tree. Recovery: `mn cache clear --wallet <name>` then retry. */
   INVALID_DUST_PROOF: 'INVALID_DUST_PROOF',
   DUST_REQUIRED: 'DUST_REQUIRED',
+  /** A Dust registration can't pay its fee yet: the wallet's NIGHT hasn't generated enough Dust. Recovery: run `mn dust register` again at the time the message gives, or add NIGHT. */
+  DUST_GENERATING: 'DUST_GENERATING',
   /** Long-running wallet sync exceeded its deadline. On hosted networks this is most common during the first cold sync; retrying usually progresses since the cache resumes from the last applied event. */
   SYNC_TIMEOUT: 'SYNC_TIMEOUT',
   CANCELLED: 'CANCELLED',
@@ -65,6 +67,9 @@ export function classifyError(err: Error): ClassifiedError {
   const code = (err as { code?: unknown }).code;
   if (typeof code === 'string' && SETUP_ERROR_CODES.has(code)) {
     return { exitCode: EXIT_NETWORK_ERROR, errorCode: code as ErrorCode };
+  }
+  if (code === ERROR_CODES.DUST_GENERATING) {
+    return { exitCode: EXIT_INSUFFICIENT_BALANCE, errorCode: ERROR_CODES.DUST_GENERATING };
   }
 
   const msg = (err.message ?? '').toLowerCase();

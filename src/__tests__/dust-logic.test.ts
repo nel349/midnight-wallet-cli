@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as rx from 'rxjs';
 
 import { isDustRelatedError, ensureDust, registerNightUtxos } from '../lib/transfer.ts';
+import { DustFeeNotGeneratedError } from '../lib/dust-registration-plan.ts';
 import type { FacadeBundle } from '../lib/facade.ts';
 import type { DustAddress } from '@midnightntwrk/wallet-sdk/address-format';
 import type { UtxoWithMeta } from '@midnightntwrk/wallet-sdk/facade';
@@ -368,6 +369,41 @@ describe('registerNightUtxos', () => {
     vi.useRealTimers();
   });
 
+  // Figures from a ledger-9 localnet: 20 NIGHT, 34 minutes after the airdrop.
+  const FEE = 526_587_115_818_352n;
+  const estimate = (generatedNow: bigint) => async () => ({
+    fee: FEE,
+    dustGenerationEstimations: [{ dust: { generatedNow, rate: 165_340_000_000n, maxCap: 100_000_000_000_000_000n } }],
+  });
+
+  it('refuses at once, saying when to retry, when the NIGHT needs longer than mn waits to generate the fee', async () => {
+    const registerSpy = vi.fn();
+    const waitForGeneratedDust = vi.fn();
+    // Just airdropped: nothing generated, so the fee takes about 53 minutes (mn waits at most 10).
+    const bundle = createBundleStub({ estimateRegistration: estimate(0n), registerNightUtxos: registerSpy, waitForGeneratedDust });
+
+    const err: any = await registerNightUtxos(bundle, [NIGHT_UTXO], DUST_ADDRESS).catch((e) => e);
+
+    expect(err).toBeInstanceOf(DustFeeNotGeneratedError);
+    expect(err.message).toContain('so the fee is covered in about 54 minutes');
+    expect(waitForGeneratedDust).not.toHaveBeenCalled();
+    expect(registerSpy).not.toHaveBeenCalled();
+  });
+
+  it('says how long it will wait, then registers, when the fee is generated within mn\'s wait', async () => {
+    const statuses: string[] = [];
+    const waitForGeneratedDust = vi.fn().mockResolvedValue(undefined);
+    const submitTransaction = vi.fn().mockResolvedValue('reg-tx');
+    // 34 minutes in: about 20 minutes to go... too long; 50 minutes in: about 4 minutes to go.
+    const generatedAt50Min = 165_340_000_000n * 50n * 60n;
+    const bundle = createBundleStub({ estimateRegistration: estimate(generatedAt50Min), waitForGeneratedDust, submitTransaction });
+
+    await expect(registerNightUtxos(bundle, [NIGHT_UTXO], DUST_ADDRESS, (s) => statuses.push(s))).resolves.toBe('reg-tx');
+
+    expect(statuses[0]).toBe('Waiting for the NIGHT to generate the 0.526587115818352 DUST registration fee (about 4 minutes)...');
+    expect(waitForGeneratedDust).toHaveBeenCalledWith([NIGHT_UTXO], FEE, expect.anything());
+  });
+
   it('succeeds on first attempt: proves the SDK recipe, then submits the proven tx', async () => {
     const recipe = { type: 'UNPROVEN_TRANSACTION' };
     const finalized = { finalized: true };
@@ -401,7 +437,11 @@ describe('registerNightUtxos', () => {
 
   it('waits for the coins to generate the estimated fee before registering them', async () => {
     const calls: string[] = [];
-    const estimateRegistration = vi.fn(async () => { calls.push('estimate'); return { fee: 777n, dustGenerationEstimations: [] }; });
+    // One estimate per UTXO, as the SDK returns: the fee is generated about a second from now.
+    const estimateRegistration = vi.fn(async () => {
+      calls.push('estimate');
+      return { fee: 777n, dustGenerationEstimations: [{ dust: { generatedNow: 700n, rate: 100n, maxCap: 10_000n } }] };
+    });
     const waitForGeneratedDust = vi.fn(async () => { calls.push('wait'); });
     const registerSpy = vi.fn(async () => { calls.push('register'); return { type: 'UNPROVEN_TRANSACTION' }; });
     const bundle = createBundleStub({ estimateRegistration, waitForGeneratedDust, registerNightUtxos: registerSpy });
@@ -409,7 +449,8 @@ describe('registerNightUtxos', () => {
     const nightUtxos = [NIGHT_UTXO];
     await registerNightUtxos(bundle, nightUtxos, DUST_ADDRESS);
 
-    expect(calls).toEqual(['estimate', 'wait', 'register']);
+    // The first estimate plans the wait; each attempt estimates again, since the fee drifts.
+    expect(calls).toEqual(['estimate', 'estimate', 'wait', 'register']);
     expect(estimateRegistration).toHaveBeenCalledWith(nightUtxos);
     const [waitUtxos, required, opts] = waitForGeneratedDust.mock.calls[0] as unknown as [unknown, bigint, { timeoutMs: number }];
     expect(waitUtxos).toBe(nightUtxos);

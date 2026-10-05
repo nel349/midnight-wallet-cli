@@ -130,6 +130,8 @@ export function validateRecipientAddress(address: string, networkConfig: Network
 // that still import from this module.
 export { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts';
 import { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts';
+import { DustFeeNotGeneratedError, formatWait, planRegistration } from './dust-registration-plan.ts';
+import { toDust } from '../ui/format.ts';
 
 /** Format dust specks to human-readable DUST string (e.g. "0.300000"). Lib-layer safe (no UI import). */
 function dustToString(specks: bigint): string {
@@ -234,12 +236,24 @@ export async function registerNightUtxos(
   let lastError: Error | undefined;
   let retrying = false;
 
+  // The registration pays its fee from the Dust these UTXOs generate: say up
+  // front how long that takes, and don't wait when it outlasts the deadline.
+  const { fee, dustGenerationEstimations } = await bundle.facade.estimateRegistration(nightUtxos);
+  const plan = planRegistration(fee, dustGenerationEstimations);
+  if (plan.waitMs === null || plan.waitMs > deadline - Date.now()) {
+    throw new DustFeeNotGeneratedError(plan, new Date());
+  }
+  const waitNote = plan.waitMs > 0 ? `, fee covered in ${formatWait(plan.waitMs)}` : '';
+  if (plan.waitMs > 0) {
+    onStatus?.(`Waiting for the NIGHT to generate the ${toDust(plan.fee)} DUST registration fee (${formatWait(plan.waitMs)})...`);
+  }
+
   // Once in retry mode, tick the elapsed timer every second so the spinner
   // updates continuously — during the sleep AND during submission attempts.
   const elapsedInterval = setInterval(() => {
     if (retrying && onStatus) {
       const elapsed = formatElapsed(Date.now() - startTime);
-      onStatus(`Waiting for dust generation capacity (${elapsed} elapsed, ~5 min on fresh wallets)...`);
+      onStatus(`Waiting for dust generation capacity (${elapsed} elapsed${waitNote})...`);
     }
   }, 1_000);
 
@@ -252,7 +266,7 @@ export async function registerNightUtxos(
         if (isDustRelatedError(err) && Date.now() + DUST_REGISTRATION_RETRY_DELAY_MS < deadline) {
           retrying = true;
           const elapsed = formatElapsed(Date.now() - startTime);
-          onStatus?.(`Waiting for dust generation capacity (${elapsed} elapsed, ~5 min on fresh wallets)...`);
+          onStatus?.(`Waiting for dust generation capacity (${elapsed} elapsed${waitNote})...`);
           await new Promise(resolve => setTimeout(resolve, DUST_REGISTRATION_RETRY_DELAY_MS));
           continue;
         }
