@@ -24,15 +24,14 @@ export const COMMAND_FLAGS: Readonly<Record<string, readonly string[]>> = {
   'genesis-address': ['network'],
   'help': ['agent', 'intro', 'no-intro'],
   'info': ['network', 'wallet'],
-  'inspect-cost': [],
+  'inspect-cost': ['network', ...ENDPOINTS],
   'localnet': ['tail'],
   'manual': ['no-pager', 'raw'],
   'serve': ['approve-all', 'approve-fees', 'force-shielded', 'max-fee', 'max-pending', 'network', 'no-auto-approve-reads', 'no-cache', 'port', 'verbose', 'wallet', ...ENDPOINTS],
   'status': ['all', 'network', 'watch'],
   'test': [
     'all', 'browser-mode', 'build-cmd', 'build-dir', 'force', 'goal', 'name', 'network', 'no-ai',
-    'path', 'port', 'redeploy', 'screen', 'strategy', 'suite', 'url',
-  ],
+    'path', 'port', 'redeploy', 'screen', 'strategy', 'suite', 'url', ...ENDPOINTS],
   'transfer': ['force-shielded', 'network', 'no-cache', 'shielded', 'verbose', 'wallet', ...ENDPOINTS],
   'wallet': ['entropy', 'force', 'mnemonic', 'network', 'seed', 'wallet'],
 };

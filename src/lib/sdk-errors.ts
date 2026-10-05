@@ -85,3 +85,14 @@ export function isSdkInsufficientFundsError(err: any): boolean {
   if (tag === 'Wallet.InsufficientFunds') return true;
   return msg === 'insufficient funds' || msg.startsWith('insufficient funds');
 }
+
+/**
+ * The SDK's cold-start race: it refused for lack of NIGHT although the wallet
+ * has it, because its coin index wasn't built yet; restarting the facade
+ * fixes it. A Dust shortage reads alike ("Insufficient Funds: could not
+ * balance dust") but is real: only waiting for Dust fixes it, and repeated
+ * facade restarts for it crashed the ledger WASM ("unreachable").
+ */
+export function isColdStartRace(err: unknown): boolean {
+  return isSdkInsufficientFundsError(err) && !isDustShortage(err);
+}

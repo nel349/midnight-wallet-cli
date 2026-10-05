@@ -129,19 +129,12 @@ export function validateRecipientAddress(address: string, networkConfig: Network
 // can import them without a circular dependency. Re-exported for callers
 // that still import from this module.
 export { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts';
-import { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts';
+import { isColdStartRace, isDustRelatedError } from './sdk-errors.ts';
 import { DustFeeNotGeneratedError, formatWait, planRegistration } from './dust-registration-plan.ts';
 import { assertChainClockCurrent, fetchChainTime } from './chain-clock.ts';
+import { awaitDustForFee } from './dust-wait.ts';
 import { toDust } from '../ui/format.ts';
 
-/** Format dust specks to human-readable DUST string (e.g. "0.300000"). Lib-layer safe (no UI import). */
-function dustToString(specks: bigint): string {
-  const abs = specks < 0n ? -specks : specks;
-  const whole = abs / 1_000_000_000_000_000n;
-  const frac = abs % 1_000_000_000_000_000n;
-  const sign = specks < 0n ? '-' : '';
-  return `${sign}${whole}.${frac.toString().padStart(15, '0').slice(0, 6)}`;
-}
 
 /** Format milliseconds as "Xs" or "Xm Ys" for human-friendly elapsed display. */
 function formatElapsed(ms: number): string {
@@ -464,10 +457,11 @@ async function buildAndSubmitTransfer(
         continue;
       }
 
-      // SDK "insufficient funds" means the internal coin index is empty
-      // even though we pre-flight-checked the balance. Bubble up — the
-      // outer retry in executeTransfer will restart the facade.
-      if (isSdkInsufficientFundsError(err)) {
+      // SDK "insufficient funds" (of NIGHT) means the internal coin index is
+      // empty even though we pre-flight-checked the balance. Bubble up — the
+      // outer retry will restart the facade. A Dust shortage is not that: it
+      // goes to the Dust path below, which waits for the fee.
+      if (isColdStartRace(err)) {
         throw err;
       }
 
@@ -477,16 +471,8 @@ async function buildAndSubmitTransfer(
         onDust?.(`Dust insufficient, re-ensuring (${elapsed} elapsed)...`);
         try {
           const freshState = await quickSync(bundle, 'lite');
-          // Fail fast if dust is below fee threshold — retrying won't help
-          const dustBal = freshState.dust.balance(new Date());
-          if (dustBal > 0n && dustBal < MIN_DUST_FOR_TRANSFER) {
-            throw new Error(
-              `Insufficient dust for transaction fees.\n` +
-              `Available: ${dustToString(dustBal)} DUST, need ≥${dustToString(MIN_DUST_FOR_TRANSFER)} DUST.\n` +
-              `Dust regenerates over time from registered NIGHT UTXOs.\n` +
-              `Check status: midnight dust status`
-            );
-          }
+          // Below the fee threshold: wait when the Dust is moments away, else fail fast.
+          await awaitDustForFee(freshState.dust, MIN_DUST_FOR_TRANSFER, onDust);
           await ensureDust(bundle, onDust, freshState);
         } catch (retryErr: any) {
           // Re-throw "Insufficient dust" immediately — not retryable
@@ -556,22 +542,17 @@ export async function executeTransfer(params: TransferParams): Promise<TransferR
           );
         }
 
-        // Pre-flight dust-below-threshold check. Facade restart won't change
-        // this outcome, so fail fast here.
-        const initialDustBalance = state.dust.balance(new Date());
-        if (initialDustBalance > 0n && initialDustBalance < MIN_DUST_FOR_TRANSFER) {
-          throw new Error(
-            `Insufficient dust for transaction fees.\n` +
-            `Available: ${dustToString(initialDustBalance)} DUST, need ≥${dustToString(MIN_DUST_FOR_TRANSFER)} DUST.\n` +
-            `Dust regenerates over time from registered NIGHT UTXOs.\n` +
-            `Check status: midnight dust status`
-          );
-        }
+        // Pre-flight: below the fee threshold, wait when the Dust is moments
+        // away (just after registering), else fail fast with how long it takes.
+        await awaitDustForFee(state.dust, MIN_DUST_FOR_TRANSFER, onDust, signal);
 
         if (signal?.aborted) throw new Error('Operation cancelled');
 
         verbose('transfer', 'Ensuring dust availability...');
         await ensureDust(bundle, onDust, state);
+        // ensureDust returns once any Dust shows (right after registering
+        // that can be less than the fee): wait for the fee on current state.
+        await awaitDustForFee((await bundle.facade.waitForSyncedState()).dust, MIN_DUST_FOR_TRANSFER, onDust, signal);
         verbose('transfer', 'Dust available');
 
         if (signal?.aborted) throw new Error('Operation cancelled');

@@ -305,8 +305,9 @@ describe('genesis-address --json', () => {
 // ── inspect-cost --json ───────────────────────────────────
 describe('inspect-cost --json', () => {
   it('outputs valid JSON with all 5 dimensions', async () => {
-    const args = parseArgs(['inspect-cost', '--json']);
-    await inspectCostCommand(args);
+    const local = await localIndexerFlags();
+    const args = parseArgs(['inspect-cost', '--json', ...local.flags]);
+    await inspectCostCommand(args).finally(local.close);
     const data = parseJsonOutput();
 
     expect(data.readTime).toBeDefined();
@@ -322,8 +323,9 @@ describe('inspect-cost --json', () => {
   });
 
   it('produces no stderr output', async () => {
-    const args = parseArgs(['inspect-cost', '--json']);
-    await inspectCostCommand(args);
+    const local = await localIndexerFlags();
+    const args = parseArgs(['inspect-cost', '--json', ...local.flags]);
+    await inspectCostCommand(args).finally(local.close);
     expect(io.stderr()).toBe('');
   });
 });
@@ -430,3 +432,12 @@ describe('help --json', () => {
     }
   });
 });
+
+/** A local indexer serving real ledger-9 parameters, and the endpoint flags that point inspect-cost at it. */
+async function localIndexerFlags(): Promise<{ flags: string[]; close: () => Promise<void> }> {
+  const { startLocalIndexer } = await import('./helpers/local-indexer.ts');
+  const { LEDGER9_PARAMETERS_HEX } = await import('./fixtures/ledger9-parameters.ts');
+  const indexer = await startLocalIndexer(() => JSON.stringify({ data: { block: { height: 26919, ledgerParameters: LEDGER9_PARAMETERS_HEX } } }));
+  const ws = indexer.url.replace(/^http:/, 'ws:') + '/ws';
+  return { flags: ['--network', 'undeployed', '--indexer-ws', ws, '--node', 'ws://127.0.0.1:9', '--proof-server', 'http://127.0.0.1:9'], close: indexer.close };
+}

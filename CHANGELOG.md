@@ -2,6 +2,15 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **A transfer right after registering for Dust waits for the fee instead of crashing.** Straight after registering, a wallet holds less Dust than a transfer's fee (about 0.6 against 0.85 DUST for 1000 NIGHT). The SDK's Dust shortage was taken for its cold-start race, so mn rebuilt the wallet up to five times; on a ledger-9 localnet that ran for 9 minutes and ended in a ledger WASM crash ("unreachable"). A Dust shortage now goes to the Dust path: mn waits when the fee is covered within 2 minutes, saying how long, and otherwise fails at once saying how long it would take.
+- **`inspect-cost` reports the chain's block limits.** It derived them from the built-in initial ledger parameters; it now reads the parameters of the chain's latest block (on a ledger-9 localnet the read-time and block-usage limits are 2x and 5x the initial ones), and `--json` adds the network and block height. It takes `--network` and the endpoint flags.
+- **The Dust and shielded caches notice a chain reset.** A local chain restarted with the same genesis hash passed the chain-id check, so a cache could resume past the chain's last event and serve its old state as current. mn now compares each cache's last event with the indexer's latest one and re-syncs when the cache is ahead (the unshielded cache already had this check).
+- **The transfer Dust threshold matches ledger 9.** A 1 NIGHT transfer cost about 0.85 DUST on a ledger-9 localnet, so the pre-flight minimum is 0.9 DUST (it was 0.8, measured on ledger 8).
+
 ## [0.6.0-rc.2] - 2026-10-05
 
 ### Fixed

@@ -24,11 +24,11 @@ export const DUST_FEE_BLOCKS_MARGIN = 5;
 
 // Minimum dust balance for a transfer transaction.
 // The actual fee = feesWithMargin(tx, ledgerParams, feeBlocksMargin) + DUST_COST_OVERHEAD.
-// We can't compute the exact feesWithMargin without building the transaction, but
-// observed costs are ~0.5 DUST per unshielded transfer. 0.6 DUST gives headroom.
-// Used as a pre-flight check to fail fast instead of entering the SDK's internal
-// balancing which hangs or retries uselessly when dust is too low.
-export const MIN_DUST_FOR_TRANSFER = 800_000_000_000_000n;
+// We can't compute the exact feesWithMargin without building the transaction;
+// a 1 NIGHT unshielded transfer cost ~0.85 DUST on a ledger-9 localnet
+// (2026-10-05), so 0.9 DUST. Used as a pre-flight check: below it the transfer
+// waits for Dust that is moments away, or fails fast with how long it takes.
+export const MIN_DUST_FOR_TRANSFER = 900_000_000_000_000n;
 
 // Initial dust-accrual parameters (protocol constants, matching the ledger's
 // INITIAL_PARAMETERS). Single source of truth: the direct dust readers build a

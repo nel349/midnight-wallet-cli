@@ -19,6 +19,7 @@ import * as ledger from '@midnightntwrk/ledger-v9';
 import { MIDNIGHT_DIR, CACHE_DIR_NAME, DIR_MODE, FILE_MODE } from './constants.ts';
 import { deriveShieldedSeed } from './derivation.ts';
 import { readShieldedBalanceDirect, type ShieldedDirectOptions } from './shielded-direct.ts';
+import { fetchEventTip, isCursorBeyondTip } from './event-tip.ts';
 
 // v2: ledger-9 states replace ledger-8 ones. Dev-preset localnets share a genesis
 // hash, so the chain-id guard can't keep a ledger-8 cache off a ledger-9 chain.
@@ -214,7 +215,12 @@ export async function readShieldedBalanceCached(
   const secretKeys = ledger.ZswapSecretKeys.fromSeed(deriveShieldedSeed(seedBuffer));
   const pubkeyHex = secretKeys.coinPublicKey;
 
-  const cached = options.forceFresh ? null : loadShieldedCache(network, pubkeyHex, undefined, options.chainId);
+  let cached = options.forceFresh ? null : loadShieldedCache(network, pubkeyHex, undefined, options.chainId);
+  // A cursor past the chain's latest event: the chain was reset under the cache.
+  if (cached && isCursorBeyondTip(cached.lastAppliedEventId, await fetchEventTip(indexerWS, 'zswap'))) {
+    clearShieldedDirectCache(network, pubkeyHex);
+    cached = null;
+  }
   const startFromId = cached ? cached.lastAppliedEventId + 1 : 0;
 
   const result = await readShieldedBalanceDirect(secretKeys, indexerWS, {

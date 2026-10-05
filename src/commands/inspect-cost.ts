@@ -1,11 +1,14 @@
-// inspect-cost command — display current block limits from LedgerParameters
-// Uses the probeDimension technique from reference implementation
+// inspect-cost command — display the chain's current block limits, from the
+// ledger parameters of its latest block. Uses the probeDimension technique
+// from the reference implementation.
 
 import { type ParsedArgs, hasFlag } from '../lib/argv.ts';
 import * as ledger from '@midnightntwrk/ledger-v9';
 import { header, keyValue, divider } from '../ui/format.ts';
 import { bold, dim } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
+import { resolveNetwork } from '../lib/resolve-network.ts';
+import { fetchLedgerParameters } from '../lib/chain-params.ts';
 
 interface SyntheticCost {
   readTime: bigint;
@@ -58,12 +61,13 @@ const UNITS: Record<string, string> = {
 };
 
 export default async function inspectCostCommand(args: ParsedArgs): Promise<void> {
-  const params = ledger.LedgerParameters.initialParameters();
+  const { name: networkName, config } = resolveNetwork({ args });
+  const { height, params } = await fetchLedgerParameters(config.indexer);
   const limits = deriveBlockLimits(params);
 
   // JSON mode
   if (hasFlag(args, 'json')) {
-    writeJsonResult(limits);
+    writeJsonResult({ ...limits, network: networkName, height });
     return;
   }
 
@@ -74,7 +78,7 @@ export default async function inspectCostCommand(args: ParsedArgs): Promise<void
 
   // Formatted details to stderr
   process.stderr.write('\n' + header('Block Limits') + '\n\n');
-  process.stderr.write(dim('  Derived from LedgerParameters.initialParameters()') + '\n\n');
+  process.stderr.write(dim(`  From the ledger parameters of block ${height} on ${networkName}`) + '\n\n');
 
   for (const [dimension, value] of Object.entries(limits)) {
     const unit = UNITS[dimension] ?? '';

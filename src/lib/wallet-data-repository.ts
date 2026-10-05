@@ -31,7 +31,7 @@ import {
   type FacadeBundle,
   type SyncMode,
 } from './facade.ts';
-import { isSdkInsufficientFundsError } from './sdk-errors.ts';
+import { isColdStartRace } from './sdk-errors.ts';
 import {
   loadDustCache,
   saveDustCache,
@@ -54,6 +54,7 @@ import { verbose } from './verbose.ts';
 import { callNodeRpc } from './node-rpc.ts';
 import { deriveDustSeed } from './derivation.ts';
 import { deriveUnshieldedAddress } from './derive-address.ts';
+import { fetchEventTip, isCursorBeyondTip } from './event-tip.ts';
 
 // ── Public types ──────────────────────────────────────────
 
@@ -260,6 +261,12 @@ export class WalletDataRepository {
     const chainId = currentChainId ?? undefined;
 
     let cached = opts.forceFresh ? null : loadDustCache(networkName, pubkeyHex, this.cacheDir);
+    // A cursor past the chain's latest event: the chain was reset under the
+    // cache (the genesis check above can't tell when the hash is reused).
+    if (cached && isCursorBeyondTip(cached.lastAppliedEventId, await fetchEventTip(network.indexerWS, 'dust'))) {
+      clearDustDirectCache(networkName, pubkeyHex, this.cacheDir);
+      cached = null;
+    }
     const startedFromCache = cached !== null;
     let totalEventsApplied = 0;
     let lastAppliedEventId = cached?.lastAppliedEventId ?? -1;
@@ -494,7 +501,9 @@ export class WalletDataRepository {
           result = await fn({ bundle, state: syncedState });
           break;
         } catch (err) {
-          const canRetry = writeMode && attempt < COLD_START_MAX_ATTEMPTS && isSdkInsufficientFundsError(err);
+          // A Dust shortage is real, not the cold-start race: rebuilding the
+          // facade can't fix it (and repeated rebuilds crashed the ledger WASM).
+          const canRetry = writeMode && attempt < COLD_START_MAX_ATTEMPTS && isColdStartRace(err);
           if (!canRetry) throw err;
           opts.onStatus?.(`Refreshing wallet state (attempt ${attempt + 1}/${COLD_START_MAX_ATTEMPTS})...`);
           await stopFacade(bundle).catch(() => {});

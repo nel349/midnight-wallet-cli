@@ -59,7 +59,8 @@ describe('COMMAND_FLAGS matches the code', () => {
   const LITERAL_READ = /(?:getFlag|hasFlag|requireFlag)\(\s*\w+\s*,\s*['"]([a-z0-9-]+)['"]/g;
   // Shared helpers that read flags on the command's behalf.
   const HELPER_FLAGS: Record<string, string[]> = {
-    'resolveNetwork(': ['network'],
+    // resolveNetwork also takes each endpoint from its flag before config.
+    'resolveNetwork(': ['network', 'node', 'indexer-ws', 'proof-server'],
     'resolveNetworkName(': ['network'],
     'resolveSeedSource(': ['seed', 'wallet'],
     'resolveSeed(': ['seed', 'wallet'],

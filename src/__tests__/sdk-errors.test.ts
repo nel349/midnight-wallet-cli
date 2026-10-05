@@ -3,7 +3,7 @@
 // (an Effect tagged error carrying tokenType), not just matching strings.
 
 import { describe, it, expect } from 'vitest';
-import { isDustShortage } from '../lib/sdk-errors.ts';
+import { isColdStartRace, isDustShortage } from '../lib/sdk-errors.ts';
 
 /** wallet-sdk 2.0's dust InsufficientFundsError: tagged, with the token it could not balance. */
 function sdkInsufficientFunds(tokenType: string): Error {
@@ -86,5 +86,27 @@ describe('isDustShortage on what the real wallet SDK rejects with', () => {
       right: { _tag: 'Fail', error: { _tag: 'Wallet.InsufficientFunds', tokenType: 'dust' } },
     }, 'several failures');
     expect(isDustShortage(err)).toBe(true);
+  });
+});
+
+describe('isColdStartRace', () => {
+  // The FiberFailure shape wallet-sdk 2.0.0-rc.0 rejected with on a ledger-9 localnet.
+  const fiberFailure = (tokenType: string) => {
+    const err = new Error(`Insufficient Funds: could not balance ${tokenType}`);
+    err.name = '(FiberFailure) Wallet.InsufficientFunds';
+    return Object.assign(err, { [Symbol.for('effect/Runtime/FiberFailure/Cause')]: { _tag: 'Fail', error: { _tag: 'Wallet.InsufficientFunds', tokenType } } });
+  };
+
+  it('is a NIGHT shortage while the wallet holds NIGHT: restarting the facade fixes it', () => {
+    expect(isColdStartRace(fiberFailure('0'.repeat(64)))).toBe(true);
+    expect(isColdStartRace(new Error('Insufficient funds'))).toBe(true);
+  });
+
+  it('is not a Dust shortage, which only waiting for Dust fixes (found live: restarts crashed the ledger WASM)', () => {
+    expect(isColdStartRace(fiberFailure('dust'))).toBe(false);
+  });
+
+  it('is not anything else', () => {
+    expect(isColdStartRace(new Error('Transaction submission error'))).toBe(false);
   });
 });
