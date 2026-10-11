@@ -43,6 +43,8 @@ export const ERROR_CODES = {
   LOCAL_STACK_UNREACHABLE: 'LOCAL_STACK_UNREACHABLE',
   /** Several local Midnight stacks run and no endpoints were given. Recovery: pass endpoint flags or `midnight config set` them. */
   AMBIGUOUS_LOCAL_STACKS: 'AMBIGUOUS_LOCAL_STACKS',
+  /** This Node.js is older than mn supports (22). Recovery: install a current Node.js. */
+  UNSUPPORTED_NODE: 'UNSUPPORTED_NODE',
   UNKNOWN: 'UNKNOWN',
 } as const;
 
@@ -75,6 +77,9 @@ export function classifyError(err: Error): ClassifiedError {
   const code = (err as { code?: unknown }).code;
   if (typeof code === 'string' && SETUP_ERROR_CODES.has(code)) {
     return { exitCode: EXIT_NETWORK_ERROR, errorCode: code as ErrorCode };
+  }
+  if (code === ERROR_CODES.UNSUPPORTED_NODE) {
+    return { exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNSUPPORTED_NODE };
   }
   if (code === ERROR_CODES.DUST_GENERATING) {
     return { exitCode: EXIT_INSUFFICIENT_BALANCE, errorCode: ERROR_CODES.DUST_GENERATING };

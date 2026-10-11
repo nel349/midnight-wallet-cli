@@ -857,6 +857,7 @@ ERROR CODES
                                 one and set its endpoints (config set)
   LOCAL_STACK_UNREACHABLE 4     No ledger-9 stack answers at the endpoints
   AMBIGUOUS_LOCAL_STACKS  4     Several local stacks run; pass endpoint flags
+  UNSUPPORTED_NODE        1     Node.js is older than 22; install a current one
   CANCELLED               7     Operation cancelled (SIGINT)
   UNKNOWN                 1     Unclassified error
 

@@ -320,7 +320,7 @@ Found a bug or have a feature request? [Open an issue](https://github.com/nel349
 
 ## Requirements
 
-- Node.js >= 20
+- Node.js >= 22
 - Docker (for `midnight localnet` commands; `up` is refused on this build)
 - A ledger-9 chain to talk to: node, indexer (4.4) and proof server. The proof server defaults to `localhost:6300` and is required for transactions on every network
 

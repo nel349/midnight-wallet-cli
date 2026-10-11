@@ -2,6 +2,16 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Node.js 22 or newer is required.** mn declared Node.js 20, but the wallet SDK uses features Node 22 added: on Node 20 a transfer failed with "Wallet sync timed out". mn now says so at startup on an older Node.js (error code `UNSUPPORTED_NODE`, exit code 1; `mn help` still works), and CI tests on Node 22 and 24.
+
+### Fixed
+
+- **A fee is paid from one Dust coin when one is enough.** The wallet SDK took the smallest coins first, so a wallet with a young, small Dust coin beside a larger one paid every fee with two Dust spends, and the node refuses a small transaction that carries two ("exceeded the maximum time to dismiss for transaction size"); the user saw "Transaction submission error". mn now picks the smallest single coin that covers the fee, and combines coins only when no single one can.
+
 ## [0.6.0-rc.6] - 2026-10-11
 
 ### Fixed
