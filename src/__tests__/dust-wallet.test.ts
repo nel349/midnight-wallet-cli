@@ -31,7 +31,6 @@ beforeAll(async () => {
   beforeRange = new Date(inRange.getTime() - 10_000);
 });
 
-const sum = (inputs: readonly { value: bigint }[]) => inputs.reduce((total, input) => total + input.value, 0n);
 const caught = (run: () => unknown): unknown => {
   try { run(); } catch (error) { return error; }
   throw new Error('expected a failure');
@@ -84,26 +83,31 @@ describe('mn\'s choice of fee coins', () => {
     expect(messages(error).some((message) => isDustRelatedError({ message }))).toBe(true);
   });
 
-  it('adds the next coin when the smallest is in that range, and the fee transaction can be built', () => {
+  it('pays with the larger coin alone when the smallest is in that range, and the fee transaction can be built', () => {
     const mine = transacting(ConvergingDustTransacting);
-    const [small, large] = coinsAt(inRange);
+    const [, large] = coinsAt(inRange);
     const { fee, recipeInputs } = EitherOps.getOrThrowLeft(mine.computeBalancingRecipe(...computeArguments(payment, inRange)));
 
-    expect(recipeInputs.map((input) => input.token.nonce)).toEqual([small!.token.nonce, large!.token.nonce]);
-    // Two spends cost more than one, and the two coins cover it. (The ledger's
-    // fee for the same two spends can vary by a few parts in a million from one
-    // dry run to the next, so the fee is not compared to a second run.)
-    expect(fee).toBeGreaterThan(feeRange(payment, inRange).withOneSpend);
-    expect(fee).toBeLessThanOrEqual(small!.value + large!.value);
-    // Each coin in turn pays all it has: the small one whole, the large one the rest.
-    expect(recipeInputs[0]!.value).toBe(small!.value);
-    expect(sum(recipeInputs)).toBe(fee);
+    // One spend, not two: the node refuses a small transaction carrying two Dust spends.
+    expect(recipeInputs.map((input) => input.token.nonce)).toEqual([large!.token.nonce]);
+    expect(fee).toBe(feeRange(payment, inRange).withOneSpend);
+    expect(recipeInputs[0]!.value).toBe(fee);
+    expect(fee).toBeLessThanOrEqual(large!.value);
 
     const [feeTransaction] = EitherOps.getOrThrowLeft(mine.balanceTransactions(...computeArguments(payment, inRange)));
     expect(feeTransaction.intents?.size).toBe(1);
-    const estimate = EitherOps.getOrThrowLeft(mine.estimateFee(...computeArguments(payment, inRange)));
-    expect(estimate).toBeGreaterThan(feeRange(payment, inRange).withOneSpend);
-    expect(estimate).toBeLessThanOrEqual(small!.value + large!.value);
+    expect(EitherOps.getOrThrowLeft(mine.estimateFee(...computeArguments(payment, inRange)))).toBe(fee);
+  });
+
+  // Found live: a young coin beside a large one made every fee two spends.
+  it('pays with the larger coin alone when the smallest can\'t cover even the payment\'s own fee', () => {
+    const mine = transacting(ConvergingDustTransacting);
+    const [, large] = coinsAt(beforeRange);
+    const { recipeInputs } = EitherOps.getOrThrowLeft(mine.computeBalancingRecipe(...computeArguments(payment, beforeRange)));
+    expect(recipeInputs.map((input) => input.token.nonce)).toEqual([large!.token.nonce]);
+    // The SDK's own choice, smallest coins first, is both of them.
+    const sdk = transacting(Transacting.TransactingCapabilityImplementation);
+    expect(EitherOps.getOrThrowLeft(sdk.computeBalancingRecipe(...computeArguments(payment, beforeRange))).recipeInputs).toHaveLength(2);
   });
 
   it('gives what the SDK gives when the SDK\'s first choice covers the fee', () => {

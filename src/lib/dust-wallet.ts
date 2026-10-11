@@ -12,7 +12,7 @@ import { Imbalances, InsufficientFundsError as NoCoinsCoverIt, getBalanceRecipe 
 import { CustomDustWallet, type DustWallet as SdkDustWallet } from '@midnight-ntwrk/wallet-sdk-dust-wallet';
 import { Transacting, V1Builder } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
 import { LedgerOps } from '@midnight-ntwrk/wallet-sdk-utilities';
-import { type DustInput, planDustInputs, spreadFeeAcrossInputs } from './dust-balancing-plan.ts';
+import { type DustInput, chooseDustCoins, planDustInputs, spreadFeeAcrossInputs } from './dust-balancing-plan.ts';
 
 type SdkTransacting = Transacting.TransactingCapabilityImplementation<ledger.FinalizedTransaction>;
 type RecipeArguments = Parameters<SdkTransacting['computeBalancingRecipe']>;
@@ -35,7 +35,7 @@ export class ConvergingDustTransacting extends Transacting.TransactingCapability
       plan = planDustInputs<DustCoin['token']>({
         owed,
         coinCount: coins.length,
-        choose: (amount) => this.#choose(coins, amount),
+        choose: (amount) => chooseDustCoins(coins, amount, (several) => this.#combine(coins, several)),
         feeWith: (inputs) => this.dryRunFee(inputs, transactions, secretKey, state, ttl, currentTime, ledgerParams),
       });
     } catch (error) {
@@ -54,8 +54,8 @@ export class ConvergingDustTransacting extends Transacting.TransactingCapability
     return LedgerOps.ledgerTry(() => { throw new NoCoinsCoverIt('dust'); });
   }
 
-  /** The SDK balancer's choice of coins covering `owed`, in the order it takes them. */
-  #choose(coins: readonly DustCoin[], owed: bigint): DustInput<DustCoin['token']>[] | undefined {
+  /** The SDK balancer's choice of several coins covering `owed`, in the order it takes them. */
+  #combine(coins: readonly DustCoin[], owed: bigint): DustInput<DustCoin['token']>[] | undefined {
     try {
       const recipe = getBalanceRecipe({
         coins: coins.map((coin) => ({ type: 'dust' as const, value: coin.value, token: coin.token })),
