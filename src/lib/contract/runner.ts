@@ -97,7 +97,7 @@ export interface StateResult {
 
 export async function runState(options: StateOptions): Promise<StateResult> {
   const script = generateStateScript(options);
-  const result = await executeScript(options.dappDir, script, options.onMessage);
+  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage });
   try {
     return JSON.parse(result) as StateResult;
   } catch {
@@ -112,7 +112,7 @@ export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
   const extraEnv = options.privateStateSecretKey
     ? { MN_PRIVATE_STATE_SECRET: options.privateStateSecretKey }
     : undefined;
-  const result = await executeScript(options.dappDir, script, options.onMessage, extraEnv);
+  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: extraEnv });
   try {
     return JSON.parse(result) as DeployResult;
   } catch {
@@ -122,7 +122,7 @@ export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
 
 export async function runCall(options: CallOptions): Promise<CallResult> {
   const script = generateCallScript(options);
-  const result = await executeScript(options.dappDir, script, options.onMessage);
+  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage });
   try {
     return JSON.parse(result) as CallResult;
   } catch {
@@ -133,7 +133,7 @@ export async function runCall(options: CallOptions): Promise<CallResult> {
 // ── Shared script fragments ──
 
 /** Minimal JSON-RPC client over WebSocket that talks to mn serve. */
-function rpcClientCode(servePort: number): string {
+export function rpcClientCode(servePort: number): string {
   return `
 import WebSocket from 'ws';
 
@@ -577,12 +577,22 @@ function overlayMidnightSdk(userNodeModules: string): string[] {
   return created;
 }
 
-async function executeScript(
-  dappDir: string,
-  script: string,
-  onMessage?: (msg: string) => void,
-  extraEnv?: Record<string, string>,
-): Promise<string> {
+/** A generated script to run with node, and where. */
+export interface ScriptRun {
+  /** Where the script file is written: its bare imports resolve from here. */
+  dir: string;
+  script: string;
+  /** Each line the script writes to stderr, other than its marked error. */
+  onMessage?: (msg: string) => void;
+  env?: Record<string, string>;
+  /** The script's working directory; `dir` when not given. */
+  cwd?: string;
+  /** Make mn's own SDK packages resolvable from `dir` when it lacks them. Default true. */
+  overlaySdk?: boolean;
+}
+
+/** Runs a generated script and returns what it wrote to stdout. Throws its marked error when it fails. */
+export async function executeScript({ dir: dappDir, script, onMessage, env: extraEnv, cwd, overlaySdk = true }: ScriptRun): Promise<string> {
   // ESM resolution walks up from the importing file's location to find
   // node_modules; NODE_PATH does NOT work for ESM. Three different files
   // need to resolve bare imports during a deploy:
@@ -594,7 +604,7 @@ async function executeScript(
   // both the empty-tree and missing-package cases; cleanup removes only
   // what we created so the dApp dir ends up exactly as we found it.
   const userNodeModules = join(dappDir, 'node_modules');
-  const overlayPaths = overlayMidnightSdk(userNodeModules);
+  const overlayPaths = overlaySdk ? overlayMidnightSdk(userNodeModules) : [];
 
   const scriptPath = join(dappDir, `.mn-contract-${Date.now()}.mjs`);
   writeFileSync(scriptPath, script);
@@ -612,7 +622,7 @@ async function executeScript(
 
   return new Promise<string>((resolve, reject) => {
     const child = spawn('node', [scriptPath], {
-      cwd: dappDir,
+      cwd: cwd ?? dappDir,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
