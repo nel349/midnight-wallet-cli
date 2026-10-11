@@ -7,7 +7,7 @@
 // loopback port.
 
 import { InMemoryTransactionHistoryStorage } from '@midnightntwrk/wallet-sdk';
-import { DustWallet } from '@midnightntwrk/wallet-sdk/dust';
+import { DustWallet } from '../../lib/dust-wallet.ts';
 import { WalletFacade, WalletEntrySchema, mergeWalletEntries } from '@midnightntwrk/wallet-sdk/facade';
 import { ShieldedWallet } from '@midnightntwrk/wallet-sdk/shielded';
 import { PublicKey, UnshieldedWallet, createKeystore } from '@midnightntwrk/wallet-sdk/unshielded';

@@ -21,6 +21,7 @@ import { inspectTxHex } from './tx-inspect.ts';
 import { expiredIntents, feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { PartlySignedTransactionError, assertSignable, signRecipe } from './sign-recipe.ts';
 import { decodeSignPayload, signedMessageBytes } from './sign-data.ts';
+import { sleep } from './dust-wait.ts';
 import { fetchPartialSuccessSegments, type SegmentResult } from './tx-segments.ts';
 import { walletsBelowLedger9 } from './ledger-guard.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
@@ -587,18 +588,20 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     return latestState !== undefined && hasDustAvailable(latestState);
   }
 
-  /** Wait for dust to become available by observing state updates. */
-  async function waitForDust(timeoutMs: number): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      // If already available, resolve immediately
-      if (isDustAvailable()) { resolve(true); return; }
+  /**
+   * Waits for a Dust coin to show in the wallet state: `already` there,
+   * `appeared` during the wait, or `timeout`.
+   */
+  async function waitForDust(timeoutMs: number): Promise<'already' | 'appeared' | 'timeout'> {
+    return new Promise((resolve) => {
+      if (isDustAvailable()) { resolve('already'); return; }
       const sub = facade.state().pipe(
         rx.filter(() => isDustAvailable()),
         rx.take(1),
         rx.timeout(timeoutMs),
       ).subscribe({
-        next: () => { sub.unsubscribe(); resolve(true); },
-        error: () => { sub.unsubscribe(); resolve(false); },
+        next: () => { sub.unsubscribe(); resolve('appeared'); },
+        error: () => { sub.unsubscribe(); resolve('timeout'); },
       });
     });
   }
@@ -612,25 +615,23 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       + 'transactions at once, the wallet needs more Dust coins: one per NIGHT UTXO registered for Dust generation.');
   }
 
-  /** Retry a facade call that fails with "No dust tokens", waiting for dust between attempts. */
+  /** Retries a facade call that fails for lack of Dust, waiting between attempts for a coin to come free or grow. */
   async function withDustRetry<T>(fn: () => Promise<T>): Promise<T> {
-    for (let attempt = 1; attempt <= DUST_RETRY_ATTEMPTS; attempt++) {
+    for (let attempt = 1; ; attempt++) {
       try {
         return await fn();
       } catch (err: any) {
         const msg = String(err?.message ?? err ?? '');
         if (!isDustShortage(err)) throw err;
-        if (attempt === DUST_RETRY_ATTEMPTS) throw dustExhaustedError(err);
+        if (attempt >= DUST_RETRY_ATTEMPTS) throw dustExhaustedError(err);
         process.stderr.write(dim(`  dust unavailable, waiting for recovery (${attempt}/${DUST_RETRY_ATTEMPTS})... [${msg.slice(0, 60)}]`) + '\n');
-        // Wait for dust to actually appear in state, not just a blind delay
-        const recovered = await waitForDust(DUST_RETRY_DELAY_MS);
-        if (!recovered && attempt < DUST_RETRY_ATTEMPTS) {
-          // Dust didn't appear within delay — give it a bit more time
-          await new Promise((r) => setTimeout(r, DUST_RETRY_DELAY_MS));
-        }
+        // A coin that comes free during the wait (its transaction landed) is
+        // tried at once. A coin that was there all along was too small for
+        // the fee, and a wait that ran out found none: either way it needs
+        // time, so the delay passes before the next attempt.
+        if (await waitForDust(DUST_RETRY_DELAY_MS) !== 'appeared') await sleep(DUST_RETRY_DELAY_MS);
       }
     }
-    throw new Error('unreachable');
   }
 
   // ── Handler map — all 18 ConnectedAPI methods ──

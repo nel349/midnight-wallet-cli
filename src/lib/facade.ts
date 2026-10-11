@@ -5,7 +5,7 @@ import {
   PublicKey,
   type UnshieldedKeystore,
 } from '@midnightntwrk/wallet-sdk/unshielded';
-import { DustWallet } from '@midnightntwrk/wallet-sdk/dust';
+import { DustWallet } from './dust-wallet.ts';
 import {
   WalletFacade,
   WalletEntrySchema,

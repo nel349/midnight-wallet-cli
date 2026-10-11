@@ -2,6 +2,13 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **A wallet low on Dust no longer freezes mn.** When the Dust coins the wallet SDK chose covered a transaction's own fee but not the fee with the Dust spend added, the SDK's coin choice looped without end: `mn serve` (and `mn transfer`) stopped answering, ran at 250 to 370% CPU while the ledger's memory grew, and failed about ten minutes later with `unreachable`. A coin regrowing after a payment passes through that range, for about 13 seconds with 1000 NIGHT behind it and about 11 minutes with 20, and one request in that time froze a fee wallet for every client. mn now builds its Dust wallet with its own choice of fee coins, through the SDK's builder: it takes the next coin when the first choice falls short, and refuses as a Dust shortage when no coins cover the fee. This was also behind the crash after "a transfer right after registering" that 0.6.0-rc.3 worked around.
+- **`mn serve` really waits for Dust between attempts.** A coin that had just paid a fee showed as available though it was worth less than the next fee, so all ten attempts ran within 40 ms and the request failed, when the coin would have covered it seconds later. Each new attempt now waits 3 seconds for the coin to grow (up to 27 seconds in all); a coin that comes free because its transaction landed is still used at once.
+
 ## [0.6.0-rc.5] - 2026-10-06
 
 ### Security

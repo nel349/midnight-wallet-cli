@@ -1067,7 +1067,8 @@ describe('dapp-connector', () => {
         .rejects.toThrow('some other error');
     });
 
-    it('fails after max retry attempts', { timeout: 20_000 }, async () => {
+    it('fails after max retry attempts', async () => {
+      vi.useFakeTimers();
       process.stderr.write = (() => true) as any;
       let callCount = 0;
       connector = createConnector({
@@ -1080,12 +1081,68 @@ describe('dapp-connector', () => {
         },
       });
 
-      const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()).catch((e: any) => e);
+      const failure = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()).catch((e: any) => e);
+      await vi.advanceTimersByTimeAsync(9 * 3_000);
+      const err: any = await failure;
       expect(err.code).toBe('InternalError');
       expect(err.message).toContain('No Dust is free to pay the fee (No dust tokens found in the wallet state)');
       expect(err.message).toContain('Each balanced transaction reserves a whole Dust coin');
       expect(err.message).toContain('0 balanced transaction(s) are waiting to be submitted on this server');
       expect(callCount).toBe(10); // DUST_RETRY_ATTEMPTS = 10
+      vi.useRealTimers();
+    });
+
+    it('asks again at once when a coin comes free during the wait', async () => {
+      vi.useFakeTimers();
+      process.stderr.write = (() => true) as any;
+      const attemptedAt: number[] = [];
+      const started = Date.now();
+      connector = createConnector({
+        approvalOptions: { approveAll: true },
+        bundleOverrides: {
+          // No Dust coin is free until one second in, when a pending transaction lands and releases its coin.
+          stateFn: () => rx.concat(rx.of(mockState({ dustBalance: 0n })), rx.timer(1_000).pipe(rx.map(() => mockState({ dustBalance: 1000n })))),
+          balanceUnboundTransaction: () => {
+            attemptedAt.push(Date.now() - started);
+            return attemptedAt.length < 2 ? Promise.reject(new Error('No dust tokens found in the wallet state')) : Promise.resolve({ type: 'UNBOUND' });
+          },
+        },
+      });
+
+      const promise = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx());
+      await vi.advanceTimersByTimeAsync(1_100);
+      await promise;
+      expect(attemptedAt).toEqual([0, 1_000]);
+      vi.useRealTimers();
+    });
+
+    // Found live: a coin that had just paid a fee was worth less than the
+    // next one. It showed as available, so all ten attempts ran in 40 ms and
+    // the request failed, though the coin would have covered it seconds later.
+    it('gives a coin that is there but too small the delay to grow before each new attempt', async () => {
+      vi.useFakeTimers();
+      process.stderr.write = (() => true) as any;
+      const shortage = Object.assign(new Error('Insufficient Funds: could not balance dust'), { _tag: 'Wallet.InsufficientFunds', tokenType: 'dust' });
+      const attemptedAt: number[] = [];
+      const started = Date.now();
+      connector = createConnector({
+        approvalOptions: { approveAll: true },
+        bundleOverrides: {
+          // The wallet state shows Dust throughout; the fourth attempt finds it has grown enough.
+          balanceUnboundTransaction: () => {
+            attemptedAt.push(Date.now() - started);
+            return attemptedAt.length < 4 ? Promise.reject(shortage) : Promise.resolve({ type: 'UNBOUND' });
+          },
+        },
+      });
+
+      const promise = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx());
+      await vi.advanceTimersByTimeAsync(2_900);
+      expect(attemptedAt).toEqual([0]);
+      await vi.advanceTimersByTimeAsync(6_200);
+      await promise;
+      expect(attemptedAt).toEqual([0, 3_000, 6_000, 9_000]);
+      vi.useRealTimers();
     });
   });
 
