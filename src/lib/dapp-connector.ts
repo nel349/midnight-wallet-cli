@@ -15,6 +15,7 @@ import { createApiError, type RpcHandler, type RpcHandlerContext } from './ws-rp
 import { createPhaseTracker, type PhaseTracker } from './phase-tracker.ts';
 import { serializeTx, deserializeUnsealed, deserializeSealed, fromHex } from './tx-serde.ts';
 import { signedMessageBytes } from './sign-data.ts';
+import { PartlySignedTransactionError, SignedTransactionNeedsUnshieldedError, assertSignable, signRecipe } from './sign-recipe.ts';
 import { inspectTxHex } from './tx-inspect.ts';
 import { TX_TTL_MINUTES, PROOF_TIMEOUT_MS, DUST_RETRY_ATTEMPTS, DUST_RETRY_DELAY_MS, ABANDONED_TX_TIMEOUT_MS } from './constants.ts';
 import { dim } from '../ui/colors.ts';
@@ -188,9 +189,7 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
    *  Returns both the serialized hex and the finalized tx object (for tracking/revert). */
   async function processRecipe(recipe: any, tracker?: PhaseTracker): Promise<{ hex: string; finalized: any }> {
     tracker?.start('signing');
-    const signed = await facade.signRecipe(recipe, (payload) =>
-      keystore.signData(payload),
-    );
+    const signed = await signRecipe(facade, recipe, (payload) => keystore.signData(payload));
     tracker?.start('proving');
     let timer: ReturnType<typeof setTimeout> | undefined;
     const finalized = await Promise.race([
@@ -202,6 +201,28 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     clearTimeout(timer);
     tracker?.complete();
     return { hex: serializeTx(finalized), finalized };
+  }
+
+  /**
+   * Refuses, as InvalidRequest, an unsealed transaction the wallet can't
+   * balance and sign without breaking it. One whose bytes can't be read is
+   * left for the balance itself to report.
+   */
+  function assertDAppTxSignable(txHex: string): void {
+    let tx;
+    try {
+      tx = deserializeUnsealed(txHex);
+    } catch {
+      return;
+    }
+    try {
+      assertSignable(tx);
+    } catch (err) {
+      if (err instanceof PartlySignedTransactionError || err instanceof SignedTransactionNeedsUnshieldedError) {
+        throw createApiError('InvalidRequest', err.message);
+      }
+      throw err;
+    }
   }
 
   /** Prompt terminal approval for a write method. Throws Rejected on denial. */
@@ -520,6 +541,8 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
       if (!txHex) {
         throw createApiError('InvalidRequest', 'tx is required');
       }
+
+      assertDAppTxSignable(txHex);
 
       const tracker = makeTracker('balanceUnsealedTransaction', context);
 

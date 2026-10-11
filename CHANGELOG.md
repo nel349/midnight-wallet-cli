@@ -2,6 +2,17 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [0.5.5] - 2026-10-11
+
+### Fixed
+
+- **A wallet low on Dust no longer freezes mn.** When the Dust coins the wallet SDK chose covered a transaction's own fee but not the fee with the Dust spend added, the SDK's coin choice looped without end: `mn serve` (and `mn transfer`) stopped answering, ran at several hundred percent CPU while the ledger's memory grew, and failed about ten minutes later with `unreachable`. A coin regrowing after a payment passes through that range (with the ledger's standard fee parameters, about 40 seconds for a coin backed by 1000 NIGHT), and one request in that time froze the wallet for every client. mn now builds its Dust wallet with its own choice of fee coins, through the SDK's builder: it takes the next coin when the first choice falls short, and refuses as a Dust shortage when no coins cover the fee. A localnet prices transactions at zero, so this shows on networks with real fees.
+- **`mn serve` can balance a transaction the dApp already signed.** For an unsealed transaction the wallet SDK signed the dApp's own transaction again and every signature the dApp had attached came back twice, so the node refused it ("mismatch between number of inputs (1) and signatures (2)"). When all of a transaction's unshielded inputs are signed, mn now signs only its own balancing transaction. A transaction with some inputs signed and some not, or a signed one that still needs unshielded value from the wallet (which would change what the dApp signed), is refused as `InvalidRequest` before the operator is asked.
+
+### Changed
+
+- `@midnight-ntwrk/wallet-sdk-utilities` is declared as a dependency, at the version the wallet SDK already installs (1.1.1).
+
 ## [0.5.4] - 2026-10-10
 
 ### Security
