@@ -1,10 +1,10 @@
 // Which Dust coins pay a fee: the loop that chooses them must end, whatever
-// the coins are worth. Coins and fees here are plain numbers; the wallet's
-// choice is the SDK balancer's: the smallest coins first, until they cover
-// what is owed.
+// the coins are worth, and one coin pays when one is enough. Coins and fees
+// here are plain numbers. Several coins are combined as the SDK balancer
+// combines them: the smallest first, until they cover what is owed.
 
 import { describe, expect, it } from 'vitest';
-import { type DustInput, planDustInputs, spreadFeeAcrossInputs } from '../lib/dust-balancing-plan.ts';
+import { type DustInput, chooseDustCoins, planDustInputs, spreadFeeAcrossInputs } from '../lib/dust-balancing-plan.ts';
 
 type Coin = DustInput<string>;
 const coin = (token: string, value: bigint): Coin => ({ token, value });
@@ -29,11 +29,31 @@ const plan = (coins: Coin[], own: bigint, perSpend: bigint, owed = own) => {
   const result = planDustInputs({
     owed,
     coinCount: coins.length,
-    choose: (amount) => (choices.push(amount), smallestFirst(coins)(amount)),
+    choose: (amount) => (choices.push(amount), chooseDustCoins(coins, amount, smallestFirst(coins))),
     feeWith: fee(own, perSpend),
   });
   return { result, choices };
 };
+
+describe('chooseDustCoins', () => {
+  const coins = [coin('a', 100n), coin('b', 5000n), coin('c', 900n)];
+
+  it('takes the smallest single coin that covers the amount', () => {
+    expect(chooseDustCoins(coins, 800n, smallestFirst(coins))).toEqual([coin('c', 900n)]);
+    expect(chooseDustCoins(coins, 900n, smallestFirst(coins))).toEqual([coin('c', 900n)]);
+    expect(chooseDustCoins(coins, 901n, smallestFirst(coins))).toEqual([coin('b', 5000n)]);
+    expect(chooseDustCoins(coins, 50n, smallestFirst(coins))).toEqual([coin('a', 100n)]);
+  });
+
+  it('combines several only when no single coin covers it', () => {
+    expect(chooseDustCoins(coins, 5500n, smallestFirst(coins))).toEqual([coin('a', 100n), coin('c', 900n), coin('b', 5000n)]);
+  });
+
+  it('is undefined when all of them can\'t', () => {
+    expect(chooseDustCoins(coins, 7000n, smallestFirst(coins))).toBeUndefined();
+    expect(chooseDustCoins([], 1n, smallestFirst([]))).toBeUndefined();
+  });
+});
 
 describe('planDustInputs', () => {
   it('takes the first choice when it covers the fee with its own spend counted', () => {
@@ -46,8 +66,17 @@ describe('planDustInputs', () => {
   // not the 800 it costs with the spend added.
   it('chooses again for the higher fee when the first choice covers the transaction\'s fee but not its own spend', () => {
     const { result, choices } = plan([coin('a', 750n), coin('b', 5000n)], 700n, 100n);
-    expect(result).toEqual({ kind: 'covered', fee: 900n, inputs: [coin('a', 750n), coin('b', 5000n)] });
+    // The larger coin alone: one spend, where the two together would be two.
+    expect(result).toEqual({ kind: 'covered', fee: 800n, inputs: [coin('b', 5000n)] });
     expect(choices).toEqual([700n, 800n]);
+  });
+
+  // Found live: a young coin of 0.1 DUST beside one of 29 made a 0.82 DUST fee
+  // a two-spend transaction, which the node refused.
+  it('pays with the larger coin alone when the smallest can\'t cover the fee', () => {
+    const { result, choices } = plan([coin('young', 100n), coin('b', 5000n)], 700n, 100n);
+    expect(result).toEqual({ kind: 'covered', fee: 800n, inputs: [coin('b', 5000n)] });
+    expect(choices).toEqual([700n]);
   });
 
   it('ends as short when the only coin is in that range', () => {
@@ -61,12 +90,17 @@ describe('planDustInputs', () => {
     expect(plan([], 700n, 100n).result).toEqual({ kind: 'short', atFirstChoice: true });
   });
 
-  it('keeps adding coins while each added spend outruns what they cover', () => {
-    const coins = [coin('a', 710n), coin('b', 100n), coin('c', 100n), coin('d', 5000n)];
+  it('combines coins, and keeps adding them while each added spend outruns what they cover, when no single coin is enough', () => {
+    const coins = [coin('a', 400n), coin('b', 300n), coin('c', 300n), coin('d', 450n)];
     const { result, choices } = plan(coins, 700n, 100n);
-    // b + c + a = 910 covers 700 but not the 1000 three spends cost; d makes it four spends at 1100.
-    expect(result).toEqual({ kind: 'covered', fee: 1100n, inputs: [coin('b', 100n), coin('c', 100n), coin('a', 710n), coin('d', 5000n)] });
-    expect(choices).toEqual([700n, 1000n]);
+    // b + c + a = 1000 covers 700 and the 1000 three spends cost.
+    expect(result).toEqual({ kind: 'covered', fee: 1000n, inputs: [coin('b', 300n), coin('c', 300n), coin('a', 400n)] });
+    expect(choices).toEqual([700n]);
+
+    const tighter = plan([coin('a', 380n), coin('b', 300n), coin('c', 300n), coin('d', 450n)], 700n, 100n);
+    // b + c + a = 980 covers 700, not the 1000 three spends cost; d makes it four spends at 1100.
+    expect(tighter.result).toEqual({ kind: 'covered', fee: 1100n, inputs: [coin('b', 300n), coin('c', 300n), coin('a', 380n), coin('d', 450n)] });
+    expect(tighter.choices).toEqual([700n, 1000n]);
   });
 
   it('chooses for the whole fee when the transactions owe nothing before a spend is added', () => {
@@ -75,7 +109,7 @@ describe('planDustInputs', () => {
     expect(choices).toEqual([700n]);
   });
 
-  it('ends within one pass per coin and one more, even when no choice ever covers its fee', () => {
+  it('ends within two passes per coin and one more, even when no choice ever covers its fee', () => {
     const coins = [coin('a', 10n), coin('b', 10n), coin('c', 10n)];
     let passes = 0;
     const result = planDustInputs({
@@ -86,7 +120,7 @@ describe('planDustInputs', () => {
       feeWith: () => 1000n,
     });
     expect(result).toEqual({ kind: 'short', atFirstChoice: false });
-    expect(passes).toBe(coins.length + 1);
+    expect(passes).toBe(coins.length * 2 + 1);
   });
 });
 
