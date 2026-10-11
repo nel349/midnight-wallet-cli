@@ -15,6 +15,11 @@ export interface Spinner {
   log(line: string): void;
 }
 
+/** A spinner that shows nothing, for `--json` callers: stdout stays the result alone and stderr stays quiet. */
+export function silentSpinner(): Spinner {
+  return { update() {}, stop() {}, fail() {}, log() {} };
+}
+
 let active: Spinner | null = null;
 
 export function getActiveSpinner(): Spinner | null {

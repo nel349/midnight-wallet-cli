@@ -62,6 +62,7 @@ describe('COMMAND_FLAGS matches the code', () => {
     // resolveNetwork also takes each endpoint from its flag before config.
     'resolveNetwork(': ['network', 'node', 'indexer-ws', 'proof-server'],
     'resolveNetworkName(': ['network'],
+    'resolvePayingTarget(': ['network', 'node', 'indexer-ws', 'proof-server'],
     'resolveSeedSource(': ['seed', 'wallet'],
     'resolveSeed(': ['seed', 'wallet'],
     'isVerbose(': ['verbose'],

@@ -1,13 +1,13 @@
 // Contract commands — inspect, deploy, call, and query state for compiled Midnight contracts.
 
 import { resolve } from 'node:path';
-import { applyEndpointOverrides, endpointFlags, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../lib/network.ts';
 import { type ParsedArgs, getFlag, hasFlag, requireFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
 import { header, keyValue } from '../ui/format.ts';
 import { bold, dim, teal, yellow, green } from '../ui/colors.ts';
-import { start as startSpinner, type Spinner } from '../ui/spinner.ts';
+import { silentSpinner, start as startSpinner } from '../ui/spinner.ts';
+import { assertWalletCanPay, openPayingServe, resolvePayingTarget } from '../lib/paying-wallet.ts';
 import { validateContractAddress } from '../lib/contract/validate.ts';
 import { resolveContractCallRequest, resolveContractDeployRequest, resolveScanDir } from '../lib/contract/request.ts';
 import {
@@ -17,15 +17,6 @@ import {
   formatWitnessSignature,
   toJsonOutput,
 } from '../lib/contract/inspect.ts';
-
-/**
- * No-op spinner for `--json` callers. Suppresses chrome on stderr so
- * programmatic consumers (agents, scripts) get a clean JSON-only stream
- * on stdout with nothing on stderr to misinterpret.
- */
-function silentSpinner(): Spinner {
-  return { update() {}, stop() {}, fail() {}, log() {} };
-}
 
 const VALID_SUBCOMMANDS = ['inspect', 'deploy', 'call', 'state'] as const;
 type Subcommand = typeof VALID_SUBCOMMANDS[number];
@@ -111,107 +102,6 @@ async function handleInspect(args: ParsedArgs): Promise<void> {
   process.stderr.write('\n');
 }
 
-// ── Network: --network, then explicit endpoint flags over the defaults ──
-// Without endpoint flags, `undeployed` resolves to whatever local stack docker
-// shows, which is ambiguous when more than one runs.
-
-interface ContractNetwork {
-  network: string;
-  networkConfig: NetworkConfig;
-  endpoints: EndpointOverrides;
-}
-
-async function contractNetwork(args: ParsedArgs, subcommand: string): Promise<ContractNetwork> {
-  const { resolveNetwork } = await import('../lib/resolve-network.ts');
-  const network = getFlag(args, 'network') ?? 'undeployed';
-  const endpoints: EndpointOverrides = {
-    node: getFlag(args, 'node'),
-    indexerWS: getFlag(args, 'indexer-ws'),
-    proofServer: getFlag(args, 'proof-server'),
-  };
-  const { name, config: networkConfig } = resolveNetwork({
-    args: { command: 'contract', subcommand, positionals: [], flags: { network, ...endpointFlags(endpoints) } },
-  });
-  applyEndpointOverrides(networkConfig, endpoints, name);
-  return { network, networkConfig, endpoints };
-}
-
-// ── Preflight check: balance + dust before deploy/call ──
-
-async function preflight({ network, networkConfig }: ContractNetwork, jsonMode: boolean, wallet?: string): Promise<void> {
-  const { loadWalletConfig, resolveWalletPath } = await import('../lib/wallet-config.ts');
-  const { defaultRepository } = await import('../lib/wallet-data-repository.ts');
-  const { NATIVE_TOKEN_TYPE } = await import('../lib/constants.ts');
-
-  // resolveWalletPath honours --wallet when passed; without the arg, it
-  // falls back to the active wallet from config. Forwarding the user's
-  // --wallet flag here keeps the preflight check aligned with the wallet
-  // that the actual deploy/call will use.
-  const walletConfig = loadWalletConfig(resolveWalletPath(wallet));
-  const seedBuffer = Buffer.from(walletConfig.seed, 'hex');
-  const address = walletConfig.addresses[network as NetworkName];
-
-  // In JSON mode, suppress the spinner entirely so stderr stays quiet for
-  // programmatic callers. The same pattern applies in handleDeploy/handleCall.
-  const spinner = jsonMode ? silentSpinner() : startSpinner('Checking wallet...');
-  const repo = defaultRepository();
-
-  try {
-    // Two cheap reads through the repo — no facade, no proof server, no
-    // strict sync. The repo's tip-aware memo means the next deploy/call
-    // in the same MCP session pays ~zero on these checks.
-    const balanceView = await repo.unshielded(address, networkConfig);
-    const nightBalance = balanceView.balances.get(NATIVE_TOKEN_TYPE) ?? 0n;
-
-    if (nightBalance === 0n) {
-      spinner.fail('No NIGHT balance');
-      throw new Error(
-        `Wallet has 0 NIGHT on ${network}.\n\n` +
-        `  Fund your wallet before deploying:\n` +
-        `    Address: ${address}\n` +
-        (network === 'undeployed'
-          ? `    Run: midnight airdrop 1000\n`
-          : `    Use the Midnight faucet or transfer from another wallet.\n`)
-      );
-    }
-
-    const dustView = await repo.dust(seedBuffer, networkConfig, { onStatus: (s) => spinner.update(s) });
-    if (dustView.balance === 0n && dustView.availableCoins === 0) {
-      spinner.fail('No dust available');
-      throw new Error(
-        `Wallet has no dust on ${network}. Dust is required to pay transaction fees.\n\n` +
-        `  Register for dust generation:\n` +
-        `    Run: midnight dust register --network ${network}\n` +
-        `    Then wait: midnight dust status --network ${network}\n`
-      );
-    }
-
-    spinner.stop(`Wallet OK (${nightBalance} NIGHT, dust available)`);
-  } catch (err) {
-    spinner.fail('Wallet check failed');
-    throw err;
-  }
-}
-
-// ── Serve lifecycle for deploy/call ──
-
-async function ensureServe({ network, endpoints }: ContractNetwork, jsonMode: boolean, wallet?: string): Promise<{ port: number; stop: () => Promise<void> }> {
-  const { startServeOrReuse } = await import('../lib/test/serve-manager.ts');
-
-  // startServeOrReuse handles port-in-use detection: if a compatible mn
-  // serve is already running we reuse it (no-op stop), if a different
-  // network's serve owns the port we throw with an actionable message.
-  const spinner = jsonMode ? silentSpinner() : startSpinner('Starting mn serve...');
-  const handle = await startServeOrReuse({
-    network,
-    endpoints,
-    wallet,
-    onMessage: (msg) => spinner.update(msg),
-  });
-  spinner.stop('mn serve ready (port ' + handle.port + ')');
-  return { port: handle.port, stop: () => handle.stop() };
-}
-
 // ── Deploy ──
 
 async function handleDeploy(args: ParsedArgs): Promise<void> {
@@ -224,7 +114,7 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
     process.stderr.write('\n' + header('Contract Deploy') + '\n\n');
   }
 
-  const target = await contractNetwork(args, 'deploy');
+  const target = resolvePayingTarget(args, 'contract', 'deploy');
   const { network, networkConfig } = target;
 
   if (!jsonMode) {
@@ -237,10 +127,10 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
   }
 
   // Pre-check: verify wallet has balance and dust before attempting deploy
-  await preflight(target, jsonMode, getFlag(args, 'wallet'));
+  await assertWalletCanPay(target, getFlag(args, 'wallet'), jsonMode ? silentSpinner() : startSpinner('Checking wallet...'));
 
   // Start mn serve (or reuse existing)
-  const serve = await ensureServe(target, jsonMode, getFlag(args, 'wallet'));
+  const serve = await openPayingServe(target, getFlag(args, 'wallet'), jsonMode ? silentSpinner() : startSpinner('Starting mn serve...'));
 
   const spinner = jsonMode ? silentSpinner() : startSpinner('Deploying contract...');
 
@@ -316,7 +206,7 @@ async function handleCall(args: ParsedArgs): Promise<void> {
     process.stderr.write('\n' + header('Contract Call') + '\n\n');
   }
 
-  const target = await contractNetwork(args, 'call');
+  const target = resolvePayingTarget(args, 'contract', 'call');
   const { network, networkConfig } = target;
 
   if (!jsonMode) {
@@ -325,9 +215,9 @@ async function handleCall(args: ParsedArgs): Promise<void> {
     process.stderr.write(keyValue('Address', address.slice(0, 20) + '...') + '\n\n');
   }
 
-  await preflight(target, jsonMode, getFlag(args, 'wallet'));
+  await assertWalletCanPay(target, getFlag(args, 'wallet'), jsonMode ? silentSpinner() : startSpinner('Checking wallet...'));
 
-  const serve = await ensureServe(target, jsonMode, getFlag(args, 'wallet'));
+  const serve = await openPayingServe(target, getFlag(args, 'wallet'), jsonMode ? silentSpinner() : startSpinner('Starting mn serve...'));
   const spinner = jsonMode ? silentSpinner() : startSpinner(`Calling ${circuit}...`);
 
   try {
@@ -377,7 +267,7 @@ async function handleState(args: ParsedArgs): Promise<void> {
 
   const { runState } = await import('../lib/contract/runner.ts');
 
-  const { network, networkConfig } = await contractNetwork(args, 'state');
+  const { network, networkConfig } = resolvePayingTarget(args, 'contract', 'state');
 
   if (!jsonMode) {
     process.stderr.write('\n' + header('Contract State') + '\n\n');
