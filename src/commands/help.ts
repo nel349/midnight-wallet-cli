@@ -799,6 +799,7 @@ ERROR CODES
   PROOF_FAILURE           6     Proof server failed to generate the ZK proof
   INVALID_DUST_PROOF      6     Chain rejected the dust spend proof as malformed
   DUST_REQUIRED           5     No dust tokens available for fees
+  UNSUPPORTED_NODE        1     Node.js is older than 22; install a current one
   CANCELLED               7     Operation cancelled (SIGINT)
   UNKNOWN                 1     Unclassified error
 

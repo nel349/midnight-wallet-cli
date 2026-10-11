@@ -99,7 +99,7 @@ A standalone git-style CLI wallet for the Midnight blockchain.
 ## Tech Stack
 
 - **Language**: TypeScript, run via `tsx`
-- **Runtime**: Node.js (>=20)
+- **Runtime**: Node.js (>=22)
 - **CLI parsing**: Manual `process.argv` — NO commander, yargs, or similar
 - **Terminal UI**: Node.js native `readline` — NO inquirer, prompts, or similar
 - **Colors**: Raw ANSI escape codes — NO chalk, kleur, or similar

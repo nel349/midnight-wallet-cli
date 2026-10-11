@@ -11,6 +11,7 @@ import { writeJsonError } from './lib/json-output.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
 import { migrateOldWallet } from './lib/wallet-config.ts';
 import { ensureHeapForSync } from './lib/heap-guard.ts';
+import { assertNodeSupported } from './lib/node-version.ts';
 
 // Commands that start a WalletFacade. They (a) leave WebSocket connections in
 // the event loop that facade.stop() doesn't fully drain — so we must exit
@@ -66,6 +67,8 @@ process.on('SIGINT', handleShutdown);
 process.on('SIGTERM', handleShutdown);
 
 async function run(): Promise<void> {
+  // Help still shows on a Node.js too old for the wallet SDK; nothing else runs there.
+  if (command !== 'help') assertNodeSupported();
   switch (command) {
     case 'help': {
       const { default: handler } = await import('./commands/help.ts');

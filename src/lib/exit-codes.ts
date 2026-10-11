@@ -30,6 +30,8 @@ export const ERROR_CODES = {
   /** Long-running wallet sync exceeded its deadline. On hosted networks this is most common during the first cold sync; retrying usually progresses since the cache resumes from the last applied event. */
   SYNC_TIMEOUT: 'SYNC_TIMEOUT',
   CANCELLED: 'CANCELLED',
+  /** This Node.js is older than mn supports (22). Recovery: install a current Node.js. */
+  UNSUPPORTED_NODE: 'UNSUPPORTED_NODE',
   UNKNOWN: 'UNKNOWN',
 } as const;
 
@@ -46,6 +48,10 @@ interface ClassifiedError {
  * Order matters: more specific patterns are checked before broader ones.
  */
 export function classifyError(err: Error): ClassifiedError {
+  // A typed error that carries its own code is classified by it, not by its text.
+  if ((err as { code?: unknown }).code === ERROR_CODES.UNSUPPORTED_NODE) {
+    return { exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNSUPPORTED_NODE };
+  }
   const msg = (err.message ?? '').toLowerCase();
 
   // Cancelled by user (SIGINT / AbortController)

@@ -19,6 +19,7 @@ import { FULL_FLAG, type ParsedArgs } from './lib/argv.ts';
 import { PKG_VERSION } from './lib/pkg.ts';
 import { createConfirmationStore } from './lib/mcp/confirmation.ts';
 import { ensureHeapForSync } from './lib/heap-guard.ts';
+import { assertNodeSupported } from './lib/node-version.ts';
 
 // Skill resources — teach MCP clients how to use this CLI conversationally.
 // Split into:
@@ -946,6 +947,8 @@ function errorResponse(error: Error) {
 
 // Start the server
 async function main() {
+  // Refuse to start on a Node.js too old for the wallet SDK, where every tool would fail obscurely.
+  assertNodeSupported();
   // The server runs facades on demand (balance/transfer/etc.). A cold shielded
   // sync would overflow Node's default heap, so re-exec once at startup with
   // more headroom. No-op when launched via `mn --mcp` (already bumped) or when

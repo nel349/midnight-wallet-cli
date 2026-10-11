@@ -310,7 +310,7 @@ Found a bug or have a feature request? [Open an issue](https://github.com/nel349
 
 ## Requirements
 
-- Node.js >= 20
+- Node.js >= 22
 - Docker (for `midnight localnet` commands)
 - A running proof server on `localhost:6300` (for transactions — required on all networks)
 
