@@ -26,8 +26,16 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
+      # The lockfile is committed before a release publishes that version's
+      # dust-sync platform packages, so it can't hold them, and once they are
+      # on the registry `npm ci` refuses the lockfile for it. CI never needed
+      # them (the tests run on the WASM path), so it installs without the pins
+      # and puts package.json back.
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm pkg delete optionalDependencies
+          npm ci
+          git checkout package.json
 
       - name: Typecheck
         run: npm run typecheck
@@ -66,8 +74,16 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
+      # The lockfile is committed before a release publishes that version's
+      # dust-sync platform packages, so it can't hold them, and once they are
+      # on the registry `npm ci` refuses the lockfile for it. CI never needed
+      # them (the tests run on the WASM path), so it installs without the pins
+      # and puts package.json back.
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm pkg delete optionalDependencies
+          npm ci
+          git checkout package.json
 
       - name: Build
         run: npm run build
