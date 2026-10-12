@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { assertEndpointUsable, endpointRefusalFromWsError } from './blockfrost.ts';
 import { NATIVE_TOKEN_TYPE, BALANCE_CHECK_TIMEOUT_MS } from './constants.ts';
 
 export interface BalanceSummary {
@@ -61,6 +62,7 @@ export function checkBalance(
   onProgress?: (current: number, highest: number) => void,
 ): Promise<BalanceSummary> {
   return new Promise((resolve, reject) => {
+    assertEndpointUsable(indexerWS);
     const ws = new WebSocket(indexerWS, ['graphql-transport-ws']);
 
     const utxos = new Map<string, { value: bigint; tokenType: string; spent: boolean; registeredForDustGeneration: boolean }>();
@@ -199,7 +201,7 @@ export function checkBalance(
         const reason = error.message?.trim()
           ? error.message
           : `unable to reach ${indexerWS} (connection refused, DNS, or TLS error). Is the indexer running?`;
-        reject(new Error(`WebSocket connection failed: ${reason}`));
+        reject(endpointRefusalFromWsError(indexerWS, error) ?? new Error(`WebSocket connection failed: ${reason}`));
       }
     });
 

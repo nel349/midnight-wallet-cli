@@ -289,19 +289,27 @@ const COMMAND_SPECS: CommandSpec[] = [
       'set <key> <value>   Write a config value',
       'unset <key>         Reset a config value to its default',
       '',
-      'Keys: network, wallet, proof-server, node, indexer-ws, account-build',
+      'Keys: network, wallet, proof-server, node, indexer-ws, account-build,',
+      '      blockfrost-project-id',
       '',
       'Endpoint keys (proof-server, node, indexer-ws) are scoped to a',
       'network: the selected one, or the one given with --network — a',
       'preprod node URL never applies to --network undeployed runs.',
+      '',
+      "blockfrost-project-id: preprod's indexer and node are served by Blockfrost,",
+      'which needs your own project id (create a Midnight preprod project at',
+      'https://blockfrost.io). It is filed under the network its prefix names,',
+      'shown masked, and never printed. MN_BLOCKFROST_PROJECT_ID in the',
+      'environment is used instead when set.',
     ],
     examples: [
       'midnight config get network',
       'midnight config set network preprod',
       'midnight config set wallet alice',
+      'midnight config set blockfrost-project-id nightpreprod...',
       'midnight config set proof-server http://localhost:6300',
-      'midnight config set node wss://rpc.preprod.midnight.network',
-      `midnight config set indexer-ws wss://indexer.preprod.midnight.network${INDEXER_GRAPHQL_WS_PATH}`,
+      'midnight config set node wss://rpc.preview.midnight.network',
+      `midnight config set indexer-ws wss://indexer.preview.midnight.network${INDEXER_GRAPHQL_WS_PATH}`,
       'midnight config unset proof-server',
     ],
     jsonFields: {
@@ -712,6 +720,14 @@ E2E testing, and a local devnet — all from the terminal.
 Wallets are network-agnostic: one seed derives addresses for all three
 networks (undeployed, preprod, preview). Network is chosen at runtime.
 
+Preprod's indexer and node are served by Blockfrost (Midnight shut its own
+preprod indexer down on 2026-10-09). Every request needs the user's own
+project id, from a Midnight preprod project at https://blockfrost.io:
+  midnight config set blockfrost-project-id <project id>
+or MN_BLOCKFROST_PROJECT_ID in the environment. Without one, a command that
+reaches preprod fails with BLOCKFROST_PROJECT_ID_REQUIRED. The project id is
+a secret: mn never prints it. Preview and undeployed need none.
+
 LEDGER 9 ONLY: this build of mn speaks ledger 9 only. A chain still on
 ledger 8 (preview and preprod today) is refused up front with an
 error saying so; use midnight-wallet-cli 0.5.x for those. localnet up
@@ -960,6 +976,14 @@ ERROR CODES
                                 install a current one
   NO_ACCOUNT              1     mn grant: the wallet has no account on this
                                 network; run grant deploy
+  BLOCKFROST_PROJECT_ID_REQUIRED 4
+                                Preprod is served by Blockfrost and no project
+                                id is set: config set blockfrost-project-id
+  BLOCKFROST_PROJECT_ID_REJECTED 4
+                                Blockfrost refused the project id (HTTP 403)
+  BLOCKFROST_LIMIT_REACHED 4    Blockfrost's plan or rate limit; wait and retry
+  ENDPOINT_SHUT_DOWN      4     An endpoint set by flag or config was shut down
+                                by its operator; unset it
   CANCELLED               7     Operation cancelled (SIGINT)
   UNKNOWN                 1     Unclassified error
 

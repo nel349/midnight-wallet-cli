@@ -29,6 +29,7 @@ import {
   PRE_SEND_SYNC_TIMEOUT_MS,
 } from './constants.ts';
 import { verbose } from './verbose.ts';
+import { assertNetworkAnswers } from './endpoint-check.ts';
 
 export type SyncMode = 'full' | 'lite' | 'no-dust';
 // full    = shielded + unshielded + dust
@@ -70,6 +71,8 @@ export async function buildFacade(
   cache?: WalletCacheData | null,
 ): Promise<FacadeBundle> {
   const networkId = getNetworkId(networkConfig.networkId);
+
+  await assertNetworkAnswers(networkConfig);
 
   verbose('facade', `Building facade for network ${networkConfig.networkId}`);
   verbose('facade', `Node: ${networkConfig.node}`);

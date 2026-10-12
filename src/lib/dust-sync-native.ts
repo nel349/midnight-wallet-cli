@@ -4,6 +4,7 @@
 // binary is missing or the run fails, callers fall back to the WASM path — the
 // sidecar is an optional accelerator, never a hard dependency.
 
+import { assertEndpointUsable } from './blockfrost.ts';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -161,6 +162,7 @@ export function runDustSyncNative(
   return new Promise((resolve, reject) => {
     const bin = resolveSidecarBinary();
     if (!bin) { reject(new Error('dust-sync sidecar not found')); return; }
+    assertEndpointUsable(network.indexerWS);
 
     const networkName = network.networkId.toLowerCase();
     const pubkeyHex = dustPublicKeyHexFromSeed(seed);

@@ -31,6 +31,7 @@ import {
   generateCallScript,
   generateStateScript,
   SCRIPT_PRELUDE,
+  indexerEnvironment,
 } from '../lib/contract/runner.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 
@@ -174,15 +175,22 @@ describe('generated providers object', () => {
       'NodeZkConfigProvider', 'httpClientProofProvider', 'indexerPublicDataProvider', 'levelPrivateStateProvider',
       `${providerSetupCode(NETWORK, 'counterPrivateState')}\nreturn providers;`,
     );
-    const providers = await fn(
-      dir, walletProvider, midnightProvider,
-      NodeZkConfigProvider, httpClientProofProvider, indexerPublicDataProvider, levelPrivateStateProvider,
-    );
+    // The generated code reads the indexer's URLs from its environment, as the script's process is given them.
+    const environment = indexerEnvironment(NETWORK);
+    Object.assign(process.env, environment);
     try {
-      expect(() => assertSeamsSupportEra(CURRENT_LEDGER_VERSION, providers)).not.toThrow();
-      expect(providers.midnightProvider).toBe(midnightProvider);
+      const providers = await fn(
+        dir, walletProvider, midnightProvider,
+        NodeZkConfigProvider, httpClientProofProvider, indexerPublicDataProvider, levelPrivateStateProvider,
+      );
+      try {
+        expect(() => assertSeamsSupportEra(CURRENT_LEDGER_VERSION, providers)).not.toThrow();
+        expect(providers.midnightProvider).toBe(midnightProvider);
+      } finally {
+        await providers.publicDataProvider.dispose();
+      }
     } finally {
-      await providers.publicDataProvider.dispose();
+      for (const name of Object.keys(environment)) delete process.env[name];
     }
   });
 });

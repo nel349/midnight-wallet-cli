@@ -9,6 +9,7 @@ import {
   setConfigValue,
   unsetConfigValue,
   getValidConfigKeys,
+  getBlockfrostProjectId,
 } from '../lib/cli-config.ts';
 
 const TEST_DIR = path.join(os.tmpdir(), `midnight-cli-config-test-${process.pid}`);
@@ -379,6 +380,67 @@ describe('unsetConfigValue', () => {
     expect(getConfigValue('network', TEST_DIR)).toBe('preprod');
     expect(getConfigValue('wallet', TEST_DIR)).toBe('alice');
     expect(getConfigValue('proof-server', TEST_DIR)).toBe('(not set)');
+  });
+});
+
+describe('blockfrost-project-id config key', () => {
+  const ID = 'nightpreprodAbCdEfGhIjKlMnOpQrStUv0123';
+  const raw = () => JSON.parse(fs.readFileSync(path.join(TEST_DIR, 'config.json'), 'utf-8'));
+
+  it('is a valid key, not set by default', () => {
+    expect(getValidConfigKeys()).toContain('blockfrost-project-id');
+    expect(getConfigValue('blockfrost-project-id', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('is filed under the network its prefix names, whichever network is selected', () => {
+    setConfigValue('network', 'undeployed', TEST_DIR);
+    setConfigValue('blockfrost-project-id', ID, TEST_DIR);
+    expect(raw().networks.preprod['blockfrost-project-id']).toBe(ID);
+    expect(raw().networks.undeployed).toBeUndefined();
+    expect(getBlockfrostProjectId(loadCliConfig(TEST_DIR), 'preprod')).toBe(ID);
+    expect(getBlockfrostProjectId(loadCliConfig(TEST_DIR), 'preview')).toBeUndefined();
+  });
+
+  it('is shown masked, with its network', () => {
+    setConfigValue('blockfrost-project-id', ID, TEST_DIR);
+    expect(getConfigValue('blockfrost-project-id', TEST_DIR)).toBe('nightpreprod…0123 (preprod)');
+  });
+
+  it('refuses a project id for a network mn doesn\'t reach through Blockfrost, and writes nothing', () => {
+    expect(() => setConfigValue('blockfrost-project-id', 'nightmainnetAbCdEfGhIjKlMnOp', TEST_DIR)).toThrow('it should start with "nightpreprod" (preprod)');
+    expect(fs.existsSync(path.join(TEST_DIR, 'config.json'))).toBe(false);
+  });
+
+  it('takes --network when it names the id\'s own network, and refuses another', () => {
+    setConfigValue('blockfrost-project-id', ID, TEST_DIR, 'preprod');
+    expect(getConfigValue('blockfrost-project-id', TEST_DIR, 'preprod')).toBe('nightpreprod…0123 (preprod)');
+    expect(getConfigValue('blockfrost-project-id', TEST_DIR, 'preview')).toBe('(not set)');
+    expect(() => setConfigValue('blockfrost-project-id', ID, TEST_DIR, 'preview')).toThrow('That is a preprod project id, and --network says preview.');
+  });
+
+  it('lives beside the network\'s endpoint overrides without disturbing them', () => {
+    setConfigValue('proof-server', 'http://localhost:16300', TEST_DIR, 'preprod');
+    setConfigValue('blockfrost-project-id', ID, TEST_DIR);
+    expect(raw().networks.preprod).toEqual({ 'proof-server': 'http://localhost:16300', 'blockfrost-project-id': ID });
+
+    unsetConfigValue('proof-server', TEST_DIR, 'preprod');
+    expect(raw().networks.preprod).toEqual({ 'blockfrost-project-id': ID });
+  });
+
+  it('is removed by unset, leaving the network\'s other settings', () => {
+    setConfigValue('proof-server', 'http://localhost:16300', TEST_DIR, 'preprod');
+    setConfigValue('blockfrost-project-id', ID, TEST_DIR);
+    unsetConfigValue('blockfrost-project-id', TEST_DIR);
+    expect(getConfigValue('blockfrost-project-id', TEST_DIR)).toBe('(not set)');
+    expect(raw().networks.preprod).toEqual({ 'proof-server': 'http://localhost:16300' });
+
+    unsetConfigValue('proof-server', TEST_DIR, 'preprod');
+    expect(raw().networks).toBeUndefined();
+  });
+
+  it('ignores one filed by hand under a network it isn\'t for', () => {
+    fs.writeFileSync(path.join(TEST_DIR, 'config.json'), JSON.stringify({ network: 'preview', networks: { preview: { 'blockfrost-project-id': ID } } }));
+    expect(getBlockfrostProjectId(loadCliConfig(TEST_DIR), 'preview')).toBeUndefined();
   });
 });
 

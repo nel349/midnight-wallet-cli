@@ -18,6 +18,7 @@
 // `partial=true` means "state is valid but not caught up — persist and resume".
 
 import WebSocket from 'ws';
+import { assertEndpointUsable, endpointRefusalFromWsError } from './blockfrost.ts';
 
 /** Why the subscription settled. `timeout`/`closed-early` are the partial cases. */
 export type WsFinishReason =
@@ -77,6 +78,7 @@ export function subscribeGraphqlWs<TResult>(
   const { query, variables, onNext, buildResult, timeoutMs, idleMs, idleBeforeFirstEvent, initialSilenceMs, signal } = sub;
 
   return new Promise<TResult>((resolve, reject) => {
+    assertEndpointUsable(wsUrl);
     const ws = new WebSocket(wsUrl, ['graphql-transport-ws']);
     let sawFirstEvent = false;
     let settled = false;
@@ -168,7 +170,7 @@ export function subscribeGraphqlWs<TResult>(
       if (caughtUp) finishOk('caught-up', false);
     });
 
-    ws.on('error', (err: Error) => finishErr(new Error(`WebSocket error: ${err.message}`)));
+    ws.on('error', (err: Error) => finishErr(endpointRefusalFromWsError(wsUrl, err) ?? new Error(`WebSocket error: ${err.message}`)));
 
     ws.on('close', () => {
       if (settled) return;

@@ -4,6 +4,7 @@
 // this is used at cold-start moments where heavyweight init would hurt.
 
 import WebSocket from 'ws';
+import { assertEndpointUsable, endpointRefusalFromWsError } from './blockfrost.ts';
 
 export interface RpcOptions {
   url: string;
@@ -25,6 +26,7 @@ export async function callNodeRpc<T = unknown>(
 ): Promise<T> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return new Promise<T>((resolvePromise, rejectPromise) => {
+    assertEndpointUsable(opts.url);
     const ws = new WebSocket(opts.url);
     let settled = false;
     const settle = (fn: () => void) => { if (!settled) { settled = true; fn(); } };
@@ -61,7 +63,7 @@ export async function callNodeRpc<T = unknown>(
 
     ws.on('error', (err) => {
       clearTimeout(timer);
-      settle(() => rejectPromise(err instanceof Error ? err : new Error(String(err))));
+      settle(() => rejectPromise(endpointRefusalFromWsError(opts.url, err) ?? (err instanceof Error ? err : new Error(String(err)))));
     });
   });
 }

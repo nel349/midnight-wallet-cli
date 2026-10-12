@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
 import { MIDNIGHT_DIR, DEFAULT_CONFIG_FILENAME, DIR_MODE, FILE_MODE, isValidWalletName } from './constants.ts';
+import { blockfrostNetworks, checkProjectId, maskProjectId, networkOfProjectId } from './blockfrost.ts';
 import { type NetworkName, isValidNetworkName } from './network.ts';
 import { UsageError } from './errors.ts';
 
@@ -12,6 +13,13 @@ export interface NetworkEndpointOverrides {
   'indexer-ws'?: string;
 }
 
+/** What is kept per network: endpoint overrides, and the Blockfrost project id of a network Blockfrost serves. */
+export interface NetworkSettings extends NetworkEndpointOverrides {
+  'blockfrost-project-id'?: string;
+}
+
+const PROJECT_ID_KEY = 'blockfrost-project-id';
+
 export interface CliConfig {
   network: NetworkName;
   /**
@@ -19,7 +27,7 @@ export interface CliConfig {
    * Endpoints are inherently network-specific; scoping them prevents a
    * preprod node URL from leaking into `--network undeployed` runs.
    */
-  networks?: Partial<Record<NetworkName, NetworkEndpointOverrides>>;
+  networks?: Partial<Record<NetworkName, NetworkSettings>>;
   /**
    * Legacy flat overrides (pre-scoping). Still read for backward
    * compatibility, but they only apply when the resolved network matches
@@ -38,7 +46,7 @@ const DEFAULT_CLI_CONFIG: CliConfig = {
   network: 'undeployed',
 };
 
-const VALID_CONFIG_KEYS: readonly string[] = ['network', 'proof-server', 'node', 'indexer-ws', 'wallet', 'account-build'] as const;
+const VALID_CONFIG_KEYS: readonly string[] = ['network', 'proof-server', 'node', 'indexer-ws', 'wallet', 'account-build', PROJECT_ID_KEY] as const;
 
 /**
  * Aliases mapped to canonical config keys. Keeps integrations that learned
@@ -128,16 +136,19 @@ export function loadCliConfig(configDir?: string): CliConfig {
   // string-valued endpoint keys; drop anything else silently (config files
   // are user-edited — tolerate junk rather than crash every command).
   if (parsed.networks && typeof parsed.networks === 'object') {
-    const networks: Partial<Record<NetworkName, NetworkEndpointOverrides>> = {};
+    const networks: Partial<Record<NetworkName, NetworkSettings>> = {};
     for (const [name, overrides] of Object.entries(parsed.networks)) {
       if (!isValidNetworkName(name) || !overrides || typeof overrides !== 'object') continue;
-      const scoped: NetworkEndpointOverrides = {};
+      const scoped: NetworkSettings = {};
       for (const key of ENDPOINT_KEYS) {
         const value = (overrides as Record<string, unknown>)[key];
         if (value && typeof value === 'string') {
           scoped[key as keyof NetworkEndpointOverrides] = value;
         }
       }
+      // A project id is kept only under the network its prefix names.
+      const projectId = (overrides as Record<string, unknown>)[PROJECT_ID_KEY];
+      if (typeof projectId === 'string' && networkOfProjectId(projectId) === name) scoped[PROJECT_ID_KEY] = projectId;
       if (Object.keys(scoped).length > 0) networks[name] = scoped;
     }
     if (Object.keys(networks).length > 0) config.networks = networks;
@@ -166,6 +177,11 @@ export function getEndpointOverridesForNetwork(
   };
 }
 
+/** The Blockfrost project id set for `networkName`, if any. */
+export function getBlockfrostProjectId(config: CliConfig, networkName: NetworkName): string | undefined {
+  return config.networks?.[networkName]?.[PROJECT_ID_KEY];
+}
+
 /**
  * Save CLI config to ~/.midnight/config.json.
  * Creates the directory if it doesn't exist.
@@ -189,6 +205,14 @@ export function getConfigValue(key: string, configDir?: string, scope?: NetworkN
   if (canonical === 'network') return config.network;
   if (canonical === 'wallet') return config.wallet ?? '(not set)';
   if (canonical === 'account-build') return config['account-build'] ?? '(not set)';
+  if (canonical === PROJECT_ID_KEY) {
+    // A secret: shown masked, and by network, since each network has its own.
+    const set = blockfrostNetworks().filter((network) => scope === undefined || scope === network).flatMap((network) => {
+      const projectId = getBlockfrostProjectId(config, network);
+      return projectId === undefined ? [] : [`${maskProjectId(projectId)} (${network})`];
+    });
+    return set.length > 0 ? set.join(', ') : '(not set)';
+  }
   if (ENDPOINT_KEYS.has(canonical)) {
     const overrides = getEndpointOverridesForNetwork(config, scope ?? config.network);
     const value = overrides[canonical as keyof NetworkEndpointOverrides];
@@ -207,7 +231,7 @@ export function getConfigValue(key: string, configDir?: string, scope?: NetworkN
  * following the user to the next network. Scoped entries win on conflict.
  */
 function migrateFlatEndpointsToScope(config: CliConfig, networkName: NetworkName): void {
-  const scoped: NetworkEndpointOverrides = { ...(config.networks?.[networkName] ?? {}) };
+  const scoped: NetworkSettings = { ...(config.networks?.[networkName] ?? {}) };
   let migrated = false;
   for (const key of ENDPOINT_KEYS) {
     const k = key as keyof NetworkEndpointOverrides;
@@ -254,6 +278,11 @@ export function setConfigValue(key: string, value: string, configDir?: string, s
     if (value.trim() === '') throw new Error('Invalid account-build: give the directory of the account build.');
     // Kept absolute, so it means the same directory wherever mn is run from.
     config['account-build'] = path.resolve(value);
+  } else if (canonical === PROJECT_ID_KEY) {
+    // Filed under the network its prefix names, whichever network is selected.
+    const { projectId, network } = checkProjectId(value);
+    if (scope !== undefined && scope !== network) throw new UsageError(`That is a ${network} project id, and --network says ${scope}.`);
+    config.networks = { ...(config.networks ?? {}), [network]: { ...(config.networks?.[network] ?? {}), [PROJECT_ID_KEY]: projectId } };
   } else if (ENDPOINT_KEYS.has(canonical)) {
     if (!isValidUrl(value)) {
       throw new Error(
@@ -262,7 +291,7 @@ export function setConfigValue(key: string, value: string, configDir?: string, s
     }
     const k = canonical as keyof NetworkEndpointOverrides;
     const target = scope ?? config.network;
-    const scoped: NetworkEndpointOverrides = { ...(config.networks?.[target] ?? {}) };
+    const scoped: NetworkSettings = { ...(config.networks?.[target] ?? {}) };
     scoped[k] = value;
     config.networks = { ...(config.networks ?? {}), [target]: scoped };
     // A legacy flat key applies to the selected network only.
@@ -294,6 +323,15 @@ export function unsetConfigValue(key: string, configDir?: string, scope?: Networ
     delete config.wallet;
   } else if (canonical === 'account-build') {
     delete config['account-build'];
+  } else if (canonical === PROJECT_ID_KEY) {
+    for (const network of blockfrostNetworks()) {
+      if (scope !== undefined && scope !== network) continue;
+      const scoped = config.networks?.[network];
+      if (!scoped) continue;
+      delete scoped[PROJECT_ID_KEY];
+      if (Object.keys(scoped).length === 0) delete config.networks![network];
+    }
+    if (config.networks && Object.keys(config.networks).length === 0) delete config.networks;
   } else if (ENDPOINT_KEYS.has(canonical)) {
     const k = canonical as keyof NetworkEndpointOverrides;
     const target = scope ?? config.network;
@@ -315,10 +353,10 @@ export function unsetConfigValue(key: string, configDir?: string, scope?: Networ
   saveCliConfig(config, configDir);
 }
 
-/** A network scope (`--network`) only means something for the per-network endpoint keys. */
+/** A network scope (`--network`) only means something for the keys kept per network. */
 function assertScopeApplies(canonical: string, scope: NetworkName | undefined): void {
-  if (scope !== undefined && !ENDPOINT_KEYS.has(canonical)) {
-    throw new UsageError(`--network only applies to the endpoint keys (${[...ENDPOINT_KEYS].join(', ')}), not "${canonical}".`);
+  if (scope !== undefined && !ENDPOINT_KEYS.has(canonical) && canonical !== PROJECT_ID_KEY) {
+    throw new UsageError(`--network only applies to the endpoint keys (${[...ENDPOINT_KEYS].join(', ')}) and ${PROJECT_ID_KEY}, not "${canonical}".`);
   }
 }
 

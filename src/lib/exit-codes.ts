@@ -47,6 +47,14 @@ export const ERROR_CODES = {
   UNSUPPORTED_NODE: 'UNSUPPORTED_NODE',
   /** `mn grant`: the wallet has no account on this network yet. Recovery: `mn grant deploy`. */
   NO_ACCOUNT: 'NO_ACCOUNT',
+  /** The network is served by Blockfrost and no project id is set. Recovery: `mn config set blockfrost-project-id <project id>`. */
+  BLOCKFROST_PROJECT_ID_REQUIRED: 'BLOCKFROST_PROJECT_ID_REQUIRED',
+  /** Blockfrost refused the project id. Recovery: check it at blockfrost.io and set it again. */
+  BLOCKFROST_PROJECT_ID_REJECTED: 'BLOCKFROST_PROJECT_ID_REJECTED',
+  /** Blockfrost is holding the project back (its plan's daily limit, or too many requests at once). Recovery: wait, or see the project's plan. */
+  BLOCKFROST_LIMIT_REACHED: 'BLOCKFROST_LIMIT_REACHED',
+  /** An endpoint set by flag or config was shut down by its operator. Recovery: unset it (`mn config unset indexer-ws`). */
+  ENDPOINT_SHUT_DOWN: 'ENDPOINT_SHUT_DOWN',
   UNKNOWN: 'UNKNOWN',
 } as const;
 
@@ -56,6 +64,10 @@ const SETUP_ERROR_CODES: ReadonlySet<string> = new Set([
   ERROR_CODES.LOCALNET_UNAVAILABLE,
   ERROR_CODES.LOCAL_STACK_UNREACHABLE,
   ERROR_CODES.AMBIGUOUS_LOCAL_STACKS,
+  ERROR_CODES.BLOCKFROST_PROJECT_ID_REQUIRED,
+  ERROR_CODES.BLOCKFROST_PROJECT_ID_REJECTED,
+  ERROR_CODES.BLOCKFROST_LIMIT_REACHED,
+  ERROR_CODES.ENDPOINT_SHUT_DOWN,
 ]);
 
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];

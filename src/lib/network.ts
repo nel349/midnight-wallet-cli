@@ -1,3 +1,4 @@
+import { blockfrostEndpoints, usesBlockfrost } from './blockfrost.ts';
 import { execSync } from 'child_process';
 import { ProtocolVersion } from '@midnightntwrk/wallet-sdk';
 import { loadCliConfig, getEndpointOverridesForNetwork } from './cli-config.ts';
@@ -29,10 +30,10 @@ export interface NetworkConfig {
 }
 
 const NETWORK_CONFIGS: Record<NetworkName, NetworkConfig> = {
+  // Served by Blockfrost since Midnight shut its own preprod indexer down
+  // (2026-10-09). These carry no project id: `resolveNetworkConfig` adds it.
   preprod: {
-    indexer: `https://indexer.preprod.midnight.network${INDEXER_GRAPHQL_PATH}`,
-    indexerWS: `wss://indexer.preprod.midnight.network${INDEXER_GRAPHQL_WS_PATH}`,
-    node: 'wss://rpc.preprod.midnight.network',
+    ...blockfrostEndpoints('preprod', undefined),
     proofServer: 'http://localhost:6300',
     networkId: 'PreProd',
   },
@@ -170,15 +171,19 @@ export interface ResolveNetworkConfigOptions {
   given?: EndpointOverrides;
   /** Local stack detection (tests inject docker output). */
   detect?: () => LocalStackPorts;
+  /** The user's Blockfrost project id, for a network Blockfrost serves. */
+  blockfrostProjectId?: string;
 }
 
 /**
  * Resolve a full network config: given endpoints first, then (on undeployed)
  * the single running local stack's ports for the components not given, then
- * the network defaults. Refuses when a component it must detect is ambiguous.
+ * the network defaults (on a network Blockfrost serves, its endpoints with the
+ * project id). Refuses when a component it must detect is ambiguous.
  */
 export function resolveNetworkConfig(name: NetworkName, options: ResolveNetworkConfigOptions = {}): NetworkConfig {
   const config = getNetworkConfig(name);
+  if (usesBlockfrost(name)) Object.assign(config, blockfrostEndpoints(name, options.blockfrostProjectId));
   const given = options.given ?? {};
 
   const need: NeededComponents = {
@@ -210,9 +215,15 @@ export function resolveNetworkConfig(name: NetworkName, options: ResolveNetworkC
   return config;
 }
 
-/** The indexer's HTTP GraphQL URL for its WebSocket URL. */
+/**
+ * The indexer's HTTP GraphQL URL for its WebSocket URL: the protocol changed
+ * and the path's trailing `/ws` dropped. A query string (a Blockfrost project
+ * id) stays where it is.
+ */
 export function indexerHttpFromWs(wsUrl: string): string {
-  return wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/ws$/, '');
+  const queryAt = wsUrl.indexOf('?');
+  const [base, query] = queryAt === -1 ? [wsUrl, ''] : [wsUrl.slice(0, queryAt), wsUrl.slice(queryAt)];
+  return base.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/ws$/, '') + query;
 }
 
 export interface EndpointOverrides {

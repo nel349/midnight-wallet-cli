@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { writeFileSync, unlinkSync, existsSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertEndpointUsable } from '../blockfrost.ts';
 import type { NetworkConfig } from '../network.ts';
 import { WITNESS_FILE_CANDIDATES } from './witness-discovery.ts';
 import { coerceArg } from './arg-coerce.ts';
@@ -95,9 +96,23 @@ export interface StateResult {
   maps: Record<string, { size: string }>;
 }
 
+// The indexer's URLs reach a generated script through its environment, not
+// its text: on a network Blockfrost serves they carry the user's project id,
+// and the script is a file in the dApp's directory until the run ends.
+const INDEXER_URL_ENV = 'MN_INDEXER_URL';
+const INDEXER_WS_URL_ENV = 'MN_INDEXER_WS_URL';
+
+export function indexerEnvironment(networkConfig: NetworkConfig): Record<string, string> {
+  assertEndpointUsable(networkConfig.indexer);
+  return {
+    [INDEXER_URL_ENV]: networkConfig.indexer,
+    [INDEXER_WS_URL_ENV]: networkConfig.indexerWS ?? networkConfig.indexer.replace('http', 'ws'),
+  };
+}
+
 export async function runState(options: StateOptions): Promise<StateResult> {
   const script = generateStateScript(options);
-  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage });
+  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: indexerEnvironment(options.networkConfig) });
   try {
     return JSON.parse(result) as StateResult;
   } catch {
@@ -109,9 +124,10 @@ export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
   const script = generateDeployScript(options);
   // The private-state secret goes to the subprocess via env (never the on-disk
   // script) so a caller-chosen owner is not written to the filesystem.
-  const extraEnv = options.privateStateSecretKey
-    ? { MN_PRIVATE_STATE_SECRET: options.privateStateSecretKey }
-    : undefined;
+  const extraEnv = {
+    ...indexerEnvironment(options.networkConfig),
+    ...(options.privateStateSecretKey ? { MN_PRIVATE_STATE_SECRET: options.privateStateSecretKey } : {}),
+  };
   const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: extraEnv });
   try {
     return JSON.parse(result) as DeployResult;
@@ -122,7 +138,7 @@ export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
 
 export async function runCall(options: CallOptions): Promise<CallResult> {
   const script = generateCallScript(options);
-  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage });
+  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: indexerEnvironment(options.networkConfig) });
   try {
     return JSON.parse(result) as CallResult;
   } catch {
@@ -310,8 +326,8 @@ const providers = {
     accountId: 'mn-contract-runner',
   }),
   publicDataProvider: indexerPublicDataProvider({
-    queryURL: ${JSON.stringify(networkConfig.indexer)},
-    subscriptionURL: ${JSON.stringify(networkConfig.indexerWS ?? networkConfig.indexer.replace('http', 'ws'))},
+    queryURL: process.env.${INDEXER_URL_ENV},
+    subscriptionURL: process.env.${INDEXER_WS_URL_ENV},
   }),
   zkConfigProvider,
   proofProvider: httpClientProofProvider({ url: ${JSON.stringify(networkConfig.proofServer)}, zkConfigProvider }),
@@ -482,8 +498,8 @@ if (typeof contractMod.ledger !== 'function') {
 
 process.stderr.write('Querying contract state...\\n');
 const provider = indexerPublicDataProvider({
-  queryURL: ${JSON.stringify(opts.networkConfig.indexer)},
-  subscriptionURL: ${JSON.stringify(opts.networkConfig.indexerWS ?? opts.networkConfig.indexer.replace('http', 'ws'))},
+  queryURL: process.env.${INDEXER_URL_ENV},
+  subscriptionURL: process.env.${INDEXER_WS_URL_ENV},
 });
 
 const contractState = await provider.queryContractState(${JSON.stringify(opts.contractAddress)});

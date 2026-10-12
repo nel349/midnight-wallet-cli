@@ -5,6 +5,7 @@
 
 import { FORK_SCHEDULE, type NetworkConfig } from './network.ts';
 import { getChainGenesisHash } from './chain-id.ts';
+import { isEndpointError } from './blockfrost.ts';
 import { queryIndexer } from './indexer-graphql.ts';
 
 export class UnsupportedLedgerError extends Error {
@@ -37,7 +38,10 @@ export async function fetchProtocolVersion(indexerHttpUrl: string): Promise<bigi
       indexerHttpUrl, '{ block { protocolVersion } }', undefined, PROBE_TIMEOUT_MS);
     const version = data.block?.protocolVersion;
     return typeof version === 'number' ? BigInt(version) : null;
-  } catch {
+  } catch (err) {
+    // An endpoint that can't serve the request as configured (no Blockfrost
+    // project id, one it refuses, a host that was shut down) says what to do.
+    if (isEndpointError(err)) throw err;
     return null;
   }
 }

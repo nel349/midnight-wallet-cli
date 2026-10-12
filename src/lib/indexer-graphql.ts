@@ -1,5 +1,7 @@
 // One GraphQL query to the indexer's HTTP endpoint.
 
+import { assertEndpointUsable, endpointRefusal } from './blockfrost.ts';
+
 /** The indexer could not answer a query: unreachable, an HTTP error, a non-JSON body, or GraphQL errors. */
 export class IndexerQueryError extends Error {
   constructor(reason: string) {
@@ -16,6 +18,7 @@ export async function queryIndexer<TData>(
   variables: Record<string, unknown> | undefined,
   timeoutMs: number,
 ): Promise<TData> {
+  assertEndpointUsable(indexerHttpUrl);
   let res: Response;
   try {
     res = await fetch(indexerHttpUrl, {
@@ -27,7 +30,7 @@ export async function queryIndexer<TData>(
   } catch (err) {
     throw new IndexerQueryError((err as Error).message);
   }
-  if (!res.ok) throw new IndexerQueryError(`HTTP ${res.status} ${res.statusText}`.trim());
+  if (!res.ok) throw endpointRefusal(indexerHttpUrl, res.status) ?? new IndexerQueryError(`HTTP ${res.status} ${res.statusText}`.trim());
   let body: { data?: TData | null; errors?: Array<{ message: string }> };
   try {
     body = await res.json() as typeof body;

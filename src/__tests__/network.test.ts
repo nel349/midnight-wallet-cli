@@ -9,6 +9,7 @@ import {
   getValidNetworkNames,
   resolveNetworkConfig,
   applyEndpointOverrides,
+  indexerHttpFromWs,
 } from '../lib/network.ts';
 
 describe('detectNetworkFromAddress', () => {
@@ -65,11 +66,12 @@ describe('isValidNetworkName', () => {
 });
 
 describe('getNetworkConfig', () => {
-  it('returns exact URLs for preprod', () => {
+  // Midnight shut its own preprod indexer down on 2026-10-09; Blockfrost serves it.
+  it('returns Blockfrost\'s URLs for preprod, without a project id', () => {
     const config = getNetworkConfig('preprod');
-    expect(config.indexer).toBe('https://indexer.preprod.midnight.network/api/v4/graphql');
-    expect(config.indexerWS).toBe('wss://indexer.preprod.midnight.network/api/v4/graphql/ws');
-    expect(config.node).toBe('wss://rpc.preprod.midnight.network');
+    expect(config.indexer).toBe('https://midnight-preprod.blockfrost.io/api/v0');
+    expect(config.indexerWS).toBe('wss://midnight-preprod.blockfrost.io/api/v0/ws');
+    expect(config.node).toBe('wss://rpc.midnight-preprod.blockfrost.io');
     expect(config.proofServer).toBe('http://localhost:6300');
     expect(config.networkId).toBe('PreProd');
   });
@@ -98,7 +100,7 @@ describe('getNetworkConfig', () => {
     a.proofServer = 'http://mutated';
     a.indexer = 'http://mutated';
     expect(b.proofServer).toBe('http://localhost:6300');
-    expect(b.indexer).toBe('https://indexer.preprod.midnight.network/api/v4/graphql');
+    expect(b.indexer).toBe('https://midnight-preprod.blockfrost.io/api/v0');
   });
 });
 
@@ -143,7 +145,25 @@ describe('resolveNetworkConfig', () => {
     const a = resolveNetworkConfig('preprod');
     a.node = 'wss://mutated';
     const b = resolveNetworkConfig('preprod');
-    expect(b.node).toBe('wss://rpc.preprod.midnight.network');
+    expect(b.node).toBe('wss://rpc.midnight-preprod.blockfrost.io');
+  });
+
+  it('puts the Blockfrost project id on preprod\'s indexer and node', () => {
+    const config = resolveNetworkConfig('preprod', { blockfrostProjectId: 'nightpreprodAbCdEfGhIjKlMnOp' });
+    expect(config.indexer).toBe('https://midnight-preprod.blockfrost.io/api/v0?project_id=nightpreprodAbCdEfGhIjKlMnOp');
+    expect(config.indexerWS).toBe('wss://midnight-preprod.blockfrost.io/api/v0/ws?project_id=nightpreprodAbCdEfGhIjKlMnOp');
+    expect(config.node).toBe('wss://rpc.midnight-preprod.blockfrost.io?project_id=nightpreprodAbCdEfGhIjKlMnOp');
+    expect(config.proofServer).toBe('http://localhost:6300');
+  });
+
+  it('lets given endpoints win over Blockfrost\'s', () => {
+    const config = resolveNetworkConfig('preprod', { blockfrostProjectId: 'nightpreprodAbCdEfGhIjKlMnOp', given: { node: 'wss://my-node', indexerWS: 'wss://my-indexer/api/v4/graphql/ws' } });
+    expect(config.node).toBe('wss://my-node');
+    expect(config.indexer).toBe('https://my-indexer/api/v4/graphql');
+  });
+
+  it('gives a project id to no network Blockfrost doesn\'t serve', () => {
+    expect(resolveNetworkConfig('preview', { blockfrostProjectId: 'nightpreprodAbCdEfGhIjKlMnOp' })).toEqual(getNetworkConfig('preview'));
   });
 });
 
@@ -276,7 +296,7 @@ describe('applyEndpointOverrides — network scoping (cross-network leak regress
 
     const preprod = getNetworkConfig('preprod');
     applyEndpointOverrides(preprod, {}, 'preprod', TEST_DIR);
-    expect(preprod.node).toBe('wss://rpc.preprod.midnight.network');
+    expect(preprod.node).toBe('wss://rpc.midnight-preprod.blockfrost.io');
   });
 
   it('scoped override beats the flat key for the pinned network', () => {
@@ -304,5 +324,22 @@ describe('applyEndpointOverrides — network scoping (cross-network leak regress
     const config = getNetworkConfig('undeployed');
     applyEndpointOverrides(config, {}, 'undeployed', TEST_DIR);
     expect(config.indexer).toBe('http://localhost:19088/api/v4/graphql');
+  });
+});
+
+describe('indexerHttpFromWs', () => {
+  it('changes the protocol and drops the path\'s trailing /ws', () => {
+    expect(indexerHttpFromWs('ws://localhost:8088/api/v4/graphql/ws')).toBe('http://localhost:8088/api/v4/graphql');
+    expect(indexerHttpFromWs('wss://indexer.preview.midnight.network/api/v4/graphql/ws')).toBe('https://indexer.preview.midnight.network/api/v4/graphql');
+  });
+
+  // An explicit Blockfrost URL kept its /ws, so every HTTP query went to the WebSocket path.
+  it('keeps a query string where it is', () => {
+    expect(indexerHttpFromWs('wss://midnight-preprod.blockfrost.io/api/v0/ws?project_id=nightpreprodAbCdEfGhIjKlMnOp'))
+      .toBe('https://midnight-preprod.blockfrost.io/api/v0?project_id=nightpreprodAbCdEfGhIjKlMnOp');
+  });
+
+  it('leaves a path that doesn\'t end in /ws alone', () => {
+    expect(indexerHttpFromWs('wss://example.org/graphql?ws=/ws')).toBe('https://example.org/graphql?ws=/ws');
   });
 });

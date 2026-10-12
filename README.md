@@ -106,10 +106,24 @@ midnight transfer mn_addr_preprod1... 100
 | Network | Description |
 |---------|-------------|
 | `undeployed` | Local network. On this build: a ledger-9 stack you run yourself (`midnight localnet up` is refused) |
-| `preprod` | Midnight pre-production testnet (ledger 8 today: refused by this build, use 0.5.x) |
+| `preprod` | Midnight pre-production testnet (ledger 8 today: refused by this build, use 0.5.x). Its indexer and node are served by Blockfrost: needs a project id |
 | `preview` | Midnight preview testnet (ledger 8 today: refused by this build, use 0.5.x) |
 
 Wallets are network-agnostic — one seed derives addresses for all three networks. Use `--network <name>` on any command, or persist it with `midnight config set network preview`.
+
+### Preprod and Blockfrost
+
+Midnight shut its own preprod indexer down on 2026-10-09; [Blockfrost serves it now](https://docs.midnight.network/guides/networks-and-environments), along with the node RPC, and every request needs your own project id. Create a project for Midnight Preprod at [blockfrost.io](https://blockfrost.io) and give mn its id:
+
+```bash
+midnight config set blockfrost-project-id <project id>   # or: export MN_BLOCKFROST_PROJECT_ID=<project id>
+```
+
+- Without one, a command that reaches preprod stops with `BLOCKFROST_PROJECT_ID_REQUIRED` and these instructions. A refused id is `BLOCKFROST_PROJECT_ID_REJECTED`. Requests count against your Blockfrost plan. (On this ledger-9 build preprod is then refused as a ledger-8 chain, until it forks.)
+- The project id is a secret. mn keeps it in `~/.midnight/config.json` (mode 0600), shows it masked in `config get`, and hides it in everything it prints, errors and `--verbose` logs included.
+- `mn serve` gives a connected dApp the wallet's indexer and node URLs (the DApp connector's `getConfiguration`), and on preprod those carry your project id: connect only dApps you trust with it.
+- An old `indexer-ws` setting that points at `indexer.preprod.midnight.network` fails with `ENDPOINT_SHUT_DOWN`: remove it with `midnight config unset indexer-ws --network preprod`.
+- Preview and the local network need no project id.
 
 ## Native dust acceleration
 

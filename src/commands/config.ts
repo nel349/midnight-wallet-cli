@@ -55,10 +55,12 @@ export default async function configCommand(args: ParsedArgs): Promise<void> {
       throw new UsageError(`Missing value for config set.\nUsage: midnight config set ${key} <value>`);
     }
     setConfigValue(key, value, undefined, scope);
+    // A project id is a secret: what was set is said the way `config get` shows it.
+    const shown = key === 'blockfrost-project-id' ? getConfigValue(key, undefined, scope) : value;
     if (hasFlag(args, 'json')) {
-      writeJsonResult({ action: 'set', key, value });
+      writeJsonResult({ action: 'set', key, value: shown });
       return;
     }
-    process.stderr.write(green('✓') + ` ${key} = ${value}\n`);
+    process.stderr.write(green('✓') + ` ${key} = ${shown}\n`);
   }
 }
