@@ -20,7 +20,7 @@ describe('deployShortOfDustNote', () => {
   });
 
   it('leaves the error it is added to a Dust shortage, with the same exit code', () => {
-    const fromServe = 'No Dust is free to pay the fee (Insufficient Funds: could not balance dust).';
+    const fromServe = 'The wallet has no Dust available that covers this transaction\'s fee (Insufficient Funds: could not balance dust), and no balanced transaction is holding any back on this server.';
     expect(classifyError(new Error(`${fromServe}\n\n${deployShortOfDustNote(0n)}`)))
       .toEqual({ exitCode: EXIT_INSUFFICIENT_BALANCE, errorCode: ERROR_CODES.DUST_REQUIRED });
   });

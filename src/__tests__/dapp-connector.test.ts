@@ -18,6 +18,7 @@ import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
 import { PROOF_TIMEOUT_MS } from '../lib/constants.ts';
+import { classifyError } from '../lib/exit-codes.ts';
 import { FORK_SCHEDULE } from '../lib/network.ts';
 import { deriveUnshieldedAddress, deriveAllShieldedAddresses, deriveShieldedAddress } from '../lib/derive-address.ts';
 import { DustAddress, MidnightBech32m, UnshieldedAddress } from '@midnightntwrk/wallet-sdk/address-format';
@@ -1085,9 +1086,11 @@ describe('dapp-connector', () => {
       await vi.advanceTimersByTimeAsync(9 * 3_000);
       const err: any = await failure;
       expect(err.code).toBe('InternalError');
-      expect(err.message).toContain('No Dust is free to pay the fee (No dust tokens found in the wallet state)');
-      expect(err.message).toContain('Each balanced transaction reserves a whole Dust coin');
-      expect(err.message).toContain('0 balanced transaction(s) are waiting to be submitted on this server');
+      // Nothing is reserved on this server, so the message doesn't send the caller waiting for a reservation to clear.
+      expect(err.message).toContain('The wallet has no Dust available that covers this transaction\'s fee (No dust tokens found in the wallet state)');
+      expect(err.message).toContain('no balanced transaction is holding any back on this server');
+      expect(err.message).not.toContain('Retry once they settle');
+      expect(classifyError(err).errorCode).toBe('DUST_REQUIRED');
       expect(callCount).toBe(10); // DUST_RETRY_ATTEMPTS = 10
       vi.useRealTimers();
     });
@@ -1248,6 +1251,32 @@ describe('dapp-connector', () => {
         await connector.handlers.submitTransaction({ tx: first.tx }, ctx('c1'));
         await connector.handlers.balanceUnsealedTransaction(agentTx, ctx('c1'));
         expect(balance).toHaveBeenCalledTimes(3);
+      });
+
+      it('says a balanced transaction is holding the Dust when one is, and how many', async () => {
+        vi.useFakeTimers();
+        const stderrWrite = process.stderr.write;
+        process.stderr.write = (() => true) as any;
+        try {
+          const balance = vi.fn()
+            .mockResolvedValueOnce({ type: 'RECIPE' })
+            // The shape of the wallet SDK's own Dust shortage.
+            .mockRejectedValue(Object.assign(new Error('Insufficient Funds: could not balance dust'), { _tag: 'Wallet.InsufficientFunds', tokenType: 'dust' }));
+          const { connector } = feeWallet({ balanceUnboundTransaction: balance, finalizeRecipe: vi.fn().mockResolvedValue(finalizedTx(0x01)) }, undefined,
+            { maxFeeSpecks: ONE_DUST, maxPending: 2 });
+          const agentTx = { tx: hex(await unsealedBytes(agentPaysMerchant())) };
+
+          await connector.handlers.balanceUnsealedTransaction(agentTx, ctx('c1'));
+          const failure = connector.handlers.balanceUnsealedTransaction(agentTx, ctx('c2')).catch((e: any) => e);
+          await vi.advanceTimersByTimeAsync(9 * 2 * 3_000);
+          const err: any = await failure;
+          expect(err.message).toContain('No Dust is free to pay the fee ([Wallet.InsufficientFunds] Insufficient Funds: could not balance dust)');
+          expect(err.message).toContain('1 balanced transaction(s) are waiting to be submitted on this server. Retry once they settle.');
+          expect(classifyError(err).errorCode).toBe('DUST_REQUIRED');
+        } finally {
+          process.stderr.write = stderrWrite;
+          vi.useRealTimers();
+        }
       });
 
       it('counts balances still in flight: two at the same moment cannot both take the last slot', async () => {

@@ -13,6 +13,8 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ### Fixed
 
+- **A command no longer lets another wallet's `mn serve` pay for it.** `mn contract deploy`, `mn contract call`, `mn grant` and `mn test run` reuse an `mn serve` already running on the port. They checked its network and its endpoints, not its wallet: with a serve for one wallet running, a command given `--wallet` for another had the first wallet pay, with no word of it. They now refuse, naming both wallets.
+- **`mn serve` says so when the wallet's Dust is simply less than the fee.** A Dust shortage that waiting didn't fix was always reported as Dust held by balanced transactions waiting to be submitted ("Retry once they settle"), even with none waiting. With none, the error now says the wallet's Dust doesn't cover the fee and that it builds up with time.
 - **`mn contract` shows the wallet's NIGHT as NIGHT.** The wallet check before a deploy or call printed the balance in the token's smallest unit and called it NIGHT (`Wallet OK (1000000000 NIGHT, ...)` for 1000 NIGHT), and its success lines carried two check marks.
 
 ## [0.6.0-rc.7] - 2026-10-11

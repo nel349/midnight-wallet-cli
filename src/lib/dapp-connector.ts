@@ -606,11 +606,19 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
     });
   }
 
-  /** A Dust shortage that waiting didn't fix, with what is holding the Dust and what to do. */
+  /** A Dust shortage that waiting didn't fix, with what is holding the Dust (if anything is) and what to do. */
   function dustExhaustedError(err: unknown) {
+    const pending = pendingCount();
+    if (pending === 0) {
+      // Nothing is reserved, so nothing will come free: the wallet's Dust is simply less than the fee.
+      return createApiError('InternalError',
+        `The wallet has no Dust available that covers this transaction's fee (${extractErrorDetail(err)}), and no balanced `
+        + 'transaction is holding any back on this server. Dust builds up with time from the NIGHT registered for it: '
+        + 'retry later, or register more NIGHT for Dust generation.');
+    }
     return createApiError('InternalError',
       `No Dust is free to pay the fee (${extractErrorDetail(err)}). Each balanced transaction reserves a whole Dust coin `
-      + `until it is submitted and on chain, or released when its connection closes or it expires; ${pendingCount()} `
+      + `until it is submitted and on chain, or released when its connection closes or it expires; ${pending} `
       + 'balanced transaction(s) are waiting to be submitted on this server. Retry once they settle. To pay for more '
       + 'transactions at once, the wallet needs more Dust coins: one per NIGHT UTXO registered for Dust generation.');
   }
