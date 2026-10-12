@@ -143,3 +143,37 @@ describe('resolveNetwork on preprod', () => {
     expect(config.indexer).toBe('https://midnight-preprod.blockfrost.io/api/v0');
   });
 });
+
+// mn contract and mn test resolve the network without reading endpoint flags
+// themselves: they used the defaults whatever `config set` held, so a deploy
+// went to another chain than the one every other command talked to.
+describe('resolveNetwork: endpoints given by config or flag', () => {
+  const MN_NO_DOCKER = 'undeployed';
+
+  it('applies the endpoints saved for the network', () => {
+    setConfigValue('network', MN_NO_DOCKER, TEST_DIR);
+    setConfigValue('node', 'ws://localhost:39944', TEST_DIR);
+    setConfigValue('indexer-ws', 'ws://localhost:38088/api/v4/graphql/ws', TEST_DIR);
+    setConfigValue('proof-server', 'http://localhost:36300', TEST_DIR);
+    const { config } = resolveNetwork(makeCtx());
+    expect(config.node).toBe('ws://localhost:39944');
+    expect(config.indexerWS).toBe('ws://localhost:38088/api/v4/graphql/ws');
+    expect(config.indexer).toBe('http://localhost:38088/api/v4/graphql');
+    expect(config.proofServer).toBe('http://localhost:36300');
+  });
+
+  it('lets a flag win over the saved endpoint', () => {
+    setConfigValue('network', 'preview', TEST_DIR);
+    setConfigValue('proof-server', 'http://saved:6300', TEST_DIR);
+    const { config } = resolveNetwork(makeCtx({ args: makeArgs(['--proof-server', 'http://flag:6300']) }));
+    expect(config.proofServer).toBe('http://flag:6300');
+    expect(config.node).toBe('wss://rpc.preview.midnight.network');
+  });
+
+  it('keeps one network\'s saved endpoints away from another', () => {
+    setConfigValue('network', 'preview', TEST_DIR);
+    setConfigValue('proof-server', 'http://preview-prover:6300', TEST_DIR);
+    const { config } = resolveNetwork(makeCtx({ args: makeArgs(['--network', 'preprod']) }));
+    expect(config.proofServer).toBe('http://localhost:6300');
+  });
+});

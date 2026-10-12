@@ -4,6 +4,7 @@ import * as ledger from '@midnight-ntwrk/ledger-v8';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
+import { bindCachesToIndexer } from '../cache-indexer.ts';
 import { clearWalletCache } from '../wallet-cache.ts';
 import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
@@ -205,6 +206,7 @@ async function stepBalance(amount: number, config: DappTestConfig, callbacks: Pr
     callbacks.onMessage(`SDK: ${msg}`);
   });
   const restoreRpc = suppressRpcNoise();
+  bindCachesToIndexer(network, networkConfig.indexerWS);
   const cache = loadWalletCache(address, network);
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
 
@@ -278,6 +280,7 @@ async function stepDust(config: DappTestConfig, callbacks: PrepCallbacks): Promi
 
   const unsuppress = suppressSdkTransientErrors();
   const restoreRpc = suppressRpcNoise();
+  bindCachesToIndexer(network, networkConfig.indexerWS);
   const cache = loadWalletCache(address, network);
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
 

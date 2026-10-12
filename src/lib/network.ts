@@ -74,9 +74,10 @@ interface TestcontainerPorts {
  */
 export function detectTestcontainerPorts(): TestcontainerPorts {
   try {
+    // Docker's own complaint when it isn't running is not the user's business: stderr is dropped.
     const output = execSync(
       'docker ps --format "{{.Image}}|{{.Ports}}"',
-      { encoding: 'utf-8', timeout: 5000 }
+      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
     );
 
     const result: TestcontainerPorts = {};

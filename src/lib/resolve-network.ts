@@ -10,6 +10,7 @@ import {
   isValidNetworkName,
   getValidNetworkNames,
   resolveNetworkConfig,
+  applyEndpointOverrides,
 } from './network.ts';
 import { checkProjectId, usesBlockfrost } from './blockfrost.ts';
 import { getBlockfrostProjectId, loadCliConfig } from './cli-config.ts';
@@ -70,9 +71,12 @@ export function resolveBlockfrostProjectId(
 }
 
 /**
- * Resolve network name + full config in one call.
- * Applies testcontainer port detection for undeployed, and the Blockfrost
- * project id on a network Blockfrost serves.
+ * Resolve network name + full config in one call: testcontainer port
+ * detection on undeployed, the Blockfrost project id on a network Blockfrost
+ * serves, then the endpoints given by flag or saved with `config set`, which
+ * win. Every caller gets the same endpoints, so a command that resolves the
+ * network without looking at endpoint flags itself (contract, test) still
+ * honours the saved ones.
  */
 export function resolveNetwork(ctx: NetworkResolutionContext): {
   name: NetworkName;
@@ -80,5 +84,10 @@ export function resolveNetwork(ctx: NetworkResolutionContext): {
 } {
   const name = resolveNetworkName(ctx);
   const config = resolveNetworkConfig(name, resolveBlockfrostProjectId(name, ctx.configDir));
+  applyEndpointOverrides(config, {
+    proofServer: getFlag(ctx.args, 'proof-server'),
+    node: getFlag(ctx.args, 'node'),
+    indexerWS: getFlag(ctx.args, 'indexer-ws'),
+  }, name, ctx.configDir);
   return { name, config };
 }

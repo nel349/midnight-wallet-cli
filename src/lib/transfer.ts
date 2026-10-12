@@ -7,6 +7,7 @@ import { NetworkId } from '@midnight-ntwrk/wallet-sdk-abstractions';
 import { type UtxoWithMeta as DustUtxoWithMeta } from '@midnight-ntwrk/wallet-sdk-dust-wallet/v1';
 import * as rx from 'rxjs';
 
+import { UsageError } from './errors.ts';
 import { type NetworkConfig } from './network.ts';
 import { type FacadeBundle, quickSync, suppressSdkTransientErrors } from './facade.ts';
 import { defaultRepository } from './wallet-data-repository.ts';
@@ -90,10 +91,10 @@ export function nightToMicro(amountNight: number): bigint {
 export function parseAmount(amountStr: string): number {
   const amount = Number(amountStr);
   if (Number.isNaN(amount) || !Number.isFinite(amount)) {
-    throw new Error(`Invalid amount: "${amountStr}" — must be a positive number`);
+    throw new UsageError(`Invalid amount: "${amountStr}" — must be a positive number`);
   }
   if (amount <= 0) {
-    throw new Error(`Invalid amount: "${amountStr}" — must be greater than 0`);
+    throw new UsageError(`Invalid amount: "${amountStr}" — must be greater than 0`);
   }
   return amount;
 }

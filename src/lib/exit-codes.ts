@@ -1,3 +1,4 @@
+import { isUsageError } from './errors.ts';
 // Structured exit codes and error classification for CLI
 // Used by both JSON mode and non-JSON error reporting
 
@@ -65,6 +66,11 @@ interface ClassifiedError {
  */
 export function classifyError(err: Error): ClassifiedError {
   // A typed error that carries its own code is classified by it, not by its text.
+  // A usage error is the caller's to fix, whatever its text (the CLI and MCP agree on this).
+  // (Tested through `unknown`: UsageError has Error's shape, so narrowing `err` itself would leave `never`.)
+  if (isUsageError(err as unknown)) {
+    return { exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.INVALID_ARGS };
+  }
   const code = (err as { code?: unknown }).code;
   if (code === ERROR_CODES.UNSUPPORTED_NODE) {
     return { exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNSUPPORTED_NODE };
@@ -121,7 +127,8 @@ export function classifyError(err: Error): ClassifiedError {
   }
 
   // Stale local cache (e.g. `applied > highest`, `chainId mismatch`)
-  if (msg.includes('stale cache') || msg.includes('chain reset') || msg.includes('chainid mismatch') || msg.includes('applied > highest')) {
+  // "inserted non-linearly": state resumed against an indexer that numbers its events differently.
+  if (msg.includes('stale cache') || msg.includes('chain reset') || msg.includes('chainid mismatch') || msg.includes('applied > highest') || msg.includes('inserted non-linearly')) {
     return { exitCode: EXIT_TX_REJECTED, errorCode: ERROR_CODES.STALE_CACHE };
   }
 
