@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as ledger from '@midnight-ntwrk/ledger-v8';
@@ -8,8 +8,10 @@ import {
   adaptResult,
   resolveSidecarBinary,
   nativeDustSyncAvailable,
+  runDustSyncNative,
   type SidecarCheckpoint,
 } from '../lib/dust-sync-native.ts';
+import type { NetworkConfig } from '../lib/network.ts';
 import { DUST_STATE_OWNED_HEX } from './fixtures/dust-state-owned.ts';
 
 describe('resumeDecision (kill-safe resume)', () => {
@@ -154,5 +156,80 @@ describe('adaptResult — native-path generation-tree collapse', () => {
     expect(on.balance).toBe(off.balance);                                   // collapse never moves the balance
     expect(on.retention.ownedGenerationIndices).toEqual([3]);              // owned indices pass through
     expect(on.state.generatingTreeRoot()).toBe(off.state.generatingTreeRoot()); // root invariant held
+  });
+});
+
+// A stand-in sidecar (a shell script) run for real, in a home of its own.
+describe('runDustSyncNative when the sidecar ends without a result', () => {
+  const NETWORK: NetworkConfig = {
+    indexer: 'http://localhost:8088/api/v4/graphql', indexerWS: 'ws://localhost:8088/api/v4/graphql/ws',
+    node: 'ws://localhost:9944', proofServer: 'http://localhost:6300', networkId: 'Undeployed',
+  };
+  const SEED = Buffer.alloc(32, 7);
+  const state = () => ledger.DustLocalState.deserialize(new Uint8Array(Buffer.from(DUST_STATE_OWNED_HEX, 'hex')));
+  let home: string;
+  let saved: Record<string, string | undefined>;
+
+  const sidecar = (script: string): void => {
+    const bin = join(home, 'dust-sync');
+    writeFileSync(bin, `#!/bin/sh\n${script}\n`);
+    chmodSync(bin, 0o755);
+    process.env.MN_DUST_SYNC_BIN = bin;
+  };
+  const checkpointFile = (): string => join(home, '.midnight', 'cache', 'undeployed', readCheckpointName());
+  const readCheckpointName = (): string => {
+    const dir = join(home, '.midnight', 'cache', 'undeployed');
+    const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.startsWith('dust-native-')) : [];
+    return files[0] ?? 'dust-native-missing.json';
+  };
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'mn-sidecar-run-'));
+    saved = { HOME: process.env.HOME, MN_DUST_SYNC_BIN: process.env.MN_DUST_SYNC_BIN, MN_DISABLE_NATIVE_DUST: process.env.MN_DISABLE_NATIVE_DUST };
+    process.env.HOME = home;
+    delete process.env.MN_DISABLE_NATIVE_DUST;
+  });
+  afterEach(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  // Found on preprod through Blockfrost: the sidecar failed at startup on a
+  // resumed sync, and the checkpoint mn had just seeded for it was taken as its
+  // result. The sync neither fell back to WASM nor moved, six times over.
+  it('rejects when it failed at startup on a resumed sync, so the caller falls back', async () => {
+    sidecar('cat > /dev/null; echo "dust-sync: params query: status code 405" >&2; exit 2');
+    await expect(runDustSyncNative(SEED, NETWORK, { startFromId: 92812, initialState: state() }))
+      .rejects.toThrow('dust-sync exited 2: dust-sync: params query: status code 405');
+    // The seed it was given is still where the run began: nothing was applied.
+    expect(JSON.parse(readFileSync(checkpointFile(), 'utf-8')).last_applied_event_id).toBe(92811);
+  });
+
+  it('rejects when it failed at startup on a fresh sync', async () => {
+    sidecar('cat > /dev/null; echo "dust-sync: params query: status code 405" >&2; exit 2');
+    await expect(runDustSyncNative(SEED, NETWORK, { startFromId: 0 })).rejects.toThrow('dust-sync exited 2');
+  });
+
+  it('rejects a sidecar killed part way: what it checkpointed is picked up by the next run, not passed off as a result', async () => {
+    const progressed: SidecarCheckpoint = {
+      dust_state: DUST_STATE_OWNED_HEX, last_applied_event_id: 120000, owned_generation_indices: [], generation_frontier: 0,
+      balance: '0', available_coins: 0, events_applied: 27188, partial: true,
+    };
+    // Reads its --out argument (the 4th), writes a later checkpoint there, and dies without a result line.
+    sidecar(`cat > /dev/null; printf '%s' '${JSON.stringify(progressed)}' > "$4"; kill -9 $$`);
+    await expect(runDustSyncNative(SEED, NETWORK, { startFromId: 92812, initialState: state() })).rejects.toThrow('dust-sync exited');
+    expect(JSON.parse(readFileSync(checkpointFile(), 'utf-8')).last_applied_event_id).toBe(120000);
+  });
+
+  it('takes the result line of a sidecar that finished', async () => {
+    const done: SidecarCheckpoint = {
+      dust_state: DUST_STATE_OWNED_HEX, last_applied_event_id: 200000, owned_generation_indices: [], generation_frontier: 0,
+      balance: '0', available_coins: 0, events_applied: 107188, partial: false,
+    };
+    sidecar(`cat > /dev/null; echo '${JSON.stringify(done)}'`);
+    const result = await runDustSyncNative(SEED, NETWORK, { startFromId: 92812, initialState: state() });
+    expect(result).toMatchObject({ lastAppliedEventId: 200000, partial: false, eventCount: 107188 });
   });
 });

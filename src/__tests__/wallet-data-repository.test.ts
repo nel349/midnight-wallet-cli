@@ -195,6 +195,55 @@ describe('WalletDataRepository — dust reads', () => {
     expect(view.fromCache).toBe(false);            // we started cold
   });
 
+  // Blockfrost drops a reader slower than its stream after about 80 s: a cold
+  // preprod sync through the WASM reader is some twenty short windows. Six was
+  // the old limit, and the sync stopped a third of the way.
+  it('resumes through as many short windows as the sync needs, while each one moves', async () => {
+    let calls = 0;
+    let clock = 1_000_000;
+    const repo = new WalletDataRepository({
+      now: () => clock,
+      fetchTip: async () => 'tip-A',
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchDust: async (_seed, _net, opts) => {
+        calls++;
+        clock += 80_000;
+        const result = fakeDustResult({ lastAppliedEventId: calls * 80_000 - 1, eventCount: 80_000, partial: calls < 21 });
+        opts.onCheckpoint?.(result.state, result.lastAppliedEventId, result.retention);
+        return result;
+      },
+      cacheDir: TMP,
+    });
+
+    const view = await repo.dust(SEED, NETWORK);
+    expect(calls).toBe(21);
+    expect(view.partial).toBe(false);
+    expect(view.eventsApplied).toBe(21 * 80_000);
+  });
+
+  it('gives up after three windows in a row that apply nothing, and says the state is short', async () => {
+    let calls = 0;
+    const repo = new WalletDataRepository({
+      now: () => 1_000_000,
+      fetchTip: async () => 'tip-A',
+      fetchUnshielded: async () => fakeBalanceSummary(),
+      fetchDust: async (_seed, _net, opts) => {
+        calls++;
+        // One window of progress, then a reader that returns at once with nothing.
+        const moved = calls === 1;
+        const result = fakeDustResult({ lastAppliedEventId: moved ? 499 : -1, eventCount: moved ? 500 : 0, partial: true });
+        if (moved) opts.onCheckpoint?.(result.state, result.lastAppliedEventId, result.retention);
+        return result;
+      },
+      cacheDir: TMP,
+    });
+
+    const view = await repo.dust(SEED, NETWORK);
+    expect(calls).toBe(4);
+    expect(view.partial).toBe(true);
+    expect(view.lastAppliedEventId).toBe(499);
+  });
+
   it('keeps a completed sync when the tip fetch fails at memo time', async () => {
     // The tip probe is an optimization. A cold dust sync is minutes of work that
     // is already on disk by this point; a node blip must not turn it into a throw.
@@ -232,12 +281,15 @@ describe('WalletDataRepository — dust reads', () => {
     // event 686,503 of 1,450,904 on preprod while exiting 0.
     let calls = 0;
     let nextLastEventId = 249;
+    // Each window takes ten minutes: the loop's hour is used up after six.
+    let clock = 1_000_000;
     const repo = new WalletDataRepository({
-      now: () => 1_000_000,
+      now: () => clock,
       fetchTip: async () => 'tip-A',
       fetchUnshielded: async () => fakeBalanceSummary(),
       fetchDust: async (_seed, _net, opts) => {
         calls++;
+        clock += 10 * 60_000;
         const result = fakeDustResult({
           lastAppliedEventId: nextLastEventId,
           eventCount: 250,
@@ -252,7 +304,7 @@ describe('WalletDataRepository — dust reads', () => {
 
     const view = await repo.dust(SEED, NETWORK);
     expect(view.partial).toBe(true);
-    expect(calls).toBeGreaterThan(1);                  // it did exhaust the loop, not bail early
+    expect(calls).toBe(6);                             // it used its hour, and no more
     expect(view.lastAppliedEventId).toBe(nextLastEventId - 250); // the checkpoint it got to
     expect(view.eventsApplied).toBe(250 * calls);
   });

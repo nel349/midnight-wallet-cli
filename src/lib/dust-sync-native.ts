@@ -207,7 +207,10 @@ export function runDustSyncNative(
     child.on('error', (err) => { opts.signal?.removeEventListener('abort', onAbort); reject(err); });
     child.on('close', (code) => {
       opts.signal?.removeEventListener('abort', onAbort);
-      if (code !== 0 && !existsSync(out)) {
+      // The sidecar answers SIGINT itself (checkpoint, then exit 0), so any
+      // other exit is a failure, whatever is left at `out`. That file may be our
+      // own seed checkpoint or one the dead run never finished.
+      if (code !== 0) {
         reject(new Error(`dust-sync exited ${code}: ${stderrTail.trim().slice(-300)}`));
         return;
       }

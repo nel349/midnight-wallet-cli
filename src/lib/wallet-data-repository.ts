@@ -194,13 +194,17 @@ interface MemoEntry<T> {
 const TIP_PROBE_TTL_MS = 5_000;
 
 /**
- * Max iterations of the partial-resume loop in `dust()`. Each iteration covers
- * one full `timeoutMs` window of the underlying fetcher (default 600s). With
- * 6 iterations and the default timeout, total wall-time ceiling is ~60min —
- * enough to fully cold-sync any preprod wallet from event 0 even at a slow
- * indexer. A misbehaving indexer that streams events forever still terminates.
+ * Wall-time ceiling of the partial-resume loop in `dust()`: enough to fully
+ * cold-sync any preprod wallet from event 0, and an indexer that streams
+ * events forever still terminates. The bound is time, not a count of
+ * windows, because a window can be short: Blockfrost drops a reader slower
+ * than its stream after about 80 s (some 80k events for the WASM reader), so
+ * a cold preprod sync is twenty windows or more, each resumed from the last.
  */
-const DUST_PARTIAL_RETRIES = 6;
+const DUST_SYNC_BUDGET_MS = 60 * 60_000;
+
+/** Windows in a row that apply no event before the loop gives up: the sync is stuck, not slow. */
+const DUST_STALLED_WINDOWS = 3;
 
 /** Default per-sync-attempt deadline (local). */
 const SYNC_ATTEMPT_LOCAL_MS = 30_000;
@@ -271,13 +275,15 @@ export class WalletDataRepository {
     let lastAppliedEventId = cached?.lastAppliedEventId ?? -1;
     let result: DustDirectResult | null = null;
 
-    // Auto-retry on `partial: true`. Cold preprod has ~250k dust events;
-    // the underlying fetcher resolves with `partial` after its soft timeout
-    // (default 600s) instead of throwing. Each call's `onCheckpoint` saves
-    // intermediate state to disk, so retries resume from where we left off
-    // and never re-process events. Bounded so a broken indexer doesn't
-    // loop forever.
-    for (let attempt = 0; attempt < DUST_PARTIAL_RETRIES; attempt++) {
+    // Auto-resume on `partial: true`. The underlying fetcher resolves with
+    // `partial` when its window ends before the tip (its soft timeout, or the
+    // indexer dropping the connection) instead of throwing. Each call's
+    // `onCheckpoint` saves intermediate state to disk, so the next window
+    // resumes from where the last one stopped and never re-processes events.
+    // Bounded by time and by progress, so a broken indexer doesn't loop forever.
+    const startedAt = this.now();
+    let stalledWindows = 0;
+    for (let attempt = 0; ; attempt++) {
       if (opts.signal?.aborted) throw new Error('Operation cancelled');
       const startFromId = cached ? cached.lastAppliedEventId + 1 : 0;
       opts.onStatus?.(
@@ -319,6 +325,8 @@ export class WalletDataRepository {
 
       totalEventsApplied += result.eventCount;
       if (!result.partial) break;
+      stalledWindows = result.eventCount > 0 ? 0 : stalledWindows + 1;
+      if (stalledWindows >= DUST_STALLED_WINDOWS || this.now() - startedAt >= DUST_SYNC_BUDGET_MS) break;
 
       // Reload for the next iteration so cached.state is the latest checkpoint.
       cached = loadDustCache(networkName, pubkeyHex, this.cacheDir);

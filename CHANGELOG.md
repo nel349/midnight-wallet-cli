@@ -13,6 +13,7 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ### Fixed
 
+- **A Dust sync through Blockfrost finishes.** Three things stopped it on preprod. The native accelerator derived its HTTP URL the same wrong way as below, failed at once with "status code 405", and fell back to WASM. When it failed like that on a *resumed* sync, mn took the checkpoint it had just written for the accelerator as the accelerator's result: the sync neither fell back nor moved, and `mn serve` and transfers ended in "Wallet sync timed out". And Blockfrost drops a reader slower than its stream (the WASM reader, after about 80 seconds and 80,000 events), where mn resumed at most six times: it now resumes for as long as each attempt moves, within an hour. The accelerator also hides a project id in its own error messages.
 - **An `indexer-ws` setting or flag with a query string derives the right HTTP URL.** The HTTP URL kept the path's `/ws` when a query followed it, so every HTTP query of a Blockfrost URL given in full went to the WebSocket path.
 - **`mn contract` and `mn test` honour the endpoints you set.** They resolved the network without the `node`, `indexer-ws` and `proof-server` values saved with `midnight config set`, so a deploy or call went to the network's defaults whatever every other command was using (a proof server on another port, for one).
 - **A zero or non-numeric transfer amount is a usage error** (`INVALID_ARGS`, exit 2), not `UNKNOWN`; the MCP server now classifies every usage error that way, as the CLI did.
