@@ -817,7 +817,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_grant_deploy',
-    description: 'Deploy the wallet\'s account and activate its owner key (returns pending token). Takes about 34 DUST and a few minutes. The owner key is a random development key the mnemonic can\'t recover: dev-owner-key must be true.',
+    description: 'Deploy the wallet\'s account and activate its owner key (returns pending token). Takes about 48 DUST from the wallet (17 at once for the largest of five transactions) and a few minutes. The owner key is a random development key the mnemonic can\'t recover: dev-owner-key must be true.',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',

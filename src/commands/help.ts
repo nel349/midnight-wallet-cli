@@ -891,8 +891,9 @@ ledger-9 network.
   midnight grant deploy --dev-owner-key [--json]
     → { address, resumed, activated, network, wallet, ownerKey }
     Deploys the account and activates its owner key. Safe to run again:
-    it finishes a deploy that stopped part way. Takes about 34 DUST over
-    five transactions (measured on a local ledger-9 chain).
+    it finishes a deploy that stopped part way. Takes about 48 DUST from
+    the wallet over five transactions, the largest about 17 at once
+    (measured on a local ledger-9 chain).
     The owner key is a random development key for now, kept in the
     account's records (~/.midnight/accounts/<network>/<wallet>/), which the
     wallet's mnemonic can't recover.
