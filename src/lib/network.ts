@@ -1,4 +1,5 @@
 import { execSync } from 'child_process';
+import { blockfrostEndpoints, usesBlockfrost } from './blockfrost.ts';
 import { loadCliConfig, getEndpointOverridesForNetwork } from './cli-config.ts';
 import { INDEXER_GRAPHQL_PATH, INDEXER_GRAPHQL_WS_PATH } from './constants.ts';
 
@@ -13,10 +14,10 @@ export interface NetworkConfig {
 }
 
 const NETWORK_CONFIGS: Record<NetworkName, NetworkConfig> = {
+  // Served by Blockfrost since Midnight shut its own preprod indexer down
+  // (2026-10-09). These carry no project id: `resolveNetworkConfig` adds it.
   preprod: {
-    indexer: `https://indexer.preprod.midnight.network${INDEXER_GRAPHQL_PATH}`,
-    indexerWS: `wss://indexer.preprod.midnight.network${INDEXER_GRAPHQL_WS_PATH}`,
-    node: 'wss://rpc.preprod.midnight.network',
+    ...blockfrostEndpoints('preprod', undefined),
     proofServer: 'http://localhost:6300',
     networkId: 'PreProd',
   },
@@ -111,10 +112,12 @@ export function detectTestcontainerPorts(): TestcontainerPorts {
 }
 
 /**
- * Resolve a full network config, applying testcontainer port overrides for undeployed.
+ * Resolve a full network config: the Blockfrost project id on a network
+ * Blockfrost serves, testcontainer port overrides on undeployed.
  */
-export function resolveNetworkConfig(name: NetworkName): NetworkConfig {
+export function resolveNetworkConfig(name: NetworkName, blockfrostProjectId?: string): NetworkConfig {
   const config = getNetworkConfig(name);
+  if (usesBlockfrost(name)) Object.assign(config, blockfrostEndpoints(name, blockfrostProjectId));
 
   if (name === 'undeployed') {
     const detected = detectTestcontainerPorts();
@@ -163,14 +166,20 @@ export function applyEndpointOverrides(
   config.indexerWS = flagOverrides.indexerWS ?? scoped['indexer-ws'] ?? config.indexerWS;
 
   // Keep indexer HTTP in sync if indexer WS was overridden
-  // (derive HTTP URL from WS URL by stripping /ws suffix and adjusting protocol)
   if (flagOverrides.indexerWS ?? scoped['indexer-ws']) {
-    const wsUrl = config.indexerWS;
-    config.indexer = wsUrl
-      .replace(/^wss:/, 'https:')
-      .replace(/^ws:/, 'http:')
-      .replace(/\/ws$/, '');
+    config.indexer = indexerHttpFromWs(config.indexerWS);
   }
 
   return config;
+}
+
+/**
+ * The indexer's HTTP GraphQL URL for its WebSocket URL: the protocol changed
+ * and the path's trailing `/ws` dropped. A query string (a Blockfrost project
+ * id) stays where it is.
+ */
+export function indexerHttpFromWs(wsUrl: string): string {
+  const queryAt = wsUrl.indexOf('?');
+  const [base, query] = queryAt === -1 ? [wsUrl, ''] : [wsUrl.slice(0, queryAt), wsUrl.slice(queryAt)];
+  return base.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/ws$/, '') + query;
 }

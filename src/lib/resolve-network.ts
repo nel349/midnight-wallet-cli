@@ -11,7 +11,8 @@ import {
   getValidNetworkNames,
   resolveNetworkConfig,
 } from './network.ts';
-import { loadCliConfig } from './cli-config.ts';
+import { checkProjectId, usesBlockfrost } from './blockfrost.ts';
+import { getBlockfrostProjectId, loadCliConfig } from './cli-config.ts';
 
 export interface NetworkResolutionContext {
   args: ParsedArgs;
@@ -45,15 +46,39 @@ export function resolveNetworkName(ctx: NetworkResolutionContext): NetworkName {
   return 'undeployed';
 }
 
+/** Where a project id can be given for one run, or to a process that has no config (CI, an MCP server). */
+export const BLOCKFROST_PROJECT_ID_ENV = 'MN_BLOCKFROST_PROJECT_ID';
+
+/**
+ * The Blockfrost project id for `name`: the environment's, else the one set
+ * with `midnight config set`. Undefined on a network Blockfrost doesn't
+ * serve, and when none is set (a command that then connects is told so).
+ * The environment's is checked, and used only for the network it is for.
+ */
+export function resolveBlockfrostProjectId(
+  name: NetworkName,
+  configDir?: string,
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  if (!usesBlockfrost(name)) return undefined;
+  const fromEnv = env[BLOCKFROST_PROJECT_ID_ENV];
+  if (fromEnv !== undefined && fromEnv.trim() !== '') {
+    const { projectId, network } = checkProjectId(fromEnv);
+    if (network === name) return projectId;
+  }
+  return getBlockfrostProjectId(loadCliConfig(configDir), name);
+}
+
 /**
  * Resolve network name + full config in one call.
- * Applies testcontainer port detection for undeployed.
+ * Applies testcontainer port detection for undeployed, and the Blockfrost
+ * project id on a network Blockfrost serves.
  */
 export function resolveNetwork(ctx: NetworkResolutionContext): {
   name: NetworkName;
   config: NetworkConfig;
 } {
   const name = resolveNetworkName(ctx);
-  const config = resolveNetworkConfig(name);
+  const config = resolveNetworkConfig(name, resolveBlockfrostProjectId(name, ctx.configDir));
   return { name, config };
 }

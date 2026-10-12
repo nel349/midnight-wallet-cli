@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { writeFileSync, unlinkSync, existsSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertEndpointUsable } from '../blockfrost.ts';
 import type { NetworkConfig } from '../network.ts';
 import { WITNESS_FILE_CANDIDATES } from './witness-discovery.ts';
 import { coerceArg } from './arg-coerce.ts';
@@ -95,9 +96,23 @@ export interface StateResult {
   maps: Record<string, { size: string }>;
 }
 
+// The indexer's URLs reach a generated script through its environment, not
+// its text: on a network Blockfrost serves they carry the user's project id,
+// and the script is a file in the dApp's directory until the run ends.
+const INDEXER_URL_ENV = 'MN_INDEXER_URL';
+const INDEXER_WS_URL_ENV = 'MN_INDEXER_WS_URL';
+
+export function indexerEnvironment(networkConfig: NetworkConfig): Record<string, string> {
+  assertEndpointUsable(networkConfig.indexer);
+  return {
+    [INDEXER_URL_ENV]: networkConfig.indexer,
+    [INDEXER_WS_URL_ENV]: networkConfig.indexerWS ?? networkConfig.indexer.replace('http', 'ws'),
+  };
+}
+
 export async function runState(options: StateOptions): Promise<StateResult> {
   const script = generateStateScript(options);
-  const result = await executeScript(options.dappDir, script, options.onMessage);
+  const result = await executeScript(options.dappDir, script, options.onMessage, indexerEnvironment(options.networkConfig));
   try {
     return JSON.parse(result) as StateResult;
   } catch {
@@ -109,9 +124,10 @@ export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
   const script = generateDeployScript(options);
   // The private-state secret goes to the subprocess via env (never the on-disk
   // script) so a caller-chosen owner is not written to the filesystem.
-  const extraEnv = options.privateStateSecretKey
-    ? { MN_PRIVATE_STATE_SECRET: options.privateStateSecretKey }
-    : undefined;
+  const extraEnv = {
+    ...indexerEnvironment(options.networkConfig),
+    ...(options.privateStateSecretKey ? { MN_PRIVATE_STATE_SECRET: options.privateStateSecretKey } : {}),
+  };
   const result = await executeScript(options.dappDir, script, options.onMessage, extraEnv);
   try {
     return JSON.parse(result) as DeployResult;
@@ -122,7 +138,7 @@ export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
 
 export async function runCall(options: CallOptions): Promise<CallResult> {
   const script = generateCallScript(options);
-  const result = await executeScript(options.dappDir, script, options.onMessage);
+  const result = await executeScript(options.dappDir, script, options.onMessage, indexerEnvironment(options.networkConfig));
   try {
     return JSON.parse(result) as CallResult;
   } catch {
@@ -309,8 +325,8 @@ const providers = {
     accountId: 'mn-contract-runner',
   }),
   publicDataProvider: indexerPublicDataProvider(
-    ${JSON.stringify(networkConfig.indexer)},
-    ${JSON.stringify(networkConfig.indexerWS ?? networkConfig.indexer.replace('http', 'ws'))},
+    process.env.${INDEXER_URL_ENV},
+    process.env.${INDEXER_WS_URL_ENV},
   ),
   zkConfigProvider,
   proofProvider: httpClientProofProvider(${JSON.stringify(networkConfig.proofServer)}, zkConfigProvider),
@@ -352,7 +368,7 @@ const providers = {
  */
 const ARG_COERCE_FN = `\nconst coerceArg = (${coerceArg.toString()});\n`;
 
-function generateDeployScript(opts: DeployOptions): string {
+export function generateDeployScript(opts: DeployOptions): string {
   const privateStateKey = opts.privateStateKey ?? `${opts.contractName}PrivateState`;
   // Constructor args are pre-serialized to JSON here (still in our process)
   // so the generated script just spreads them. The coerceArg helper inside
@@ -395,7 +411,7 @@ process.exit(0);
 `;
 }
 
-function generateCallScript(opts: CallOptions): string {
+export function generateCallScript(opts: CallOptions): string {
   const privateStateKey = opts.privateStateKey ?? `${opts.contractName}PrivateState`;
 
   return `
@@ -433,7 +449,7 @@ process.exit(0);
 `;
 }
 
-function generateStateScript(opts: StateOptions): string {
+export function generateStateScript(opts: StateOptions): string {
   return `
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 setNetworkId(${JSON.stringify(opts.networkConfig.networkId.toLowerCase())});
@@ -454,8 +470,8 @@ if (typeof contractMod.ledger !== 'function') {
 
 process.stderr.write('Querying contract state...\\n');
 const provider = indexerPublicDataProvider(
-  ${JSON.stringify(opts.networkConfig.indexer)},
-  ${JSON.stringify(opts.networkConfig.indexerWS ?? opts.networkConfig.indexer.replace('http', 'ws'))},
+  process.env.${INDEXER_URL_ENV},
+  process.env.${INDEXER_WS_URL_ENV},
 );
 
 const contractState = await provider.queryContractState(${JSON.stringify(opts.contractAddress)});

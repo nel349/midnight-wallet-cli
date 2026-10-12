@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { resolveNetworkName, resolveNetwork, type NetworkResolutionContext } from '../lib/resolve-network.ts';
-import { saveCliConfig } from '../lib/cli-config.ts';
+import { resolveBlockfrostProjectId, resolveNetworkName, resolveNetwork, type NetworkResolutionContext } from '../lib/resolve-network.ts';
+import { saveCliConfig, setConfigValue } from '../lib/cli-config.ts';
 import { parseArgs, type ParsedArgs } from '../lib/argv.ts';
 
 // Use a temp config dir to avoid polluting the real ~/.midnight/
@@ -91,5 +91,55 @@ describe('resolveNetwork', () => {
     expect(result.config.node).toBeDefined();
     expect(result.config.proofServer).toBeDefined();
     expect(result.config.networkId).toBeDefined();
+  });
+});
+
+describe('resolveBlockfrostProjectId', () => {
+  const FROM_CONFIG = 'nightpreprodConfigConfigConfig0001';
+  const FROM_ENV = 'nightpreprodEnvEnvEnvEnvEnvEnv0002';
+
+  it('is undefined when none is set', () => {
+    expect(resolveBlockfrostProjectId('preprod', TEST_DIR, {})).toBeUndefined();
+  });
+
+  it('is the one set with config set', () => {
+    setConfigValue('blockfrost-project-id', FROM_CONFIG, TEST_DIR);
+    expect(resolveBlockfrostProjectId('preprod', TEST_DIR, {})).toBe(FROM_CONFIG);
+  });
+
+  it('is the environment\'s over the config\'s', () => {
+    setConfigValue('blockfrost-project-id', FROM_CONFIG, TEST_DIR);
+    expect(resolveBlockfrostProjectId('preprod', TEST_DIR, { MN_BLOCKFROST_PROJECT_ID: FROM_ENV })).toBe(FROM_ENV);
+    expect(resolveBlockfrostProjectId('preprod', TEST_DIR, { MN_BLOCKFROST_PROJECT_ID: '  ' })).toBe(FROM_CONFIG);
+  });
+
+  it('is undefined on a network Blockfrost doesn\'t serve, whatever is set', () => {
+    setConfigValue('blockfrost-project-id', FROM_CONFIG, TEST_DIR);
+    expect(resolveBlockfrostProjectId('preview', TEST_DIR, { MN_BLOCKFROST_PROJECT_ID: FROM_ENV })).toBeUndefined();
+    expect(resolveBlockfrostProjectId('undeployed', TEST_DIR, { MN_BLOCKFROST_PROJECT_ID: 'garbage' })).toBeUndefined();
+  });
+
+  it('refuses an environment value that is no project id', () => {
+    expect(() => resolveBlockfrostProjectId('preprod', TEST_DIR, { MN_BLOCKFROST_PROJECT_ID: 'nightmainnetAbCdEfGhIjKl' }))
+      .toThrow('it should start with "nightpreprod" (preprod)');
+  });
+});
+
+describe('resolveNetwork on preprod', () => {
+  let origEnv: string | undefined;
+  beforeEach(() => { origEnv = process.env.MN_BLOCKFROST_PROJECT_ID; delete process.env.MN_BLOCKFROST_PROJECT_ID; });
+  afterEach(() => { if (origEnv !== undefined) process.env.MN_BLOCKFROST_PROJECT_ID = origEnv; });
+
+  it('gives Blockfrost\'s endpoints with the project id that is set', () => {
+    setConfigValue('blockfrost-project-id', 'nightpreprodConfigConfigConfig0001', TEST_DIR);
+    const { name, config } = resolveNetwork(makeCtx({ args: makeArgs(['--network', 'preprod']) }));
+    expect(name).toBe('preprod');
+    expect(config.indexerWS).toBe('wss://midnight-preprod.blockfrost.io/api/v0/ws?project_id=nightpreprodConfigConfigConfig0001');
+    expect(config.node).toBe('wss://rpc.midnight-preprod.blockfrost.io?project_id=nightpreprodConfigConfigConfig0001');
+  });
+
+  it('resolves without one, so a command that never connects is not stopped', () => {
+    const { config } = resolveNetwork(makeCtx({ args: makeArgs(['--network', 'preprod']) }));
+    expect(config.indexer).toBe('https://midnight-preprod.blockfrost.io/api/v0');
   });
 });

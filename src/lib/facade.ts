@@ -25,6 +25,7 @@ import {
   PRE_SEND_SYNC_TIMEOUT_MS,
 } from './constants.ts';
 import { verbose } from './verbose.ts';
+import { assertNetworkAnswers } from './endpoint-check.ts';
 
 const NETWORK_ID_MAP: Record<string, NetworkId.NetworkId> = {
   PreProd: NetworkId.NetworkId.PreProd,
@@ -66,6 +67,8 @@ export async function buildFacade(
   if (networkId === undefined) {
     throw new Error(`Unknown networkId: ${networkConfig.networkId}`);
   }
+
+  await assertNetworkAnswers(networkConfig);
 
   verbose('facade', `Building facade for network ${networkConfig.networkId}`);
   verbose('facade', `Node: ${networkConfig.node}`);

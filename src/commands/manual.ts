@@ -88,7 +88,8 @@ export function buildManual(): string {
   out.push(subhead('CONCEPTS'));
   out.push(`  ${bold('Networks')}`);
   out.push(`    ${teal('undeployed')}   Local Docker network. Free dev tokens, fast iteration.`);
-  out.push(`    ${teal('preprod')}      Public testnet. Persistent, real ZK proofs.`);
+  out.push(`    ${teal('preprod')}      Public testnet. Persistent, real ZK proofs. Served by Blockfrost:`);
+  out.push(`                 needs your own project id (see Configuration).`);
   out.push(`    ${teal('preview')}      Public testnet, smaller scale.`);
   out.push('');
   out.push(`  ${bold('Tokens')}`);
@@ -121,6 +122,8 @@ export function buildManual(): string {
   out.push(`    ${dim('$')} ${dim('mn balance --wallet alice')}`);
   out.push('');
   out.push(`  ${bold('First wallet on preprod')}`);
+  out.push(`    ${dim('# once: a Midnight preprod project id from https://blockfrost.io')}`);
+  out.push(`    ${dim('$')} ${dim('mn config set blockfrost-project-id nightpreprod...')}`);
   out.push(`    ${dim('$')} ${dim('mn wallet generate alice --network preprod')}`);
   out.push(`    ${dim('# fund from the preprod faucet:')}`);
   out.push(`    ${dim('# https://faucet.preprod.midnight.network/')}`);
@@ -159,6 +162,10 @@ export function buildManual(): string {
   out.push(`    ${yellow('proof-server')}   Override proof server URL`);
   out.push(`    ${yellow('node')}           Override substrate RPC URL`);
   out.push(`    ${yellow('indexer-ws')}     Override indexer WebSocket URL`);
+  out.push(`    ${yellow('blockfrost-project-id')}`);
+  out.push(`                   Your Blockfrost project id for preprod, whose indexer and`);
+  out.push(`                   node Blockfrost serves. Kept per network, shown masked,`);
+  out.push(`                   never printed. Or: MN_BLOCKFROST_PROJECT_ID.`);
   out.push('');
   out.push(`    ${bold('Compatibility alias')}`);
   out.push(`    ${yellow('network-id')}     Resolves transparently to ${yellow('network')}.`);

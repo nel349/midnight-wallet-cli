@@ -80,6 +80,11 @@ midnight transfer mn_addr_undeployed1... 100
 midnight wallet generate alice
 midnight config set network preprod   # or: preview
 
+# Preprod only: its indexer and node are served by Blockfrost, which needs
+# your own project id. Create a "Midnight Preprod" project at https://blockfrost.io
+# and set its id once (it starts with nightpreprod):
+midnight config set blockfrost-project-id <project id>
+
 # 2. Get test tokens from the faucet
 #    preprod: https://faucet.preprod.midnight.network/
 #    preview: https://faucet.preview.midnight.network/
@@ -98,10 +103,24 @@ midnight transfer mn_addr_preprod1... 100
 | Network | Description |
 |---------|-------------|
 | `undeployed` | Local network via Docker (`midnight localnet up`) |
-| `preprod` | Midnight pre-production testnet |
+| `preprod` | Midnight pre-production testnet (indexer and node served by Blockfrost: needs a project id) |
 | `preview` | Midnight preview testnet |
 
 Wallets are network-agnostic — one seed derives addresses for all three networks. Use `--network <name>` on any command, or persist it with `midnight config set network preview`.
+
+### Preprod and Blockfrost
+
+Midnight shut its own preprod indexer down on 2026-10-09; [Blockfrost serves it now](https://docs.midnight.network/guides/networks-and-environments), along with the node RPC, and every request needs your own project id. Create a project for Midnight Preprod at [blockfrost.io](https://blockfrost.io) and give mn its id:
+
+```bash
+midnight config set blockfrost-project-id <project id>   # or: export MN_BLOCKFROST_PROJECT_ID=<project id>
+```
+
+- Without one, a command that reaches preprod stops with `BLOCKFROST_PROJECT_ID_REQUIRED` and these instructions. A refused id is `BLOCKFROST_PROJECT_ID_REJECTED`. Requests count against your Blockfrost plan.
+- The project id is a secret. mn keeps it in `~/.midnight/config.json` (mode 0600), shows it masked in `config get`, and hides it in everything it prints, errors and `--verbose` logs included.
+- `mn serve` gives a connected dApp the wallet's indexer and node URLs (the DApp connector's `getConfiguration`), and on preprod those carry your project id: connect only dApps you trust with it.
+- An old `indexer-ws` setting that points at `indexer.preprod.midnight.network` fails with `ENDPOINT_SHUT_DOWN`: remove it with `midnight config unset indexer-ws`.
+- Preview and the local network need no project id.
 
 ## Native dust acceleration
 

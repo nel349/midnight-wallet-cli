@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 // ── Test helpers ──
 
@@ -74,16 +77,35 @@ const MOCK_RPC_RESPONSE = { result: { peers: 11, isSyncing: false, shouldHavePee
 describe('status command', () => {
   let stderr: ReturnType<typeof captureStderr>;
 
+  // Preprod is served by Blockfrost, which needs a project id: one in the
+  // environment for these tests, and a home with no config of its own.
+  const PROJECT_ID = 'nightpreprodAbCdEfGhIjKlMnOpQrStUv0123';
+  let home: string;
+  let origHome: string | undefined;
+  let origProjectId: string | undefined;
+
   beforeEach(() => {
     stderr = captureStderr();
     process.exitCode = undefined;
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-status-test-'));
+    origHome = process.env.HOME;
+    origProjectId = process.env.MN_BLOCKFROST_PROJECT_ID;
+    process.env.HOME = home;
+    process.env.MN_BLOCKFROST_PROJECT_ID = PROJECT_ID;
   });
 
   afterEach(() => {
     stderr.restore();
     restoreFetch();
     process.exitCode = undefined;
+    process.env.HOME = origHome;
+    if (origProjectId === undefined) delete process.env.MN_BLOCKFROST_PROJECT_ID;
+    else process.env.MN_BLOCKFROST_PROJECT_ID = origProjectId;
+    fs.rmSync(home, { recursive: true, force: true });
   });
+
+  /** The indexer and node URLs the last run probed. */
+  const probed: string[] = [];
 
   async function runStatus(flags: Record<string, string | true> = {}) {
     // Dynamic import to get fresh module
@@ -102,7 +124,9 @@ describe('status command', () => {
     rpcDown?: boolean;
     faucetDown?: boolean;
     explorerDown?: boolean;
+    indexerStatus?: number;
   } = {}) {
+    probed.length = 0;
     mockFetch(async (url: string, init?: RequestInit) => {
       const urlStr = String(url);
 
@@ -116,14 +140,17 @@ describe('status command', () => {
         return jsonResponse(MOCK_ISSUES);
       }
 
-      // Local probes — indexer GraphQL
-      if (urlStr.includes('indexer') && urlStr.includes('graphql')) {
+      // Local probes — indexer GraphQL (Midnight's own host, or Blockfrost's)
+      if ((urlStr.includes('indexer') && urlStr.includes('graphql')) || urlStr.includes('blockfrost.io/api/v0')) {
+        probed.push(urlStr);
         if (options.indexerDown) throw new Error('ECONNREFUSED');
+        if (options.indexerStatus) return textResponse('', options.indexerStatus);
         return jsonResponse(MOCK_INDEXER_RESPONSE);
       }
 
       // Local probes — RPC
       if (urlStr.includes('rpc')) {
+        probed.push(urlStr);
         if (options.rpcDown) return textResponse('', 503);
         return jsonResponse(MOCK_RPC_RESPONSE);
       }
@@ -237,6 +264,32 @@ describe('status command', () => {
 
     expect(stderr.output).toContain('DOWN');
     expect(process.exitCode).toBe(2);
+  });
+
+  it('probes preprod at Blockfrost with the project id, and never prints it', async () => {
+    setupMockFetch();
+    await runStatus({ network: 'preprod' });
+
+    expect(probed).toContain(`https://midnight-preprod.blockfrost.io/api/v0?project_id=${PROJECT_ID}`);
+    expect(probed).toContain(`https://rpc.midnight-preprod.blockfrost.io?project_id=${PROJECT_ID}`);
+    expect(stderr.output).not.toContain(PROJECT_ID);
+  });
+
+  it('says a project id is needed, and probes nothing, when preprod has none', async () => {
+    delete process.env.MN_BLOCKFROST_PROJECT_ID;
+    setupMockFetch();
+    await runStatus({ network: 'preprod' });
+
+    expect(probed).toEqual([]);
+    expect(stderr.output).toContain('Needs a Blockfrost project id: midnight config set blockfrost-project-id <project id>');
+  });
+
+  it('says so when Blockfrost refuses the project id', async () => {
+    setupMockFetch({ indexerStatus: 403 });
+    await runStatus({ network: 'preprod' });
+
+    expect(stderr.output).toContain('Blockfrost refused the project id set for preprod (HTTP 403).');
+    expect(stderr.output).not.toContain('likely WAF blocking');
   });
 
   it('handles RPC DOWN in live probes', async () => {

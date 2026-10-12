@@ -66,6 +66,7 @@ Valid keys:
 - `node`
 - `indexer-ws`
 - `wallet`
+- `blockfrost-project-id` (kept per network under `networks.<name>`; `config get` returns it masked, e.g. `nightpreprod…ab12 (preprod)`, never in full)
 
 Aliases (transparently resolved to a canonical key):
 

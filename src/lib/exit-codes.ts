@@ -32,8 +32,24 @@ export const ERROR_CODES = {
   CANCELLED: 'CANCELLED',
   /** This Node.js is older than mn supports (22). Recovery: install a current Node.js. */
   UNSUPPORTED_NODE: 'UNSUPPORTED_NODE',
+  /** The network is served by Blockfrost and no project id is set. Recovery: `mn config set blockfrost-project-id <project id>`. */
+  BLOCKFROST_PROJECT_ID_REQUIRED: 'BLOCKFROST_PROJECT_ID_REQUIRED',
+  /** Blockfrost refused the project id. Recovery: check it at blockfrost.io and set it again. */
+  BLOCKFROST_PROJECT_ID_REJECTED: 'BLOCKFROST_PROJECT_ID_REJECTED',
+  /** Blockfrost is holding the project back (its plan's daily limit, or too many requests at once). Recovery: wait, or see the project's plan. */
+  BLOCKFROST_LIMIT_REACHED: 'BLOCKFROST_LIMIT_REACHED',
+  /** An endpoint set by flag or config was shut down by its operator. Recovery: unset it (`mn config unset indexer-ws`). */
+  ENDPOINT_SHUT_DOWN: 'ENDPOINT_SHUT_DOWN',
   UNKNOWN: 'UNKNOWN',
 } as const;
+
+/** Typed errors about reaching a network's endpoints; classified by their own code, not by message text. */
+const ENDPOINT_ERROR_CODES: ReadonlySet<string> = new Set([
+  ERROR_CODES.BLOCKFROST_PROJECT_ID_REQUIRED,
+  ERROR_CODES.BLOCKFROST_PROJECT_ID_REJECTED,
+  ERROR_CODES.BLOCKFROST_LIMIT_REACHED,
+  ERROR_CODES.ENDPOINT_SHUT_DOWN,
+]);
 
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
 
@@ -49,8 +65,12 @@ interface ClassifiedError {
  */
 export function classifyError(err: Error): ClassifiedError {
   // A typed error that carries its own code is classified by it, not by its text.
-  if ((err as { code?: unknown }).code === ERROR_CODES.UNSUPPORTED_NODE) {
+  const code = (err as { code?: unknown }).code;
+  if (code === ERROR_CODES.UNSUPPORTED_NODE) {
     return { exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNSUPPORTED_NODE };
+  }
+  if (typeof code === 'string' && ENDPOINT_ERROR_CODES.has(code)) {
+    return { exitCode: EXIT_NETWORK_ERROR, errorCode: code as ErrorCode };
   }
   const msg = (err.message ?? '').toLowerCase();
 

@@ -12,6 +12,7 @@ import { PKG_VERSION } from './lib/pkg.ts';
 import { migrateOldWallet } from './lib/wallet-config.ts';
 import { ensureHeapForSync } from './lib/heap-guard.ts';
 import { assertNodeSupported } from './lib/node-version.ts';
+import { hideProjectIdsInOutput } from './lib/output-redaction.ts';
 
 // Commands that start a WalletFacade. They (a) leave WebSocket connections in
 // the event loop that facade.stop() doesn't fully drain — so we must exit
@@ -51,6 +52,9 @@ const command = args.command ?? 'help';
 if (FACADE_COMMANDS.has(command)) await ensureHeapForSync();
 
 // Auto-migrate old ~/.midnight/wallet.json → wallets/default.json (silent, one-time)
+// Endpoint URLs can carry a Blockfrost project id: nothing mn or its libraries print shows it.
+hideProjectIdsInOutput();
+
 migrateOldWallet();
 
 // Global AbortController for clean shutdown on SIGINT/SIGTERM

@@ -15,9 +15,13 @@ Manage wallets, check balances, transfer NIGHT tokens, register dust (fee token)
 - **No self-shielding** — a wallet cannot move its own funds from unshielded to shielded. To get shielded NIGHT, receive a shielded transfer from a wallet that already has some (genesis wallet has 250M shielded NIGHT on localnet).
 - **Networks**
   - `undeployed` — local Docker network via `mn localnet up`. Use this for dev iteration.
-  - `preprod` — public testnet. First-time wallet sync processes the full event history and can take significantly longer than subsequent syncs (which restore from cached wallet state). Exact time depends on wallet age, event density, network, and hardware.
+  - `preprod` — public testnet. Its indexer and node are served by Blockfrost and need the user's own project id (see "Preprod needs a Blockfrost project id" below). First-time wallet sync processes the full event history and can take significantly longer than subsequent syncs (which restore from cached wallet state). Exact time depends on wallet age, event density, network, and hardware.
   - `preview` — public preview testnet. Same first-sync trade-off as preprod.
 - **Proof server** — local HTTP service that generates ZK proofs for transactions. Default port 6300. Version must match the network's ledger version or writes fail with "Custom error 170".
+
+### Preprod needs a Blockfrost project id
+
+Midnight shut its own preprod indexer down on 2026-10-09. Blockfrost serves preprod's indexer and node now, and every request needs the user's own project id (created at https://blockfrost.io, one project per network; preprod ids start with `nightpreprod`; requests count against the user's Blockfrost plan). The user sets it once with `midnight config set blockfrost-project-id <project id>` in their own terminal, or `MN_BLOCKFROST_PROJECT_ID` in the MCP server's environment. It is a secret: `midnight_config_get` shows it masked, no tool result contains it, and you should never ask for it in chat or echo it. Preview and the local network need none.
 
 ## Intent routing (natural language → tool)
 
@@ -111,6 +115,10 @@ Every MCP tool error returns `{ error: true, code: <ERROR_CODE>, message: <human
 | `PROOF_TIMEOUT` | ZK proof generation didn't finish within the deadline. | Retry — proofs can be slow under load. |
 | `SYNC_TIMEOUT` | Long-running wallet sync hit its deadline. Common on a hosted-network first-cold-sync. | Retry; the cache resumes from the last applied event so progress is preserved. |
 | `NETWORK_ERROR` | Indexer/node/proof-server connection refused or DNS failure. | Check `midnight_status()`; if localnet, `midnight_localnet_up()`. |
+| `BLOCKFROST_PROJECT_ID_REQUIRED` | The network (preprod) is served by Blockfrost and no project id is set. | Ask the user to create a Midnight preprod project at https://blockfrost.io and run `midnight config set blockfrost-project-id <project id>` themselves. Never ask them to paste the id into the chat. Don't retry until they have. |
+| `BLOCKFROST_PROJECT_ID_REJECTED` | Blockfrost refused the project id (HTTP 403): mistyped, revoked, or for another network. | Ask the user to check it at blockfrost.io and set it again. Don't retry blindly. |
+| `BLOCKFROST_LIMIT_REACHED` | Blockfrost's plan limit or rate limit. | Wait and retry once; if it persists, tell the user it is their Blockfrost plan. |
+| `ENDPOINT_SHUT_DOWN` | An endpoint set by flag or config was shut down by its operator (the old preprod indexer). | `midnight_config_unset({ key: "indexer-ws" })` (and `node` if set), then retry. |
 | `WALLET_NOT_FOUND` | Named wallet doesn't exist on disk. | `midnight_wallet_list()` — user may have removed it. |
 | `INVALID_ARGS` | Missing/invalid argument. | Show the message to the user verbatim — it names the missing field. |
 | `TX_REJECTED` | Chain rejected the submitted transaction (catch-all when no more specific code applies). | Read the message; usually a state mismatch resolved by re-sync + retry. |

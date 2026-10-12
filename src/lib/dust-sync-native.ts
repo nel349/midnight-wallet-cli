@@ -18,6 +18,7 @@ import type { NetworkConfig } from './network.ts';
 import { DUST_COLLAPSE_DISABLE_ENV, type DustDirectResult, type DustRetention } from './dust-direct.ts';
 import { collapseForeignGenerations } from './dust-collapse.ts';
 import { dustPublicKeyHexFromSeed } from './dust-direct-cache.ts';
+import { assertEndpointUsable } from './blockfrost.ts';
 
 /** Sidecar checkpoint JSON shape (snake_case — matches the Rust `Checkpoint`). */
 export interface SidecarCheckpoint {
@@ -151,6 +152,7 @@ export function runDustSyncNative(
   return new Promise((resolve, reject) => {
     const bin = resolveSidecarBinary();
     if (!bin) { reject(new Error('dust-sync sidecar not found')); return; }
+    assertEndpointUsable(network.indexerWS);
 
     const networkName = network.networkId.toLowerCase();
     const pubkeyHex = dustPublicKeyHexFromSeed(seed);

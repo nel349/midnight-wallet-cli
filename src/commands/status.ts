@@ -7,7 +7,9 @@
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { DASHBOARD_BASE_URL } from '../lib/constants.ts';
-import { getNetworkConfig, isValidNetworkName, type NetworkName } from '../lib/network.ts';
+import { BlockfrostProjectIdRequiredError, assertEndpointUsable, endpointRefusal } from '../lib/blockfrost.ts';
+import { isValidNetworkName, resolveNetworkConfig, type NetworkName } from '../lib/network.ts';
+import { resolveBlockfrostProjectId } from '../lib/resolve-network.ts';
 import { header, divider } from '../ui/format.ts';
 import { bold, dim, teal, green, red, gray } from '../ui/colors.ts';
 import { start as startSpinner } from '../ui/spinner.ts';
@@ -168,8 +170,28 @@ async function timedFetch(
   }
 }
 
+/** Why an endpoint can't be probed at all (no Blockfrost project id, or it was shut down), as a result. */
+function unprobeable(url: string, now: string): ProbeResult | undefined {
+  try {
+    assertEndpointUsable(url);
+    return undefined;
+  } catch (err) {
+    const notes = err instanceof BlockfrostProjectIdRequiredError
+      ? 'Needs a Blockfrost project id: midnight config set blockfrost-project-id <project id>'
+      : (err as Error).message.split('\n')[0]!;
+    return { status: 'unknown', latencyMs: 0, lastChecked: now, notes };
+  }
+}
+
+/** What a refusing status means for this endpoint, in a line; undefined when it has no special meaning. */
+function refusalNote(url: string, status: number): string | undefined {
+  return endpointRefusal(url, status)?.message.split('\n')[0];
+}
+
 async function probeIndexer(indexerUrl: string): Promise<ProbeResult> {
   const now = new Date().toISOString();
+  const cannot = unprobeable(indexerUrl, now);
+  if (cannot) return cannot;
   try {
     const { response, latencyMs } = await timedFetch(indexerUrl, {
       method: 'POST',
@@ -177,6 +199,8 @@ async function probeIndexer(indexerUrl: string): Promise<ProbeResult> {
       body: JSON.stringify({ query: '{ block { height } }' }),
     });
     if (!response.ok) {
+      const refusal = refusalNote(indexerUrl, response.status);
+      if (refusal) return { status: 'down', latencyMs, lastChecked: now, notes: refusal };
       if (response.status === 403) return { status: 'degraded', latencyMs, lastChecked: now, notes: 'HTTP 403 — likely WAF blocking' };
       return { status: 'down', latencyMs, lastChecked: now, notes: `HTTP ${response.status}` };
     }
@@ -197,6 +221,8 @@ async function probeIndexer(indexerUrl: string): Promise<ProbeResult> {
 
 async function probeRpc(nodeUrl: string): Promise<ProbeResult> {
   const now = new Date().toISOString();
+  const cannot = unprobeable(nodeUrl, now);
+  if (cannot) return cannot;
   // Convert wss:// to https:// for HTTP POST
   const httpUrl = nodeUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
   try {
@@ -206,6 +232,8 @@ async function probeRpc(nodeUrl: string): Promise<ProbeResult> {
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'system_health', params: [] }),
     });
     if (!response.ok) {
+      const refusal = refusalNote(nodeUrl, response.status);
+      if (refusal) return { status: 'down', latencyMs, lastChecked: now, notes: refusal };
       if (response.status === 403) return { status: 'degraded', latencyMs, lastChecked: now, notes: 'HTTP 403 — likely WAF blocking' };
       return { status: 'down', latencyMs, lastChecked: now, notes: `HTTP ${response.status}` };
     }
@@ -263,7 +291,7 @@ async function probeExplorer(explorerUrl: string | null): Promise<ProbeResult> {
 async function runLocalProbes(networkName: string): Promise<Record<string, ProbeResult>> {
   if (!isValidNetworkName(networkName)) return {};
 
-  const netConfig = getNetworkConfig(networkName as NetworkName);
+  const netConfig = resolveNetworkConfig(networkName as NetworkName, resolveBlockfrostProjectId(networkName as NetworkName));
   const extra = EXTRA_ENDPOINTS[networkName];
   if (!extra) return {};
 
