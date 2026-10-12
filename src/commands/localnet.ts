@@ -14,6 +14,7 @@ import {
   waitForHealthy,
   getComposePath,
   removeConflictingContainers,
+  localnetStartFailure,
 } from '../lib/localnet.ts';
 import { header, divider } from '../ui/format.ts';
 import { bold, green, red, dim, yellow } from '../ui/colors.ts';
@@ -93,21 +94,8 @@ async function handleUp(jsonMode: boolean): Promise<void> {
     }
   } catch (err) {
     spinner.fail('Failed to start local network');
-    if (err instanceof Error) {
-      if (err.message.includes('is already in use by container')) {
-        throw new Error(
-          'Container name conflict — containers with the same names already exist\n' +
-          '(likely from a previous midnight-local-network setup).\n\n' +
-          'Run "midnight localnet clean" to remove them, then try again.'
-        );
-      }
-      if (err.message.includes('address already in use')) {
-        throw new Error(
-          'Port conflict detected — another process is using a required port.\n' +
-          'Check ports 9944, 8088, and 6300, then try again.'
-        );
-      }
-    }
+    const explained = err instanceof Error ? localnetStartFailure(err.message) : undefined;
+    if (explained !== undefined) throw new Error(explained);
     throw err;
   }
 

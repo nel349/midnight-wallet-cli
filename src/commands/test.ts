@@ -442,26 +442,26 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
     // ── Prep phase ──
     if (!jsonMode) process.stderr.write(bold('  Prep\n'));
 
-    let spinner = startSpinner('Starting prep...');
+    // One spinner per step: it ends on the step's own mark, pass or fail.
+    let spinner: ReturnType<typeof startSpinner> | null = null;
 
     const results = await runPrepSteps(config, dappDir, ctx, {
       onStepStart(step) {
-        spinner.update(`[prep] ${step}...`);
+        spinner = startSpinner(`[prep] ${step}...`);
       },
       onStepComplete(step, status, duration, error) {
         if (status === 'pass') {
-          spinner.stop(`${green('✓')} ${step} (${formatMs(duration)})`);
+          spinner?.stop(`${step} (${formatMs(duration)})`);
         } else {
-          spinner.stop(`${red('✗')} ${step}: ${error ?? 'failed'}`);
+          spinner?.fail(`${step}: ${error ?? 'failed'}`);
         }
-        spinner = startSpinner('');
+        spinner = null;
       },
       onMessage(msg) {
-        spinner.update(msg);
+        spinner?.update(msg);
       },
     });
 
-    spinner.stop('');
     prepResults.push(...results);
 
     if (!jsonMode) process.stderr.write('\n');
@@ -551,11 +551,12 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
               const spinner = (action as any)._spinner;
               if (spinner) {
                 if (result.status === 'pass') {
-                  spinner.stop(`${green('✓')} ${action.id}: ${result.message ?? 'pass'}`);
+                  spinner.stop(`${action.id}: ${result.message ?? 'pass'}`);
                 } else if (result.status === 'skip') {
-                  spinner.stop(`${yellow('⊘')} ${action.id}: ${result.message ?? 'skipped'}`);
+                  spinner.clear();
+                  process.stderr.write(`${yellow('⊘')} ${action.id}: ${result.message ?? 'skipped'}\n`);
                 } else {
-                  spinner.stop(`${red('✗')} ${action.id}: ${result.message ?? 'fail'}`);
+                  spinner.fail(`${action.id}: ${result.message ?? 'fail'}`);
                 }
               }
 

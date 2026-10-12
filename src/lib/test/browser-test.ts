@@ -231,7 +231,7 @@ export async function runBrowserTest(options: BrowserTestOptions): Promise<Brows
     child.on('error', (err) => {
       clearTimeout(timer);
       logStream.end();
-      onMessage(`Claude process error: ${err.message}`);
+      onMessage(claudeLaunchFailure(err));
       resolve({
         exitCode: 1,
         logFile,
@@ -239,4 +239,13 @@ export async function runBrowserTest(options: BrowserTestOptions): Promise<Brows
       });
     });
   });
+}
+
+/** Why Claude could not be started, for the user: a missing `claude` command says what the strategy needs. */
+export function claudeLaunchFailure(err: Error): string {
+  if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+    return 'The browser strategy drives the dApp through the Claude Code CLI, and no "claude" command was found on PATH. ' +
+      'Install Claude Code, or test from the command line instead: mn test create --strategy cli';
+  }
+  return `Claude process error: ${err.message}`;
 }

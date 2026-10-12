@@ -15,7 +15,7 @@ import { start as startSpinner, type Spinner } from '../ui/spinner.ts';
  * on stdout with nothing on stderr to misinterpret.
  */
 function silentSpinner(): Spinner {
-  return { update() {}, stop() {}, fail() {}, log() {} };
+  return { update() {}, stop() {}, fail() {}, log() {}, clear() {} };
 }
 import {
   findContractInfo,

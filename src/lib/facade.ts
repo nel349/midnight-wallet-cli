@@ -576,6 +576,12 @@ export async function waitForDustAvailable(bundle: FacadeBundle, timeoutMs = 60_
   }
 }
 
+/** The wallet's spendable Dust right now, in specks. Dust accrues with time, so two reads differ. */
+export async function currentDustBalance(bundle: FacadeBundle): Promise<bigint> {
+  const state = await rx.firstValueFrom(bundle.facade.state());
+  return state.dust.balance(new Date());
+}
+
 /**
  * Quick sync for pre-send validation.
  * Shorter timeout — just catches stale UTXOs before building a transaction.

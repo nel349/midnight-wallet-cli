@@ -104,7 +104,7 @@ Use `midnight_test_create({ path, strategy })`. Strategies:
 - `"cli"` (default) — emits `dapp.test.json` + `tests/suites/cli-default/{suite,actions,assertions}.json` with deploy → state → one call per impure circuit → state. Placeholder args; user reviews and edits before `mn test run`.
 - `"browser"` — additionally needs `port` and `build-cmd`; emits `prompt.md` instead of `actions.json`. Claude drives the UI per `prompt.md`.
 
-Run via `midnight_test_run` (CLI: `mn test run --suite <name>`). Browser strategy supports `browserMode: "vision"` (screenshots — default), `"dom"` (accessibility tree, faster, requires `chrome-devtools-mcp`), `"script"` (direct JS, fastest, requires `chrome-devtools-mcp`). Pre-flight detects missing `chrome-devtools-mcp` and orphan automation Chromes from prior crashes.
+Running a suite is a CLI command, not an MCP tool: `mn test run --suite <name>` (exit code 0 on PASS, 1 on FAIL; `--json` prints the result, `mn test results` shows the last one). Its prep steps start the localnet if it is down, fund the active wallet, register Dust and wait until there is enough of it to pay for a transaction (about a minute and a half on a new chain), then start `mn serve`. Browser strategy supports `browserMode: "vision"` (screenshots — default), `"dom"` (accessibility tree, faster, requires `chrome-devtools-mcp`), `"script"` (direct JS, fastest, requires `chrome-devtools-mcp`). Pre-flight detects missing `chrome-devtools-mcp` and orphan automation Chromes from prior crashes.
 
 ## Safety rules (non-negotiable)
 

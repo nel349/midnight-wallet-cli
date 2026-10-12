@@ -1,14 +1,15 @@
 // Actions runner — execute TestAction[] sequentially for CLI test strategy.
 // Uses the contract runner (deploy/call/state) with mn serve for wallet ops.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import type { TestAction, DappTestConfig } from './types.ts';
 import type { NetworkConfig } from '../network.ts';
 import { runDeploy, runCall, runState, type StateResult } from '../contract/runner.ts';
 import { findContractInfo, type ContractInfo } from '../contract/inspect.ts';
 import { analyzeWitnessDependencies } from './circuit-witness-deps.ts';
 import { findContractSourcePath } from './ai-scaffold.ts';
+import { getChainGenesisHash } from '../chain-id.ts';
+import { loadContractCache, saveContractCache } from './contract-cache.ts';
 
 export interface ActionResult {
   id: string;
@@ -50,11 +51,12 @@ export async function runActions(options: ActionsRunnerOptions): Promise<ActionR
   const { actions, config, dappDir, suiteName, networkConfig, servePort, redeploy, onActionStart, onActionComplete, onMessage } = options;
   const results: ActionResult[] = [];
 
-  // Load cached contract address (test replay)
+  // Load cached contract address (test replay), if it is for this chain
   const network = config.network ?? 'undeployed';
+  const chainId = await getChainGenesisHash(networkConfig.node);
   let contractAddress: string | undefined;
   if (!redeploy) {
-    contractAddress = loadContractCache(dappDir, suiteName, network);
+    contractAddress = loadContractCache(dappDir, suiteName, network, chainId);
   }
 
   const { info } = findContractInfo(dappDir);
@@ -110,7 +112,7 @@ export async function runActions(options: ActionsRunnerOptions): Promise<ActionR
       // ledger state, so a previously-skipped chain shouldn't poison it.
       if (result.contractAddress) {
         contractAddress = result.contractAddress;
-        saveContractCache(dappDir, suiteName, network, contractAddress);
+        saveContractCache(dappDir, suiteName, network, contractAddress, chainId);
         if (action.type === 'contract-deploy') cascadeSkipReason = undefined;
       }
 
@@ -434,40 +436,4 @@ export function diffState(before: StateResult | undefined, after: StateResult | 
   }
 
   return diffs;
-}
-
-// ── Contract address cache (test replay) ──
-
-interface ContractCache {
-  address: string;
-  network: string;
-  timestamp: string;
-}
-
-function getCachePath(dappDir: string, suiteName: string): string {
-  return join(dappDir, 'tests', 'results', `.contract-cache-${suiteName}.json`);
-}
-
-function loadContractCache(dappDir: string, suiteName: string, network: string): string | undefined {
-  const cachePath = getCachePath(dappDir, suiteName);
-  if (!existsSync(cachePath)) return undefined;
-
-  try {
-    const cache: ContractCache = JSON.parse(readFileSync(cachePath, 'utf-8'));
-    if (cache.network !== network) return undefined; // Different network — don't reuse
-    return cache.address;
-  } catch {
-    return undefined;
-  }
-}
-
-function saveContractCache(dappDir: string, suiteName: string, network: string, address: string): void {
-  const cachePath = getCachePath(dappDir, suiteName);
-  mkdirSync(join(dappDir, 'tests', 'results'), { recursive: true });
-  const cache: ContractCache = {
-    address,
-    network,
-    timestamp: new Date().toISOString(),
-  };
-  writeFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n');
 }

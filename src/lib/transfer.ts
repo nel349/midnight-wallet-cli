@@ -128,7 +128,7 @@ export { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts
 import { isDustRelatedError, isSdkInsufficientFundsError } from './sdk-errors.ts';
 
 /** Format dust specks to human-readable DUST string (e.g. "0.300000"). Lib-layer safe (no UI import). */
-function dustToString(specks: bigint): string {
+export function dustToString(specks: bigint): string {
   const abs = specks < 0n ? -specks : specks;
   const whole = abs / 1_000_000_000_000_000n;
   const frac = abs % 1_000_000_000_000_000n;

@@ -38,10 +38,11 @@ function copiesOf(root, name) {
 }
 
 /**
- * Every resource the MCP server at `server` lists, read over stdio as an MCP
- * client would: its URI with the length of its text, or with the error.
+ * What the MCP server at `server` offers, asked over stdio as an MCP client
+ * would: the names of its tools, and every resource it lists with its text
+ * (or with the error reading it gave).
  */
-function readMcpResources(server, env) {
+function askMcpServer(server, env) {
   return new Promise((resolve, reject) => {
     const child = spawn(server, [], { env, stdio: ['pipe', 'pipe', 'ignore'] });
     const results = [];
@@ -70,12 +71,13 @@ function readMcpResources(server, env) {
     (async () => {
       await request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'fresh-install-check', version: '1' } });
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+      const tools = (await request('tools/list', {})).result.tools.map((tool) => tool.name);
       const listed = await request('resources/list', {});
       for (const { uri } of listed.result.resources) {
         const read = await request('resources/read', { uri });
-        results.push({ uri, length: read.result?.contents?.[0]?.text?.length ?? 0, error: read.error?.message });
+        results.push({ uri, text: read.result?.contents?.[0]?.text ?? '', error: read.error?.message });
       }
-      done(() => resolve(results));
+      done(() => resolve({ tools, resources: results }));
     })().catch((error) => done(() => reject(error)));
   });
 }
@@ -121,10 +123,14 @@ try {
   check('a shielded address parses', parsed.trim() === 'parsed' && address.length > 90, `${address.length} characters${parsed.trim() === 'parsed' ? '' : `, ${parsed.trim()}`}`);
 
   // The MCP server reads its skill documents from the installed package.
-  const resources = await readMcpResources(join(work, 'node_modules', '.bin', 'midnight-wallet-mcp'), { ...process.env, HOME: home });
+  const { tools, resources } = await askMcpServer(join(work, 'node_modules', '.bin', 'midnight-wallet-mcp'), { ...process.env, HOME: home });
   check('the MCP server lists its skill resources', resources.length >= 2, `${resources.length}`);
-  for (const { uri, length, error } of resources) {
-    check(`the MCP server serves ${uri}`, error === undefined && length > 0, error ? error.replace(work, '<install>') : `${length} characters`);
+  for (const { uri, text, error } of resources) {
+    check(`the MCP server serves ${uri}`, error === undefined && text.length > 0, error ? error.replace(work, '<install>') : `${text.length} characters`);
+    // An agent calls what the skill tells it to: every tool call it shows must be a tool the server has.
+    const named = [...new Set([...text.matchAll(/\b(midnight_[a-z_]+)\(/g)].map((match) => match[1]))];
+    const unknown = named.filter((name) => !tools.includes(name));
+    check(`${uri} names only tools the server has`, unknown.length === 0, unknown.length > 0 ? `not a tool: ${unknown.join(', ')}` : `${named.length} of ${tools.length} tools named`);
   }
 } catch (error) {
   check('the fresh install and its checks ran', false, String(error.stderr || error.message).trim().split('\n').slice(-3).join(' | '));

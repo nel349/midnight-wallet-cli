@@ -341,6 +341,61 @@ describe('writeScaffold', () => {
     expect(JSON.parse(readFileSync(join(dir, 'dapp.test.json'), 'utf-8')).name).toBe('demo');
   });
 
+  it('adds what a browser suite needs to an existing dapp.test.json, and keeps the rest of it', () => {
+    const dir = freshDir('browser-into-cli');
+    writeScaffold(basicScaffold(), { dappDir: dir });
+    const before = JSON.parse(readFileSync(join(dir, 'dapp.test.json'), 'utf-8'));
+    expect(before.prep).not.toContain('build-and-serve');
+
+    const browserScaffold = buildScaffold([], {
+      contractName: 'demo',
+      strategy: 'browser',
+      browser: { port: 4173, buildCmd: 'npm run dev' },
+    });
+    const result = writeScaffold(browserScaffold, { dappDir: dir });
+
+    expect(result.written).toContain(join(dir, 'dapp.test.json'));
+    expect(JSON.parse(readFileSync(join(dir, 'dapp.test.json'), 'utf-8'))).toEqual({
+      ...before,
+      port: 4173,
+      buildCmd: 'npm run dev',
+      url: 'http://localhost:4173/',
+      prep: [...before.prep, 'build-and-serve'],
+    });
+  });
+
+  it("keeps the user's own UI settings and prep when adding a browser suite", () => {
+    const dir = freshDir('browser-into-custom');
+    const userConfig = { name: 'demo', network: 'preprod', buildCmd: 'custom', prep: ['mn-serve'] };
+    writeFileSync(join(dir, 'dapp.test.json'), JSON.stringify(userConfig));
+
+    const browserScaffold = buildScaffold([], {
+      contractName: 'demo',
+      strategy: 'browser',
+      browser: { port: 5173, buildCmd: 'npm run dev' },
+    });
+    writeScaffold(browserScaffold, { dappDir: dir });
+
+    expect(JSON.parse(readFileSync(join(dir, 'dapp.test.json'), 'utf-8'))).toEqual({
+      name: 'demo',
+      network: 'preprod',
+      buildCmd: 'custom',
+      port: 5173,
+      url: 'http://localhost:5173/',
+      prep: ['mn-serve', 'build-and-serve'],
+    });
+  });
+
+  it('leaves a dapp.test.json that already has the UI settings alone', () => {
+    const dir = freshDir('browser-complete');
+    const browserScaffold = (suiteName: string) => buildScaffold([], {
+      contractName: 'demo', suiteName, strategy: 'browser', browser: { port: 4173, buildCmd: 'npm run dev' },
+    });
+    writeScaffold(browserScaffold('ui-one'), { dappDir: dir });
+    const result = writeScaffold(browserScaffold('ui-two'), { dappDir: dir });
+    expect(result.preserved).toContain(join(dir, 'dapp.test.json'));
+  });
+
   it('writes prompt.md instead of actions.json for browser scaffolds', () => {
     const dir = freshDir('browser');
     const browserScaffold = buildScaffold([], {

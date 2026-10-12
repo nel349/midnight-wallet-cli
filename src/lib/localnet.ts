@@ -166,39 +166,45 @@ const PORT_MAP: Record<string, string> = {
 };
 
 /**
- * Parse `docker compose ps --format json` into structured status.
- * Returns empty array if no containers are running.
+ * The services in `docker compose ps --format json` output: one JSON object
+ * per line, unreadable lines skipped.
+ */
+export function parseServiceStatus(output: string): ServiceStatus[] {
+  const services: ServiceStatus[] = [];
+  for (const line of output.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line) as { Service?: string; State?: string; Health?: string; Image?: string };
+      const name = obj.Service ?? 'unknown';
+      services.push({
+        name,
+        state: obj.State ?? 'unknown',
+        health: obj.Health ?? '',
+        port: PORT_MAP[name] ?? '',
+        image: obj.Image ?? '',
+      });
+    } catch {
+      // skip unparseable lines
+    }
+  }
+  return services;
+}
+
+/**
+ * The localnet's services and their state, stopped ones included (`ps -a`): a
+ * stopped localnet is not the same as none. Empty when there are no containers.
  */
 export function getServiceStatus(): ServiceStatus[] {
   try {
-    const output = dockerCompose('ps --format json');
-    if (!output.trim()) return [];
-
-    // docker compose ps --format json outputs one JSON object per line
-    const lines = output.trim().split('\n');
-    const services: ServiceStatus[] = [];
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const obj = JSON.parse(line) as { Service?: string; State?: string; Health?: string; Image?: string; Publishers?: Array<{ PublishedPort?: number }> };
-        const name = obj.Service ?? 'unknown';
-        services.push({
-          name,
-          state: obj.State ?? 'unknown',
-          health: obj.Health ?? '',
-          port: PORT_MAP[name] ?? '',
-          image: obj.Image ?? '',
-        });
-      } catch {
-        // skip unparseable lines
-      }
-    }
-
-    return services;
+    return parseServiceStatus(dockerCompose('ps -a --format json'));
   } catch {
     return [];
   }
+}
+
+/** Block for `ms` without the shell's `sleep`, which Windows doesn't have. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /**
@@ -221,11 +227,35 @@ export function waitForHealthy(timeoutMs: number = 120_000, intervalMs: number =
       if (healthyOrNoCheck) return true;
     }
 
-    // Sleep for the polling interval
-    execSync(`sleep ${intervalMs / 1000}`, { timeout: intervalMs + 1_000 });
+    sleepSync(intervalMs);
   }
 
   return false;
+}
+
+/**
+ * What a failed `docker compose up` means, when Docker's message is one a user
+ * can act on: Docker not running, a container name already taken, or a port
+ * already taken (Docker words that differently for a program on the host and
+ * for another container). Undefined for anything else.
+ */
+export function localnetStartFailure(dockerMessage: string): string | undefined {
+  if (dockerMessage.includes('Cannot connect to the Docker daemon')) {
+    return 'Docker is installed but not running.\n' +
+      'Start Docker (Docker Desktop on macOS and Windows), then run "midnight localnet up" again.';
+  }
+  if (dockerMessage.includes('is already in use by container')) {
+    return 'Container name conflict — containers with the same names already exist\n' +
+      '(likely from a previous midnight-local-network setup).\n\n' +
+      'Run "midnight localnet clean" to remove them, then try again.';
+  }
+  if (dockerMessage.includes('address already in use') || dockerMessage.includes('port is already allocated')) {
+    const port = /(?:Bind for [^\s]*:|listen tcp[46]? [^\s]*:)(\d+)/.exec(dockerMessage)?.[1];
+    return `Port conflict — ${port ? `port ${port} is` : 'a port the local network needs is'} taken by another container or program.\n` +
+      'The local network uses 9944 (node), 8088 (indexer) and 6300 (proof server).\n\n' +
+      'Free the port, then run "midnight localnet up" again.';
+  }
+  return undefined;
 }
 
 /** Return the compose file path (for display purposes). */

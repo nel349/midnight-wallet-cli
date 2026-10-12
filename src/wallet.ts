@@ -165,8 +165,10 @@ async function run(): Promise<void> {
 }
 
 run().then(() => {
+  // A command can finish without throwing and still have failed: a test run
+  // whose suite fails sets process.exitCode, and that is the code to leave with.
   if (FACADE_COMMANDS.has(command)) {
-    process.exit(0);
+    process.exit(process.exitCode ?? 0);
   }
 }).catch((err: Error) => {
   // Usage errors (missing/unknown subcommand, bad args) render in yellow

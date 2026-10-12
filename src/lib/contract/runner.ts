@@ -628,7 +628,7 @@ async function executeScript(
     child.on('close', (code) => {
       cleanup();
       if (code !== 0) {
-        reject(new Error(stderr.trim() || `Script exited with code ${code}`));
+        reject(new Error(scriptFailureMessage(stderr, code)));
         return;
       }
       resolve(stdout.trim());
@@ -639,4 +639,27 @@ async function executeScript(
       reject(err);
     });
   });
+}
+
+/**
+ * What went wrong, from the stderr of a generated script that exited non-zero:
+ * the message of the error Node printed as it died, without the source excerpt
+ * above it, the stack below it or the script's own progress lines (the vacant
+ * witnesses warning among them: callers preflight a contract that declares
+ * witnesses). The whole stderr when no error line is there to find.
+ */
+export function scriptFailureMessage(stderr: string, code: number | null): string {
+  const lines = stderr.split('\n');
+  let start = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^\w*Error(?: \[\w+\])?: /.test(lines[i]!.trim())) { start = i; break; }
+  }
+  if (start === -1) return stderr.trim() || `Script exited with code ${code}`;
+
+  const message = [lines[start]!.trim().replace(/^Error: /, '')];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === '' || /^\s*at \S/.test(line) || /^Node\.js v/.test(line.trim())) break;
+    message.push(line.trimEnd());
+  }
+  return message.join('\n');
 }

@@ -1,8 +1,8 @@
 // Prep runner — execute prep steps defined in dapp.test.json by calling existing lib functions.
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
-import { execSync } from 'node:child_process';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import { bindCachesToIndexer } from '../cache-indexer.ts';
 import { clearWalletCache } from '../wallet-cache.ts';
@@ -10,10 +10,12 @@ import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
 import type { NetworkConfig, NetworkName } from '../network.ts';
 import { checkDockerAvailable, ensureComposeFile, dockerCompose, getServiceStatus, waitForHealthy } from '../localnet.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
+import { buildFacade, currentDustBalance, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
 import { loadWalletCache, saveWalletCache } from '../wallet-cache.ts';
-import { executeTransfer, ensureDust, suppressRpcNoise } from '../transfer.ts';
-import { GENESIS_SEED, INDEXER_GRAPHQL_PATH } from '../constants.ts';
+import { dustToString, executeTransfer, ensureDust, suppressRpcNoise } from '../transfer.ts';
+import { GENESIS_SEED, INDEXER_GRAPHQL_PATH, MIN_DUST_FOR_TRANSFER } from '../constants.ts';
+import { waitForDustBalance } from '../dust-wait.ts';
+import { httpAnswers } from '../http-probe.ts';
 import { deriveUnshieldedAddress } from '../derive-address.ts';
 
 import type { DappTestConfig, PrepStepId, PrepStepResult, PrepContext, PrepCallbacks } from './types.ts';
@@ -98,33 +100,16 @@ const LOCALNET_TIMEOUT_MS = 30_000; // 30s for Docker health
 const LOCALNET_MAX_RETRIES = 2;
 const INDEXER_PROBE_TIMEOUT_MS = 30_000; // 30s for indexer to start responding after Docker healthy
 
-/**
- * Probe the indexer HTTP endpoint to verify it's actually responding.
- * Drops curl's `-f` flag — any response, including 4xx, means the server
- * is alive; we only need TCP + HTTP framing, not a 2xx body. Connection
- * refused / DNS failure / timeout still throws, which is what we want
- * to treat as "not ready".
- */
-function probeIndexer(): boolean {
-  try {
-    execSync(
-      `curl -s -o /dev/null http://localhost:8088${INDEXER_GRAPHQL_PATH} --max-time 3`,
-      { timeout: 5_000, stdio: ['pipe', 'pipe', 'pipe'] },
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
+/** The local indexer's HTTP endpoint: any answer, a 4xx included, means it is serving. */
+const LOCAL_INDEXER_URL = `http://localhost:8088${INDEXER_GRAPHQL_PATH}`;
 
 /** Poll the indexer until it responds or timeout. */
-function waitForIndexer(timeoutMs: number, onMessage?: (msg: string) => void): boolean {
+async function waitForIndexer(timeoutMs: number, onMessage?: (msg: string) => void): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (probeIndexer()) return true;
+    if (await httpAnswers(LOCAL_INDEXER_URL, 3_000)) return true;
     onMessage?.('Waiting for indexer...');
-    const { execSync } = require('node:child_process') as typeof import('node:child_process');
-    try { execSync('sleep 2', { timeout: 3_000 }); } catch {}
+    await sleep(2_000);
   }
   return false;
 }
@@ -143,7 +128,7 @@ async function stepLocalnetUp(callbacks: PrepCallbacks): Promise<void> {
 
   if (allHealthy) {
     // Docker thinks they're healthy — verify the indexer is actually responding
-    if (waitForIndexer(10_000, (msg) => callbacks.onMessage(msg))) {
+    if (await waitForIndexer(10_000, (msg) => callbacks.onMessage(msg))) {
       callbacks.onMessage(`Localnet OK (3 services healthy, indexer responding)`);
       return;
     }
@@ -167,7 +152,7 @@ async function stepLocalnetUp(callbacks: PrepCallbacks): Promise<void> {
     dockerCompose('up -d');
 
     const healthy = waitForHealthy(LOCALNET_TIMEOUT_MS);
-    if (healthy && waitForIndexer(INDEXER_PROBE_TIMEOUT_MS, (msg) => callbacks.onMessage(msg))) {
+    if (healthy && await waitForIndexer(INDEXER_PROBE_TIMEOUT_MS, (msg) => callbacks.onMessage(msg))) {
       callbacks.onMessage('Localnet running (indexer verified)');
       return;
     }
@@ -267,6 +252,8 @@ async function stepBalance(amount: number, config: DappTestConfig, callbacks: Pr
 }
 
 const DUST_WAIT_TIMEOUT_MS = 90_000; // 90s for dust to become available after registration
+// A 1000 NIGHT wallet accrues the minimum in about 80 s from registration.
+const DUST_ACCRUAL_TIMEOUT_MS = 180_000;
 
 async function stepDust(config: DappTestConfig, callbacks: PrepCallbacks): Promise<void> {
   const network = config.network ?? 'undeployed';
@@ -294,32 +281,45 @@ async function stepDust(config: DappTestConfig, callbacks: PrepCallbacks): Promi
 
     if (result.alreadyAvailable) {
       callbacks.onMessage('Dust already available');
-      try { await saveWalletCache(address, network, bundle.facade); } catch {}
-      return;
+    } else {
+      // Dust was just registered — wait for coins to actually appear on-chain.
+      // This MUST use the same facade to get real-time state updates.
+      callbacks.onMessage('Dust registered. Waiting for coins to become available...');
+      const dustState = await waitForDustAvailable(bundle, DUST_WAIT_TIMEOUT_MS);
+
+      // Verify dust is actually available — don't trust silent timeouts
+      const dustAvailable = (() => {
+        try {
+          const dust = dustState.dust as any;
+          return dust?.availableCoins?.length > 0 || dust?.balance(new Date()) > 0n;
+        } catch { return false; }
+      })();
+
+      if (!dustAvailable) {
+        if (network !== 'undeployed') {
+          throw new Error(
+            `Dust not available on ${network}. Register dust and wait for it to generate:\n` +
+            `  mn dust register\n` +
+            `  mn dust status   (check until dustAvailable: true)`
+          );
+        }
+        throw new Error(`Dust not available after ${DUST_WAIT_TIMEOUT_MS / 1000}s. The chain may be slow — try again.`);
+      }
     }
 
-    // Dust was just registered — wait for coins to actually appear on-chain.
-    // This MUST use the same facade to get real-time state updates.
-    callbacks.onMessage('Dust registered. Waiting for coins to become available...');
-    const dustState = await waitForDustAvailable(bundle, DUST_WAIT_TIMEOUT_MS);
-
-    // Verify dust is actually available — don't trust silent timeouts
-    const dustAvailable = (() => {
-      try {
-        const dust = dustState.dust as any;
-        return dust?.availableCoins?.length > 0 || dust?.balance(new Date()) > 0n;
-      } catch { return false; }
-    })();
-
-    if (!dustAvailable) {
-      if (network !== 'undeployed') {
-        throw new Error(
-          `Dust not available on ${network}. Register dust and wait for it to generate:\n` +
-          `  mn dust register\n` +
-          `  mn dust status   (check until dustAvailable: true)`
-        );
-      }
-      throw new Error(`Dust not available after ${DUST_WAIT_TIMEOUT_MS / 1000}s. The chain may be slow — try again.`);
+    // Available is not yet enough to pay with: a suite's first transaction
+    // right after a registration fails with "could not balance dust". Wait for
+    // the amount mn asks for before any transaction.
+    const needed = dustToString(MIN_DUST_FOR_TRANSFER);
+    const balance = await waitForDustBalance(() => currentDustBalance(bundle), MIN_DUST_FOR_TRANSFER, {
+      timeoutMs: DUST_ACCRUAL_TIMEOUT_MS,
+      onBalance: (b) => callbacks.onMessage(`Dust: ${dustToString(b)} of the ${needed} DUST a transaction needs, accruing...`),
+    });
+    if (balance < MIN_DUST_FOR_TRANSFER) {
+      throw new Error(
+        `Only ${dustToString(balance)} DUST after ${DUST_ACCRUAL_TIMEOUT_MS / 1000}s, and a transaction needs ${needed}. ` +
+        'Dust accrues with time, faster the more NIGHT is registered: run the suite again in a while, or fund the wallet with more NIGHT.'
+      );
     }
 
     callbacks.onMessage('Dust is available');

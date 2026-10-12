@@ -8,6 +8,8 @@ import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts'
 import {
   COMPOSE_YAML,
   COMPOSE_VERSION,
+  parseServiceStatus,
+  localnetStartFailure,
 } from '../lib/localnet.ts';
 import helpCommand, { COMMAND_SPECS } from '../commands/help.ts';
 import { COMMAND_BRIEFS } from '../ui/art.ts';
@@ -193,5 +195,56 @@ describe('help integration', () => {
     const localnetBrief = COMMAND_BRIEFS.find(([name]) => name === 'localnet');
     expect(localnetBrief).toBeDefined();
     expect(localnetBrief![1]).toContain('local network');
+  });
+});
+
+describe('parseServiceStatus', () => {
+  it('reads one service per line, stopped ones included', () => {
+    const output = [
+      JSON.stringify({ Service: 'node', State: 'running', Health: 'healthy', Image: 'midnightntwrk/midnight-node:1.0.0' }),
+      JSON.stringify({ Service: 'indexer', State: 'exited', Health: '', Image: 'midnightntwrk/indexer-standalone:4.3.3' }),
+      '',
+    ].join('\n');
+    expect(parseServiceStatus(output)).toEqual([
+      { name: 'node', state: 'running', health: 'healthy', port: '9944', image: 'midnightntwrk/midnight-node:1.0.0' },
+      { name: 'indexer', state: 'exited', health: '', port: '8088', image: 'midnightntwrk/indexer-standalone:4.3.3' },
+    ]);
+  });
+
+  it('skips a line that is not JSON and is empty for no output', () => {
+    expect(parseServiceStatus('time="..." level=warning msg="something"\n')).toEqual([]);
+    expect(parseServiceStatus('')).toEqual([]);
+  });
+});
+
+describe('localnetStartFailure', () => {
+  it('names the port another container holds', () => {
+    const docker = 'Error response from daemon: driver failed programming external connectivity on endpoint proof-server (93fc5a6b): Bind for 0.0.0.0:6300 failed: port is already allocated';
+    const message = localnetStartFailure(docker);
+    expect(message).toContain('port 6300 is taken');
+    expect(message).toContain('midnight localnet up');
+  });
+
+  it('names the port a program on the host holds', () => {
+    const docker = 'Error response from daemon: Ports are not available: exposing port TCP 0.0.0.0:9944 -> 0.0.0.0:0: listen tcp 0.0.0.0:9944: bind: address already in use';
+    expect(localnetStartFailure(docker)).toContain('port 9944 is taken');
+  });
+
+  it('still explains a port conflict whose message names no port', () => {
+    expect(localnetStartFailure('bind: address already in use')).toContain('a port the local network needs is taken');
+  });
+
+  it('points a container name conflict at clean', () => {
+    const docker = 'Error response from daemon: Conflict. The container name "/node" is already in use by container "8e7221d7". You have to remove (or rename) that container to be able to reuse that name.';
+    expect(localnetStartFailure(docker)).toContain('midnight localnet clean');
+  });
+
+  it('says Docker is not running when the daemon cannot be reached', () => {
+    const docker = "unable to get image 'midnightntwrk/midnight-node:1.0.0': Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?";
+    expect(localnetStartFailure(docker)).toContain('Docker is installed but not running');
+  });
+
+  it('has nothing to say about any other failure', () => {
+    expect(localnetStartFailure('manifest for midnightntwrk/midnight-node:9.9.9 not found: manifest unknown')).toBeUndefined();
   });
 });
