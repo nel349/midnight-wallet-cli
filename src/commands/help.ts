@@ -837,6 +837,11 @@ can connect to it — no browser extension needed.
     server balanced that way on the same connection. Everything else still
     prompts (rejected without a terminal). --max-fee <DUST> (default 10)
     and --max-pending <n> (default 2) bound what an agent can cost it.
+  - A fee the wallet's Dust doesn't cover yet (its NIGHT is still generating
+    it): serve waits when the rest is at most 2 minutes away, and otherwise
+    refuses at once with DUST_REQUIRED and the time ("generates the rest in
+    about 4 minutes"): retry then. mn's own commands (contract, test run,
+    grant) wait up to 5 minutes.
   - --json: the listening line reports the approval policy, e.g.
     "approval":{"reads":"auto","balancing":"fee-only","writes":"fee-only","feeLimits":
     {"maxFeeSpecks":"10000000000000000","maxPending":2}}
@@ -963,7 +968,9 @@ ERROR CODES
   PROOF_TIMEOUT           6     ZK proof generation timed out
   PROOF_FAILURE           6     Proof server failed to generate the ZK proof
   INVALID_DUST_PROOF      6     Chain rejected the dust spend proof as malformed
-  DUST_REQUIRED           5     No dust tokens available for fees
+  DUST_REQUIRED           5     Not enough Dust for the fee. Not registered:
+                                dust register. Generating: the message says
+                                how long (retry then, or register more NIGHT)
   DUST_GENERATING         5     Dust registration fee not generated yet; the
                                 message says when (rerun then, or add NIGHT)
   CHAIN_CLOCK_BEHIND      4     The chain's clock lags this computer's (a local

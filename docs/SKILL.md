@@ -126,7 +126,7 @@ Every MCP tool error returns `{ error: true, code: <ERROR_CODE>, message: <human
 | Code | Meaning | Recovery |
 |---|---|---|
 | `INSUFFICIENT_BALANCE` | Wallet doesn't have enough NIGHT to cover the requested amount. | Show the user. On localnet: `midnight_airdrop({ amount: "..." })`. On hosted networks: tell user to fund the address. |
-| `DUST_REQUIRED` | Wallet has NIGHT but no DUST to pay fees (or insufficient DUST). | Run `midnight_dust_register()` then wait for dust to regenerate (passive, on-chain — check `midnight_dust_status()` until `dustAvailable: true`). |
+| `DUST_REQUIRED` | Wallet has NIGHT but not enough DUST for the fee. | Not registered (`midnight_dust_status()` shows `registered: false`): run `midnight_dust_register()`. Registered: its NIGHT is still generating the fee, which happens with time. mn has already waited when the fee was a few minutes away; the message says how long the rest takes ("generates the rest in about 4 minutes"). Wait that long and retry, don't retry at once. |
 | `INVALID_DUST_PROOF` | Chain rejected the dust spend proof as malformed (substrate "Custom error 170"). Stale commitment tree. | `midnight_cache_clear({ wallet: "<name>" })` then retry. |
 | `STALE_CACHE` | Local wallet cache disagrees with chain (e.g. localnet reset, remote testnet re-indexed). | `midnight_cache_clear({ wallet: "<name>" })` then retry. |
 | `STALE_UTXO` | UTXO was already spent on-chain (substrate "error code 115"). | Re-sync (the next call will refresh state) and retry. |

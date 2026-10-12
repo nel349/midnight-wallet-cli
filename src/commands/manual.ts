@@ -225,6 +225,9 @@ export function buildManual(): string {
   out.push(`    ${dim('$')} ${dim('mn dust register --wallet <name>')}`);
   out.push(`    Then wait until status shows availability:`);
   out.push(`    ${dim('$')} ${dim('mn dust status --wallet <name>')}`);
+  out.push(`    A registered wallet can still be short of a fee right after paying one:`);
+  out.push(`    its NIGHT generates Dust with time. mn waits by itself when the fee is a`);
+  out.push(`    few minutes away, and otherwise says how long it takes: retry then.`);
   out.push('');
   out.push(`  ${bold('"Cannot find package @midnight-ntwrk/..." on contract deploy')}`);
   out.push(`    The CLI bundles its own SDK. Reinstall to pick up the bundle:`);
