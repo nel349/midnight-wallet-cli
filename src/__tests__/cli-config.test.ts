@@ -294,6 +294,39 @@ describe('wallet config key', () => {
   });
 });
 
+describe('account-build config key', () => {
+  it('is a valid key, not set by default', () => {
+    expect(getValidConfigKeys()).toContain('account-build');
+    expect(getConfigValue('account-build', TEST_DIR)).toBe('(not set)');
+  });
+
+  it('is kept as an absolute directory, so it means the same place wherever mn runs', () => {
+    setConfigValue('account-build', 'some/build', TEST_DIR);
+    expect(getConfigValue('account-build', TEST_DIR)).toBe(path.resolve('some/build'));
+    expect(loadCliConfig(TEST_DIR)['account-build']).toBe(path.resolve('some/build'));
+
+    setConfigValue('account-build', '/opt/account-build', TEST_DIR);
+    expect(getConfigValue('account-build', TEST_DIR)).toBe('/opt/account-build');
+  });
+
+  it('refuses an empty value', () => {
+    expect(() => setConfigValue('account-build', '  ', TEST_DIR)).toThrow('Invalid account-build');
+  });
+
+  it('is removed by unset, leaving the other keys', () => {
+    setConfigValue('network', 'preprod', TEST_DIR);
+    setConfigValue('account-build', '/opt/account-build', TEST_DIR);
+    unsetConfigValue('account-build', TEST_DIR);
+    expect(getConfigValue('account-build', TEST_DIR)).toBe('(not set)');
+    expect(getConfigValue('network', TEST_DIR)).toBe('preprod');
+  });
+
+  it('ignores a value in the file that is not text', () => {
+    fs.writeFileSync(path.join(TEST_DIR, 'config.json'), JSON.stringify({ network: 'undeployed', 'account-build': 7 }));
+    expect(loadCliConfig(TEST_DIR)['account-build']).toBeUndefined();
+  });
+});
+
 describe('unsetConfigValue', () => {
   it('resets network to default (undeployed)', () => {
     setConfigValue('network', 'preprod', TEST_DIR);

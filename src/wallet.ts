@@ -21,7 +21,7 @@ import { assertNodeSupported } from './lib/node-version.ts';
 // before any SDK/WASM loads (see lib/heap-guard.ts).
 // `dev` is included because it provisions wallets internally (airdrop + dust
 // register), which start facades whose WS handles aren't reliably reclaimed.
-const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve', 'test', 'contract', 'dev']);
+const FACADE_COMMANDS = new Set(['airdrop', 'transfer', 'dust', 'balance', 'serve', 'test', 'contract', 'dev', 'grant']);
 
 // --mcp: start MCP server instead of CLI (for: npx midnight-wallet-cli --mcp)
 if (process.argv.includes('--mcp')) {
@@ -156,6 +156,10 @@ async function run(): Promise<void> {
     }
     case 'dev': {
       const { default: handler } = await import('./commands/dev.ts');
+      return handler(args, signal);
+    }
+    case 'grant': {
+      const { default: handler } = await import('./commands/grant.ts');
       return handler(args, signal);
     }
     default:

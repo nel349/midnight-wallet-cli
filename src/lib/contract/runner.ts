@@ -589,10 +589,12 @@ export interface ScriptRun {
   cwd?: string;
   /** Make mn's own SDK packages resolvable from `dir` when it lacks them. Default true. */
   overlaySdk?: boolean;
+  /** What the script is for: part of its (hidden, removed afterwards) file name. Default "contract". */
+  label?: string;
 }
 
 /** Runs a generated script and returns what it wrote to stdout. Throws its marked error when it fails. */
-export async function executeScript({ dir: dappDir, script, onMessage, env: extraEnv, cwd, overlaySdk = true }: ScriptRun): Promise<string> {
+export async function executeScript({ dir: dappDir, script, onMessage, env: extraEnv, cwd, overlaySdk = true, label = 'contract' }: ScriptRun): Promise<string> {
   // ESM resolution walks up from the importing file's location to find
   // node_modules; NODE_PATH does NOT work for ESM. Three different files
   // need to resolve bare imports during a deploy:
@@ -606,7 +608,7 @@ export async function executeScript({ dir: dappDir, script, onMessage, env: extr
   const userNodeModules = join(dappDir, 'node_modules');
   const overlayPaths = overlaySdk ? overlayMidnightSdk(userNodeModules) : [];
 
-  const scriptPath = join(dappDir, `.mn-contract-${Date.now()}.mjs`);
+  const scriptPath = join(dappDir, `.mn-${label}-${Date.now()}.mjs`);
   writeFileSync(scriptPath, script);
 
   const cleanup = () => {

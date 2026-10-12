@@ -22,6 +22,7 @@ export const COMMAND_FLAGS: Readonly<Record<string, readonly string[]>> = {
   'dust': ['network', 'no-cache', 'seed', 'verbose', 'wallet', ...ENDPOINTS],
   'generate': ['force', 'mnemonic', 'network', 'output', 'seed'],
   'genesis-address': ['network'],
+  'grant': ['account-build', 'cap', 'dev-owner-key', 'expires-in', 'max-coin', 'network', 'per-call', 'wallet', 'yes', ...ENDPOINTS],
   'help': ['agent', 'intro', 'no-intro'],
   'info': ['network', 'wallet'],
   'inspect-cost': ['network', ...ENDPOINTS],

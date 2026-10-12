@@ -146,7 +146,7 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
       onMessage: (msg) => spinner.update(msg),
     });
 
-    spinner.stop(green('✓') + ' Contract deployed');
+    spinner.stop('Contract deployed');
 
     if (jsonMode) {
       // JSON path emits a single line of structured output on stdout. The
@@ -233,7 +233,7 @@ async function handleCall(args: ParsedArgs): Promise<void> {
       onMessage: (msg) => spinner.update(msg),
     });
 
-    spinner.stop(green('✓') + ` ${circuit} called`);
+    spinner.stop(`${circuit} called`);
 
     if (jsonMode) {
       writeJsonResult({
@@ -290,7 +290,7 @@ async function handleState(args: ParsedArgs): Promise<void> {
       onMessage: (msg) => spinner.update(msg),
     });
 
-    spinner.stop(green('✓') + ' State retrieved');
+    spinner.stop('State retrieved');
 
     if (jsonMode) {
       writeJsonResult({

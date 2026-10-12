@@ -60,9 +60,11 @@ interface ToolDef {
   /**
    * For a tool behind confirmation: checks the arguments before a token is
    * issued, throwing what the handler would, so the user is never asked to
-   * confirm a request that can't run.
+   * confirm a request that can't run. When it returns text, that is what the
+   * request comes to as the check found it, and the user is asked to confirm
+   * that instead of the tool's arguments.
    */
-  check?: (params: Record<string, unknown>) => Promise<void>;
+  check?: (params: Record<string, unknown>) => Promise<string | void>;
 }
 
 // Helper: build ParsedArgs from MCP tool parameters
@@ -105,6 +107,30 @@ function transferArgs(params: Record<string, unknown>): ParsedArgs {
   return args;
 }
 
+const GRANT_COMMON_PROPERTIES = {
+  wallet: { type: 'string', description: 'The wallet that owns the account and pays the fees' },
+  network: { type: 'string', enum: ['undeployed'], description: 'Only undeployed (a local ledger-9 stack)' },
+  'account-build': { type: 'string', description: 'The account build\'s directory (default: the account-build config key)' },
+};
+
+/** A grant tool's params as `grant <subcommand> [positional]`, the named param moved to the positional. */
+function grantArgs(subcommand: string, params: Record<string, unknown>, positional?: string, extraFlags: Record<string, true> = {}): ParsedArgs {
+  const args = buildArgs('grant', params, subcommand);
+  if (positional !== undefined) {
+    if (params[positional] !== undefined) args.positionals = [String(params[positional])];
+    delete args.flags[positional];
+  }
+  Object.assign(args.flags, extraFlags);
+  return args;
+}
+
+/** A grant request can run: its arguments, the account build, the network, the account and the wallet are all in order. */
+async function checkGrant(args: ParsedArgs, params: Record<string, unknown>): Promise<void> {
+  const { prepareGrant } = await import('./lib/grant/prepare.ts');
+  await prepareGrant(args);
+  await checkSendingWallet(params);
+}
+
 /** The wallet a deploy or call pays from exists and can be read. */
 async function checkSendingWallet(params: Record<string, unknown>): Promise<void> {
   const { loadWalletConfig, resolveWalletPath } = await import('./lib/wallet-config.ts');
@@ -132,6 +158,7 @@ const handlerLoaders: Record<string, () => Promise<{ default: CommandHandler }>>
   'wallet':          () => import('./commands/wallet.ts'),
   'status':          () => import('./commands/status.ts'),
   'contract':        () => import('./commands/contract.ts'),
+  'grant':           () => import('./commands/grant.ts'),
   'test':            () => import('./commands/test.ts'),
 };
 
@@ -749,6 +776,125 @@ const TOOLS: ToolDef[] = [
     },
   },
 
+  // ── Grants: the wallet owner's account (experimental) ────────────
+  {
+    name: 'midnight_grant_status',
+    description: 'The wallet\'s account: address, owner key, what it holds, number of grants. Needs an account build (see skill).',
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    inputSchema: { type: 'object', properties: { ...GRANT_COMMON_PROPERTIES } },
+    async handler(params) {
+      return captureCommand(await importHandler('grant'), grantArgs('status', params));
+    },
+  },
+  {
+    name: 'midnight_grant_list',
+    description: 'Every grant on the wallet\'s account, with its limits and whether it is live.',
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    inputSchema: { type: 'object', properties: { ...GRANT_COMMON_PROPERTIES } },
+    async handler(params) {
+      return captureCommand(await importHandler('grant'), grantArgs('list', params));
+    },
+  },
+  {
+    name: 'midnight_grant_request',
+    description: 'What issuing from an agent\'s grant request link would grant: who spends, who they can pay, and the limits (the account build\'s defaults for any not given). Issues nothing. Show the user this before midnight_grant_issue.',
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        link: { type: 'string', description: 'The grant request link' },
+        cap: { type: 'string', description: 'Most the grant may ever pay (smallest unit)' },
+        'per-call': { type: 'string', description: 'Most one payment may be' },
+        'max-coin': { type: 'string', description: 'Largest coin the agent may take to pay from' },
+        'expires-in': { type: 'string', description: 'Seconds the grant lasts' },
+        ...GRANT_COMMON_PROPERTIES,
+      },
+      required: ['link'],
+    },
+    async handler(params) {
+      return captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link'));
+    },
+  },
+  {
+    name: 'midnight_grant_deploy',
+    description: 'Deploy the wallet\'s account and activate its owner key (returns pending token). Takes about 34 DUST and a few minutes. The owner key is a random development key the mnemonic can\'t recover: dev-owner-key must be true.',
+    annotations: { destructiveHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        'dev-owner-key': { type: 'boolean', description: 'Accept a development owner key' },
+        ...GRANT_COMMON_PROPERTIES,
+      },
+    },
+    async handler(params) {
+      return captureCommand(await importHandler('grant'), grantArgs('deploy', params));
+    },
+    async check(params) {
+      await checkGrant(grantArgs('deploy', params), params);
+    },
+  },
+  {
+    name: 'midnight_grant_issue',
+    description: 'Issue a grant from an agent\'s request link (returns pending token, whose description gives the grant\'s terms as the account build read them). Lets that agent spend from the account within the limits.',
+    annotations: { destructiveHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        link: { type: 'string', description: 'The grant request link' },
+        cap: { type: 'string', description: 'Most the grant may ever pay (smallest unit)' },
+        'per-call': { type: 'string', description: 'Most one payment may be' },
+        'max-coin': { type: 'string', description: 'Largest coin the agent may take to pay from' },
+        'expires-in': { type: 'string', description: 'Seconds the grant lasts' },
+        ...GRANT_COMMON_PROPERTIES,
+      },
+      required: ['link'],
+    },
+    async handler(params) {
+      return captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link', { yes: true }));
+    },
+    // The link is read by the account build before a token is issued: a link
+    // that isn't one is refused here, and the user confirms the grant's terms
+    // as the build reports them, not a link they can't read.
+    async check(params) {
+      await checkGrant(grantArgs('issue', params, 'link', { yes: true }), params);
+      const shown = await captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link'));
+      const { describeGrantTerms } = await import('./lib/grant/request.ts');
+      return `Issue a grant on ${shown.wallet}'s account on ${shown.network}, letting an agent spend from it within these terms `
+        + `(amounts in the token's smallest unit; limits not given took the account build's defaults): ${describeGrantTerms(shown.request)}`;
+    },
+  },
+  {
+    name: 'midnight_grant_revoke',
+    description: 'Revoke one grant, by its id or slot (returns pending token).',
+    annotations: { destructiveHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        grant: { type: 'string', description: 'Grant id (64 hex) or slot number' },
+        ...GRANT_COMMON_PROPERTIES,
+      },
+      required: ['grant'],
+    },
+    async handler(params) {
+      return captureCommand(await importHandler('grant'), grantArgs('revoke', params, 'grant'));
+    },
+    async check(params) {
+      await checkGrant(grantArgs('revoke', params, 'grant'), params);
+    },
+  },
+  {
+    name: 'midnight_grant_revoke_all',
+    description: 'Revoke every grant on the wallet\'s account (returns pending token).',
+    annotations: { destructiveHint: true, openWorldHint: true },
+    inputSchema: { type: 'object', properties: { ...GRANT_COMMON_PROPERTIES } },
+    async handler(params) {
+      return captureCommand(await importHandler('grant'), grantArgs('revoke-all', params));
+    },
+    async check(params) {
+      await checkGrant(grantArgs('revoke-all', params), params);
+    },
+  },
+
   // ── Test framework ───────────────────────────────────────────────
   {
     name: 'midnight_test_create',
@@ -828,6 +974,10 @@ const REQUIRES_CONFIRMATION = new Set<string>([
   'midnight_transfer',
   'midnight_contract_deploy',
   'midnight_contract_call',
+  'midnight_grant_deploy',
+  'midnight_grant_issue',
+  'midnight_grant_revoke',
+  'midnight_grant_revoke_all',
 ]);
 
 const confirmationStore = createConfirmationStore();
@@ -846,6 +996,12 @@ function describePendingOp(tool: string, params: Record<string, unknown>): strin
       const argsHint = params.args ? ` with args ${params.args}` : '';
       return `Call circuit ${params.circuit} on contract ${params.address} as ${wallet} on ${network}${argsHint}`;
     }
+    case 'midnight_grant_deploy':
+      return `Deploy an account for ${wallet} on ${network}, on a development owner key the wallet's mnemonic can't recover`;
+    case 'midnight_grant_revoke':
+      return `Revoke grant ${params.grant} on ${wallet}'s account on ${network}`;
+    case 'midnight_grant_revoke_all':
+      return `Revoke every grant on ${wallet}'s account on ${network}`;
     default:
       return `Execute ${tool} with ${JSON.stringify(params)}`;
   }
@@ -921,15 +1077,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   // Step 1 of confirmation: return a pending token instead of executing.
   if (REQUIRES_CONFIRMATION.has(name)) {
+    let found: string | void;
     try {
-      await TOOLS.find((t) => t.name === name)?.check?.(params);
+      found = await TOOLS.find((t) => t.name === name)?.check?.(params);
     } catch (err) {
       return errorResponse(err instanceof Error ? err : new Error(String(err)));
     }
     const pending = confirmationStore.create({
       tool: name,
       args: params,
-      description: describePendingOp(name, params),
+      description: found ?? describePendingOp(name, params),
     });
     return {
       content: [{

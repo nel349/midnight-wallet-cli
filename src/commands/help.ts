@@ -289,7 +289,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       'set <key> <value>   Write a config value',
       'unset <key>         Reset a config value to its default',
       '',
-      'Keys: network, wallet, proof-server, node, indexer-ws',
+      'Keys: network, wallet, proof-server, node, indexer-ws, account-build',
       '',
       'Endpoint keys (proof-server, node, indexer-ws) are scoped to a',
       'network: the selected one, or the one given with --network — a',
@@ -465,6 +465,58 @@ const COMMAND_SPECS: CommandSpec[] = [
       circuits: 'Array of circuit definitions (inspect)',
       witnesses: 'Array of witness definitions (inspect)',
       state: 'Contract ledger state (state)',
+    },
+  },
+  {
+    name: 'grant',
+    description: 'This wallet\'s account, and the grants that let an agent spend from it (experimental)',
+    usage: 'midnight grant <deploy|status|list|issue|revoke|revoke-all> [options]',
+    flags: [
+      'deploy                        Deploy this wallet\'s account and activate its owner key',
+      'status                        The account, its owner key and what it holds',
+      'list                          Every grant on the account',
+      'issue <link>                  Show the grant an agent\'s request link would get; issue it with --yes',
+      'revoke <grant id | slot>      Revoke one grant',
+      'revoke-all                    Revoke every grant',
+      '--account-build <dir>         The account build to drive (or: midnight config set account-build <dir>)',
+      '--dev-owner-key               deploy: accept a random development owner key, which the',
+      '                              wallet\'s mnemonic can\'t recover',
+      '--yes                         issue: issue the grant (without it the grant is only shown)',
+      '--cap <n>                     issue: the most the grant may ever pay, in the token\'s smallest unit',
+      '                              (this and the three below default to the account build\'s limits)',
+      '--per-call <n>                issue: the most one payment may be',
+      '--max-coin <n>                issue: the largest coin the agent may take to pay from',
+      '--expires-in <seconds>        issue: how long the grant lasts',
+      '--wallet <name>               The wallet that owns the account and pays the fees',
+      '--network <name>              Network (default: undeployed, the only one the account build reaches)',
+      '--node <url>                  Node RPC endpoint',
+      '--indexer-ws <url>            Indexer WebSocket endpoint',
+      '--proof-server <url>          Proof server endpoint',
+      '--json                        Output structured JSON',
+    ],
+    examples: [
+      'midnight config set account-build ~/account-build',
+      'midnight grant deploy --dev-owner-key',
+      'midnight grant status',
+      'midnight grant issue \'<grant request link>\'',
+      'midnight grant issue \'<grant request link>\' --cap 500000 --yes',
+      'midnight grant list --json',
+      'midnight grant revoke 0',
+    ],
+    jsonFields: {
+      subcommand: 'The grant subcommand that ran',
+      network: 'Network name',
+      wallet: 'The wallet the account belongs to',
+      ownerKey: '"development": a random owner key the mnemonic can\'t recover',
+      address: 'The account\'s contract address (deploy)',
+      resumed: 'An account already on record was completed, not a new one deployed (deploy)',
+      activated: 'The owner key was activated by this run (deploy)',
+      account: 'The account\'s contract address (status)',
+      grants: 'The grants on the account (list), or their number (status)',
+      confirmed: 'Whether the grant was issued, or only shown (issue)',
+      request: 'Who would spend, who they can pay, and the limits the grant gets (issue)',
+      grantId: 'The issued grant\'s id (issue with --yes)',
+      revoked: 'The revoked grant\'s id (revoke)',
     },
   },
   {
@@ -822,6 +874,52 @@ Compile with Compact 0.35 (language 0.27): mn bundles compact-runtime
     midnight contract call --address <addr> --circuit post --args '["Hello"]'
     midnight contract state --address <addr>     # read on-chain state
 
+GRANTS (experimental)
+─────────────────────
+
+A wallet's account is a contract its owner deploys. It holds what the owner
+puts in it, and a grant lets an agent spend from it within limits, on the
+agent's own key. An agent asks with a grant request link; the owner issues
+or refuses, and can revoke at any time.
+
+mn runs the account owner's code from a local account build, with this
+wallet paying the fees through mn serve. Name the build once:
+  midnight config set account-build <dir>
+It needs Node.js 22.18 or newer and reaches only an undeployed (local)
+ledger-9 network.
+
+  midnight grant deploy --dev-owner-key [--json]
+    → { address, resumed, activated, network, wallet, ownerKey }
+    Deploys the account and activates its owner key. Safe to run again:
+    it finishes a deploy that stopped part way. Takes about 34 DUST over
+    five transactions (measured on a local ledger-9 chain).
+    The owner key is a random development key for now, kept in the
+    account's records (~/.midnight/accounts/<network>/<wallet>/), which the
+    wallet's mnemonic can't recover.
+
+  midnight grant status [--json]
+    → { account, device: { arm, useCounter }, devices, authNonce, encKey, grants, held }
+
+  midnight grant list [--json]
+    → { grants: [{ grantId, slot, roster, active, expired, nonce, perCallCap, cap, expiresAt, read, exhausted }] }
+
+  midnight grant issue '<link>' [--cap N] [--per-call N] [--max-coin N] [--expires-in SECONDS] [--json]
+    → { confirmed: false, request: { account, clientId, slot, grantee, payee, perCallCap, cap, maxCoinValue, expires } }
+    Shows the grant the link would get and issues nothing. The link names
+    who spends (clientId, grantee) and who they can pay (payee); the limits
+    are the owner's, and any not given take the account build's defaults.
+    A link is untrusted input: read all of it before adding --yes.
+  midnight grant issue '<link>' ... --yes [--json]
+    → { confirmed: true, grantId, request, fallbackLink }
+    Issues the grant (three transactions, a few minutes).
+
+  midnight grant revoke <grant id | slot> [--json]
+    → { revoked }
+  midnight grant revoke-all [--json]
+    → { revokedAll: true, generation }
+
+Amounts are whole numbers of the token's smallest unit, as text in JSON.
+
 E2E TESTING
 ───────────
 
@@ -857,7 +955,10 @@ ERROR CODES
                                 one and set its endpoints (config set)
   LOCAL_STACK_UNREACHABLE 4     No ledger-9 stack answers at the endpoints
   AMBIGUOUS_LOCAL_STACKS  4     Several local stacks run; pass endpoint flags
-  UNSUPPORTED_NODE        1     Node.js is older than 22; install a current one
+  UNSUPPORTED_NODE        1     Node.js is older than 22 (22.18 for mn grant);
+                                install a current one
+  NO_ACCOUNT              1     mn grant: the wallet has no account on this
+                                network; run grant deploy
   CANCELLED               7     Operation cancelled (SIGINT)
   UNKNOWN                 1     Unclassified error
 

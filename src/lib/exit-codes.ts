@@ -45,6 +45,8 @@ export const ERROR_CODES = {
   AMBIGUOUS_LOCAL_STACKS: 'AMBIGUOUS_LOCAL_STACKS',
   /** This Node.js is older than mn supports (22). Recovery: install a current Node.js. */
   UNSUPPORTED_NODE: 'UNSUPPORTED_NODE',
+  /** `mn grant`: the wallet has no account on this network yet. Recovery: `mn grant deploy`. */
+  NO_ACCOUNT: 'NO_ACCOUNT',
   UNKNOWN: 'UNKNOWN',
 } as const;
 
@@ -80,6 +82,9 @@ export function classifyError(err: Error): ClassifiedError {
   }
   if (code === ERROR_CODES.UNSUPPORTED_NODE) {
     return { exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNSUPPORTED_NODE };
+  }
+  if (code === ERROR_CODES.NO_ACCOUNT) {
+    return { exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.NO_ACCOUNT };
   }
   if (code === ERROR_CODES.DUST_GENERATING) {
     return { exitCode: EXIT_INSUFFICIENT_BALANCE, errorCode: ERROR_CODES.DUST_GENERATING };

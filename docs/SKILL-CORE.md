@@ -26,6 +26,9 @@ You have access to the `midnight-wallet-cli` MCP server. This is the **core** sk
 | "Call circuit X" / "submit a score" | `midnight_contract_call({ address, circuit, args })` — two-step pending token |
 | "What's the contract state?" / "read the ledger" | `midnight_contract_state({ address, path })` |
 | "Generate tests for this contract" / "scaffold a test suite" | `midnight_test_create({ path })` (default cli; pass `strategy: "browser"` + `port` + `build-cmd` for UI tests) |
+| "Does my wallet have an account?" / "show my grants" | `midnight_grant_status()` / `midnight_grant_list()` (experimental; local ledger-9 only) |
+| "This agent sent me a grant request link" | `midnight_grant_request({ link })` first, show the user who would spend, who they could pay and the limits (defaults apply to any not given), then `midnight_grant_issue({ link })` (two-step pending token) |
+| "Revoke that agent's grant" / "revoke everything" | `midnight_grant_revoke({ grant })` / `midnight_grant_revoke_all()` (two-step pending token) |
 
 ## Safety rules (non-negotiable)
 

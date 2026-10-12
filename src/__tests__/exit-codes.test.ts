@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { classifyError, humanizeNetworkError, ERROR_CODES, EXIT_NETWORK_ERROR, EXIT_INVALID_ARGS } from '../lib/exit-codes.ts';
+import { classifyError, humanizeNetworkError, ERROR_CODES, EXIT_GENERAL_ERROR, EXIT_NETWORK_ERROR, EXIT_INVALID_ARGS } from '../lib/exit-codes.ts';
+import { NodeTooOldForAccountBuildError } from '../lib/grant/account-build.ts';
+import { UnreachableByAccountBuildError } from '../lib/grant/bridge.ts';
+import { NoAccountError } from '../lib/grant/prepare.ts';
 
 describe('humanizeNetworkError', () => {
   it('rewrites the empty-reason node-fetch tail with URL + cause hint', () => {
@@ -68,6 +71,20 @@ describe('classifyError: typed setup errors keep their own code', () => {
   it('ignores a code that is not a known setup code', () => {
     const err = Object.assign(new Error('something odd'), { code: 'ENOENT' });
     expect(classifyError(err).errorCode).toBe(ERROR_CODES.UNKNOWN);
+  });
+});
+
+describe('classifyError: mn grant', () => {
+  it('gives a wallet with no account its own code, so a caller can deploy one', () => {
+    expect(classifyError(new NoAccountError('alice', 'undeployed'))).toEqual({ exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.NO_ACCOUNT });
+  });
+
+  it('counts a network the account build can\'t reach as the caller\'s to fix', () => {
+    expect(classifyError(new UnreachableByAccountBuildError('PreProd'))).toEqual({ exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.INVALID_ARGS });
+  });
+
+  it('says a Node.js too old for the account build is an unsupported Node.js', () => {
+    expect(classifyError(new NodeTooOldForAccountBuildError('22.10.0'))).toEqual({ exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNSUPPORTED_NODE });
   });
 });
 

@@ -253,7 +253,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 ### Available MCP Tools
 
-Once connected, your AI agent gets access to 30 tools:
+Once connected, your AI agent gets access to 37 tools:
 
 | Tool | Description |
 |------|-------------|
@@ -287,6 +287,13 @@ Once connected, your AI agent gets access to 30 tools:
 | `midnight_contract_deploy` | Deploy a compiled contract (returns pending token; confirm with `midnight_confirm_operation`) |
 | `midnight_contract_call` | Call a circuit on a deployed contract (returns pending token; auto-coerces numbers/`"123n"` strings to BigInt and `[0–255]` arrays to Uint8Array) |
 | `midnight_test_create` | Generate a CLI or browser test scaffold from the compiled contract |
+| `midnight_grant_status` | Experimental. The wallet's account: address, owner key, what it holds, number of grants |
+| `midnight_grant_list` | Experimental. Every grant on the account, with its limits and whether it is live |
+| `midnight_grant_request` | Experimental. What issuing from an agent's grant request link would grant (who spends, who they can pay, the limits); issues nothing |
+| `midnight_grant_deploy` | Experimental. Deploy the wallet's account and activate its owner key (returns pending token) |
+| `midnight_grant_issue` | Experimental. Issue the grant a request link asks for (returns pending token) |
+| `midnight_grant_revoke` | Experimental. Revoke one grant by id or slot (returns pending token) |
+| `midnight_grant_revoke_all` | Experimental. Revoke every grant on the account (returns pending token) |
 
 Every response carries `_serverVersion` so a stale MCP server (CLI on disk says X, responses still say Y) is detectable — see "Stale MCP server" in `docs/SKILL.md`.
 

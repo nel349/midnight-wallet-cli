@@ -30,13 +30,15 @@ export interface CliConfig {
   node?: string;
   'indexer-ws'?: string;
   wallet?: string;
+  /** The local account build `mn grant` drives: an absolute directory. */
+  'account-build'?: string;
 }
 
 const DEFAULT_CLI_CONFIG: CliConfig = {
   network: 'undeployed',
 };
 
-const VALID_CONFIG_KEYS: readonly string[] = ['network', 'proof-server', 'node', 'indexer-ws', 'wallet'] as const;
+const VALID_CONFIG_KEYS: readonly string[] = ['network', 'proof-server', 'node', 'indexer-ws', 'wallet', 'account-build'] as const;
 
 /**
  * Aliases mapped to canonical config keys. Keeps integrations that learned
@@ -118,6 +120,9 @@ export function loadCliConfig(configDir?: string): CliConfig {
   if (parsed.wallet && typeof parsed.wallet === 'string') {
     config.wallet = parsed.wallet;
   }
+  if (parsed['account-build'] && typeof parsed['account-build'] === 'string') {
+    config['account-build'] = parsed['account-build'];
+  }
 
   // Per-network endpoint overrides: keep only valid network names and
   // string-valued endpoint keys; drop anything else silently (config files
@@ -183,6 +188,7 @@ export function getConfigValue(key: string, configDir?: string, scope?: NetworkN
 
   if (canonical === 'network') return config.network;
   if (canonical === 'wallet') return config.wallet ?? '(not set)';
+  if (canonical === 'account-build') return config['account-build'] ?? '(not set)';
   if (ENDPOINT_KEYS.has(canonical)) {
     const overrides = getEndpointOverridesForNetwork(config, scope ?? config.network);
     const value = overrides[canonical as keyof NetworkEndpointOverrides];
@@ -244,6 +250,10 @@ export function setConfigValue(key: string, value: string, configDir?: string, s
       );
     }
     config.wallet = value;
+  } else if (canonical === 'account-build') {
+    if (value.trim() === '') throw new Error('Invalid account-build: give the directory of the account build.');
+    // Kept absolute, so it means the same directory wherever mn is run from.
+    config['account-build'] = path.resolve(value);
   } else if (ENDPOINT_KEYS.has(canonical)) {
     if (!isValidUrl(value)) {
       throw new Error(
@@ -282,6 +292,8 @@ export function unsetConfigValue(key: string, configDir?: string, scope?: Networ
     config.network = DEFAULT_CLI_CONFIG.network;
   } else if (canonical === 'wallet') {
     delete config.wallet;
+  } else if (canonical === 'account-build') {
+    delete config['account-build'];
   } else if (ENDPOINT_KEYS.has(canonical)) {
     const k = canonical as keyof NetworkEndpointOverrides;
     const target = scope ?? config.network;

@@ -11,6 +11,7 @@ import { NATIVE_TOKEN_TYPE } from './constants.ts';
 import { applyEndpointOverrides, endpointFlags, type EndpointOverrides, type NetworkConfig, type NetworkName } from './network.ts';
 import { resolveNetwork } from './resolve-network.ts';
 import { loadWalletConfig, resolveWalletPath } from './wallet-config.ts';
+import { formatNight } from '../ui/format.ts';
 import type { Spinner } from '../ui/spinner.ts';
 
 /** The network a command acts on, with its endpoints resolved. */
@@ -43,9 +44,10 @@ export function resolvePayingTarget(args: ParsedArgs, command: string, subcomman
 /**
  * The wallet holds NIGHT and has Dust to pay a fee with. Throws, saying what
  * to do, when it has neither. `wallet` is the --wallet flag; without it the
- * active wallet is checked, the one the command's server will use.
+ * active wallet is checked, the one the command's server will use. Returns
+ * what it found, the Dust in Specks.
  */
-export async function assertWalletCanPay({ network, networkConfig }: PayingTarget, wallet: string | undefined, progress: Spinner): Promise<void> {
+export async function assertWalletCanPay({ network, networkConfig }: PayingTarget, wallet: string | undefined, progress: Spinner): Promise<{ nightBalance: bigint; dustBalance: bigint }> {
   const walletConfig = loadWalletConfig(resolveWalletPath(wallet));
   const seedBuffer = Buffer.from(walletConfig.seed, 'hex');
   const address = walletConfig.addresses[network as NetworkName];
@@ -82,7 +84,8 @@ export async function assertWalletCanPay({ network, networkConfig }: PayingTarge
       );
     }
 
-    progress.stop(`Wallet OK (${nightBalance} NIGHT, dust available)`);
+    progress.stop(`Wallet OK (${formatNight(nightBalance)}, dust available)`);
+    return { nightBalance, dustBalance: dustView.balance };
   } catch (err) {
     progress.fail('Wallet check failed');
     throw err;
