@@ -4,32 +4,57 @@
 // quiet, and resuming after the cached id then reads nothing, so the stale
 // state would be served as current.
 
-import { subscribeGraphqlWs } from './graphql-ws-subscription.ts';
+import { subscribeGraphqlWs, type WsFinishReason } from './graphql-ws-subscription.ts';
 
 export type LedgerEventStream = 'dust' | 'zswap';
 
 const FIELD: Record<LedgerEventStream, string> = { dust: 'dustLedgerEvents', zswap: 'zswapLedgerEvents' };
 
-/** The stream's latest event id (from the first event's maxId), or null when it has none or the indexer can't say. */
-export async function fetchEventTip(indexerWS: string, stream: LedgerEventStream): Promise<number | null> {
+interface TipReading {
+  /** The first event's maxId, or null when no event came. */
+  tip: number | null;
+  reason: WsFinishReason;
+}
+
+/** Subscribe from event 0 and settle on the first event, or on silence. Rejects when the indexer can't be asked. */
+function readEventTip(indexerWS: string, stream: LedgerEventStream): Promise<TipReading> {
   const field = FIELD[stream];
   let tip: number | null = null;
+  return subscribeGraphqlWs<TipReading>(indexerWS, {
+    query: `subscription { ${field}(id: 0) { id maxId } }`,
+    variables: {},
+    onNext: (data) => {
+      const maxId = (data as Record<string, { maxId?: unknown } | undefined>)[field]?.maxId;
+      if (typeof maxId === 'number') tip = maxId;
+      return tip !== null;
+    },
+    buildResult: (_partial, reason) => ({ tip, reason }),
+    timeoutMs: 10_000,
+    idleMs: 3_000,
+    idleBeforeFirstEvent: true,
+  });
+}
+
+/** The stream's latest event id (from the first event's maxId), or null when it has none or the indexer can't say. */
+export async function fetchEventTip(indexerWS: string, stream: LedgerEventStream): Promise<number | null> {
   try {
-    return await subscribeGraphqlWs<number | null>(indexerWS, {
-      query: `subscription { ${field}(id: 0) { id maxId } }`,
-      variables: {},
-      onNext: (data) => {
-        const maxId = (data as Record<string, { maxId?: unknown } | undefined>)[field]?.maxId;
-        if (typeof maxId === 'number') tip = maxId;
-        return tip !== null;
-      },
-      buildResult: () => tip,
-      timeoutMs: 10_000,
-      idleMs: 3_000,
-      idleBeforeFirstEvent: true,
-    });
+    return (await readEventTip(indexerWS, stream)).tip;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Whether the stream has no events at all: the indexer took the subscription
+ * and then stayed silent. False when it has events, and false when the indexer
+ * couldn't be asked or the socket closed, so "empty" is never a guess.
+ */
+export async function isStreamEmpty(indexerWS: string, stream: LedgerEventStream): Promise<boolean> {
+  try {
+    const { tip, reason } = await readEventTip(indexerWS, stream);
+    return tip === null && reason === 'idle';
+  } catch {
+    return false;
   }
 }
 

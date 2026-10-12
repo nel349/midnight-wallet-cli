@@ -30,6 +30,7 @@ import {
 } from './constants.ts';
 import { verbose } from './verbose.ts';
 import { assertNetworkAnswers } from './endpoint-check.ts';
+import { isStreamEmpty } from './event-tip.ts';
 
 export type SyncMode = 'full' | 'lite' | 'no-dust';
 // full    = shielded + unshielded + dust
@@ -55,6 +56,10 @@ export interface FacadeBundle {
   restoredFromCache?: boolean;
   /** The network's indexer (HTTP), for reads the facade doesn't offer, like the chain's clock. */
   indexerHttpUrl?: string;
+  /** The network's indexer (WebSocket), asked which event streams are empty when a sync starts. */
+  indexerWsUrl?: string;
+  /** The streams the chain has no events in, as read when the sync started. */
+  emptyStreams?: EmptyStreams;
 }
 
 /**
@@ -155,7 +160,7 @@ export async function buildFacade(
   if (!shielded || !dust) {
     throw new Error('Wallet facade was built without its shielded or dust wallet');
   }
-  return { facade, keystore, seeds, seedStartable: { shielded, dust }, restoredFromCache, indexerHttpUrl: networkConfig.indexer };
+  return { facade, keystore, seeds, seedStartable: { shielded, dust }, restoredFromCache, indexerHttpUrl: networkConfig.indexer, indexerWsUrl: networkConfig.indexerWS };
 }
 
 /**
@@ -292,14 +297,30 @@ interface IndexProgress {
 }
 
 /**
- * Dust is caught up when it's strictly complete, or when its indices show it
- * is despite the `isConnected` bug above. A wallet with no dust events at all
- * (0/0) counts as caught up once unshielded is, because there's nothing to sync.
+ * The event streams the chain has nothing in. A wallet reading one never hears
+ * from the indexer, so its progress stays at 0/0 for good: there, and only
+ * there, "nothing applied" is the wallet's final state. On a chain that has
+ * events, 0/0 only means the wallet hasn't heard yet, and the unshielded
+ * wallet often finishes first: a shielded balance read then is 0 whatever the
+ * wallet holds.
  */
-function isDustCaughtUp(dust: IndexProgress, unshieldedOk: boolean): boolean {
+export interface EmptyStreams {
+  readonly zswap: boolean;
+  readonly dust: boolean;
+}
+
+/** Nothing known to be empty: every wallet has to hear from the indexer before it counts as synced. */
+export const NO_EMPTY_STREAMS: EmptyStreams = { zswap: false, dust: false };
+
+/**
+ * Dust is caught up when it's strictly complete, or when its indices show it
+ * is despite the `isConnected` bug above. Nothing applied (0/0) counts only on
+ * a chain with no dust events, once unshielded is synced.
+ */
+function isDustCaughtUp(dust: IndexProgress, unshieldedOk: boolean, streamEmpty: boolean): boolean {
   if (dust.isStrictlyComplete()) return true;
   if (dust.highestRelevantWalletIndex > 0n && dust.appliedIndex >= dust.highestRelevantWalletIndex) return true;
-  return isUntouched(dust) && unshieldedOk;
+  return streamEmpty && isUntouched(dust) && unshieldedOk;
 }
 
 /** No events have reached this wallet yet: nothing applied, nothing relevant. */
@@ -307,24 +328,37 @@ function isUntouched(progress: IndexProgress): boolean {
   return progress.highestRelevantWalletIndex === 0n && progress.appliedIndex === 0n;
 }
 
-export function isFacadeSynced(state: FacadeState, syncMode: SyncMode = 'full'): boolean {
+export function isFacadeSynced(
+  state: FacadeState,
+  syncMode: SyncMode = 'full',
+  empty: EmptyStreams = NO_EMPTY_STREAMS,
+): boolean {
   const unshieldedOk = state.unshielded.progress.isStrictlyComplete();
-  const dustOk = syncMode === 'no-dust' || isDustCaughtUp(state.dust.progress, unshieldedOk);
+  const dustOk = syncMode === 'no-dust' || isDustCaughtUp(state.dust.progress, unshieldedOk, empty.dust);
 
   if (syncMode === 'lite') {
     return unshieldedOk && dustOk;
   }
 
-  // Same pattern for shielded: an unfunded wallet has no zswap events.
   const shielded = state.shielded.progress;
-  const shieldedOk = shielded.isStrictlyComplete() || (unshieldedOk && isUntouched(shielded));
+  const shieldedOk = shielded.isStrictlyComplete() || (empty.zswap && unshieldedOk && isUntouched(shielded));
 
   return shieldedOk && unshieldedOk && dustOk;
 }
 
 /** Check if dust wallet sync is pending (for diagnostics). */
-function isDustSyncPending(state: FacadeState): boolean {
-  return !isDustCaughtUp(state.dust.progress, state.unshielded.progress.isStrictlyComplete());
+function isDustSyncPending(state: FacadeState, empty: EmptyStreams): boolean {
+  return !isDustCaughtUp(state.dust.progress, state.unshielded.progress.isStrictlyComplete(), empty.dust);
+}
+
+/** Ask the indexer which of the streams this sync mode reads have no events. With no indexer to ask, none. */
+async function readEmptyStreams(indexerWsUrl: string | undefined, syncMode: SyncMode): Promise<EmptyStreams> {
+  if (!indexerWsUrl) return NO_EMPTY_STREAMS;
+  const [zswap, dust] = await Promise.all([
+    syncMode === 'lite' ? false : isStreamEmpty(indexerWsUrl, 'zswap'),
+    syncMode === 'no-dust' ? false : isStreamEmpty(indexerWsUrl, 'dust'),
+  ]);
+  return { zswap, dust };
 }
 
 /**
@@ -360,7 +394,11 @@ export async function startAndSyncFacade(
   const { facade } = bundle;
 
   verbose('sync', 'Starting facade (connecting to node and indexer)...');
-  await startFacade(bundle);
+  const [, emptyStreams] = await Promise.all([startFacade(bundle), readEmptyStreams(bundle.indexerWsUrl, syncMode)]);
+  bundle.emptyStreams = emptyStreams;
+  if (emptyStreams.zswap || emptyStreams.dust) {
+    verbose('sync', `The chain has no events in: ${[emptyStreams.zswap && 'zswap', emptyStreams.dust && 'dust'].filter(Boolean).join(', ')}`);
+  }
   verbose('sync', 'Facade started, subscribing to state...');
 
   const effectiveTimeout = timeoutMs ?? SYNC_TIMEOUT_MS;
@@ -438,7 +476,7 @@ export async function startAndSyncFacade(
         const pending: string[] = [];
         try {
           if ((syncMode === 'full' || syncMode === 'no-dust') && !state.shielded.progress.isStrictlyComplete()) pending.push('shielded');
-          if (syncMode !== 'no-dust' && isDustSyncPending(state)) pending.push('dust');
+          if (syncMode !== 'no-dust' && isDustSyncPending(state, emptyStreams)) pending.push('dust');
           if (!state.unshielded.progress.isStrictlyComplete()) pending.push('unshielded');
         } catch { /* best-effort */ }
 
@@ -453,7 +491,7 @@ export async function startAndSyncFacade(
 
         // Primary: strict sync per mode (uses the isFacadeSynced workaround for
         // the dust isConnected bug — see that function above).
-        if (isFacadeSynced(state, syncMode)) {
+        if (isFacadeSynced(state, syncMode, emptyStreams)) {
           resolved = true;
           clearTimeout(timeout);
           verbose('sync', `Sync complete after ${emissionCount} emissions`);
@@ -466,7 +504,7 @@ export async function startAndSyncFacade(
         // completion paths can't drift.
         if (graceEligible) {
           const elapsed = Date.now() - startedAt;
-          if (elapsed >= CACHED_RESTORE_DUST_GRACE_MS && isFacadeSynced(state, 'no-dust')) {
+          if (elapsed >= CACHED_RESTORE_DUST_GRACE_MS && isFacadeSynced(state, 'no-dust', emptyStreams)) {
             resolved = true;
             clearTimeout(timeout);
             verbose('sync', `Sync resolved via cached-restore grace (${elapsed}ms, ${emissionCount} emissions)`);
@@ -607,7 +645,7 @@ export async function waitForDustAvailable(bundle: FacadeBundle, timeoutMs = 60_
 export async function quickSync(bundle: FacadeBundle, syncMode: SyncMode = 'full'): Promise<FacadeState> {
   return rx.firstValueFrom(
     bundle.facade.state().pipe(
-      rx.filter((state) => isFacadeSynced(state, syncMode)),
+      rx.filter((state) => isFacadeSynced(state, syncMode, bundle.emptyStreams)),
       rx.timeout(PRE_SEND_SYNC_TIMEOUT_MS),
     )
   );

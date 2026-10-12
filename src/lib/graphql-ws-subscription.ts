@@ -44,8 +44,9 @@ export interface GraphqlWsSubscription<TResult> {
    * Build the final result once the subscription settles. `partial` is true iff a
    * soft-timeout or a mid-stream close ended it — the accumulated state is still
    * valid and the caller should persist it and resume from the last cursor.
+   * `reason` says which of the settle cases above it was.
    */
-  buildResult: (partial: boolean) => TResult;
+  buildResult: (partial: boolean, reason: WsFinishReason) => TResult;
   /** Soft ceiling for the whole subscription. On expiry → buildResult(true). */
   timeoutMs: number;
   /** Idle window: once armed, finish (partial=false) after this much silence. */
@@ -94,12 +95,12 @@ export function subscribeGraphqlWs<TResult>(
       signal?.removeEventListener('abort', onAbort);
     };
 
-    const finishOk = (_reason: WsFinishReason, partial: boolean) => {
+    const finishOk = (reason: WsFinishReason, partial: boolean) => {
       if (settled) return;
       settled = true;
       cleanup();
       try {
-        resolve(buildResult(partial));
+        resolve(buildResult(partial, reason));
       } catch (err) {
         reject(err instanceof Error ? err : new Error(String(err)));
       }

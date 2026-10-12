@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
-import { fetchEventTip, isCursorBeyondTip } from '../lib/event-tip.ts';
+import { fetchEventTip, isCursorBeyondTip, isStreamEmpty } from '../lib/event-tip.ts';
 
 let servers: WebSocketServer[] = [];
 afterEach(() => { for (const s of servers) s.close(); servers = []; });
@@ -46,6 +46,38 @@ describe('fetchEventTip', () => {
     expect(await fetchEventTip(empty.url, 'dust')).toBeNull();
     expect(await fetchEventTip('ws://127.0.0.1:9', 'dust')).toBeNull();
   }, 10_000);
+});
+
+describe('isStreamEmpty', () => {
+  it('is true when the indexer takes the subscription and sends nothing', async () => {
+    const empty = await indexer([]);
+    expect(await isStreamEmpty(empty.url, 'zswap')).toBe(true);
+    expect(empty.queries).toEqual(['subscription { zswapLedgerEvents(id: 0) { id maxId } }']);
+  }, 10_000);
+
+  it('is false when the stream has an event', async () => {
+    const server = await indexer([{ dustLedgerEvents: { id: 0, maxId: 106 } }]);
+    expect(await isStreamEmpty(server.url, 'dust')).toBe(false);
+  });
+
+  it('is false when the indexer cannot be asked: empty is never a guess', async () => {
+    expect(await isStreamEmpty('ws://127.0.0.1:9', 'dust')).toBe(false);
+  });
+
+  it('is false when the indexer closes the socket before sending anything', async () => {
+    const wss = new WebSocketServer({ port: 0 });
+    servers.push(wss);
+    wss.on('connection', (ws) => {
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'connection_init') ws.send(JSON.stringify({ type: 'connection_ack' }));
+        else if (msg.type === 'subscribe') ws.close();
+      });
+    });
+    await new Promise<void>((resolve) => wss.on('listening', () => resolve()));
+    const addr = wss.address();
+    expect(await isStreamEmpty(`ws://localhost:${typeof addr === 'object' && addr ? addr.port : 0}`, 'zswap')).toBe(false);
+  });
 });
 
 describe('isCursorBeyondTip', () => {

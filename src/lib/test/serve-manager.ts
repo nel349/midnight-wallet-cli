@@ -259,7 +259,7 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
     // Reads answer from the state this sync ended on, and from every later
     // one that is synced by the rule the sync used.
     initialState: syncedState,
-    isCurrent: (state) => isFacadeSynced(state),
+    isCurrent: (state) => isFacadeSynced(state, 'full', bundle.emptyStreams),
     callbacks: {
       onPhaseStart: (_connId, _method, phase) => {
         onMessage(`${phase}...`);

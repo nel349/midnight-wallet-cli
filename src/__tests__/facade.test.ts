@@ -2,7 +2,8 @@
 // (its own `isStrictlyComplete` rules), not hand-written booleans. Only the
 // FacadeState container is a stand-in: these predicates read nothing else.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
+import { WebSocketServer } from 'ws';
 import { SyncProgress } from '@midnightntwrk/wallet-sdk';
 import { SyncProgress as UnshieldedSyncProgress } from '@midnightntwrk/wallet-sdk/unshielded/v2';
 import type { FacadeState } from '@midnightntwrk/wallet-sdk/facade';
@@ -97,23 +98,35 @@ describe('isFacadeSynced', () => {
     });
   });
 
-  describe('wallets with no events yet (0/0)', () => {
+  describe('wallets that have applied nothing (0/0)', () => {
+    // 0/0 is what a wallet shows before the indexer's first word, and also all
+    // it ever shows on a chain with no events in its stream. Only the second
+    // is a synced wallet: the unshielded wallet often finishes first, and a
+    // shielded balance read at that moment is 0 whatever the wallet holds.
     const untouched = indexed(0n, 0n, false);
+    const noDustEvents = { zswap: false, dust: true };
+    const noZswapEvents = { zswap: true, dust: false };
 
-    it('treats untouched dust as caught up once unshielded is synced (unfunded wallet)', () => {
-      expect(isFacadeSynced(state({ dust: untouched }), 'lite')).toBe(true);
+    it('does not count untouched dust as caught up on a chain that has dust events', () => {
+      expect(isFacadeSynced(state({ dust: untouched }), 'lite')).toBe(false);
+      expect(isFacadeSynced(state({ dust: untouched }), 'full')).toBe(false);
+      expect(isFacadeSynced(state({ dust: untouched }), 'lite', noZswapEvents)).toBe(false);
     });
 
-    it('does not trust untouched dust before unshielded has synced (could be the initial state)', () => {
-      expect(isFacadeSynced(state({ dust: untouched, unshielded: txs(0n, 10n) }), 'lite')).toBe(false);
+    it('does not count an untouched shielded wallet as caught up on a chain that has zswap events', () => {
+      expect(isFacadeSynced(state({ shielded: untouched }), 'full')).toBe(false);
+      expect(isFacadeSynced(state({ shielded: untouched }), 'no-dust')).toBe(false);
+      expect(isFacadeSynced(state({ shielded: untouched }), 'full', noDustEvents)).toBe(false);
     });
 
-    it('treats an untouched shielded wallet as caught up once unshielded is synced', () => {
-      expect(isFacadeSynced(state({ shielded: untouched }), 'full')).toBe(true);
+    it('counts untouched dust as caught up on a chain with no dust events, once unshielded is synced', () => {
+      expect(isFacadeSynced(state({ dust: untouched }), 'lite', noDustEvents)).toBe(true);
+      expect(isFacadeSynced(state({ dust: untouched, unshielded: txs(0n, 10n) }), 'lite', noDustEvents)).toBe(false);
     });
 
-    it('does not trust an untouched shielded wallet before unshielded has synced', () => {
-      expect(isFacadeSynced(state({ shielded: untouched, unshielded: txs(0n, 10n) }), 'no-dust')).toBe(false);
+    it('counts an untouched shielded wallet as caught up on a chain with no zswap events, once unshielded is synced', () => {
+      expect(isFacadeSynced(state({ shielded: untouched }), 'full', noZswapEvents)).toBe(true);
+      expect(isFacadeSynced(state({ shielded: untouched, unshielded: txs(0n, 10n) }), 'no-dust', noZswapEvents)).toBe(false);
     });
   });
 });
@@ -188,4 +201,59 @@ describe('startAndSyncFacade: starting the wallets exactly once', () => {
     expect(calls.unshieldedStart).toHaveBeenCalledTimes(1);
     expect(calls.pendingStart).toHaveBeenCalledTimes(1);
   });
+});
+
+describe('startAndSyncFacade: a wallet that has heard nothing yet', () => {
+  // The state the SDK emits when the unshielded wallet has finished and the
+  // shielded one hasn't heard from the indexer: everything synced, shielded 0/0.
+  // An in-process WebSocket server stands in for the indexer and answers the
+  // zswap and dust subscriptions the way it does.
+  let servers: WebSocketServer[] = [];
+  afterEach(() => { for (const s of servers) s.close(); servers = []; });
+
+  async function indexerWith(events: Record<string, unknown>): Promise<string> {
+    const wss = new WebSocketServer({ port: 0 });
+    servers.push(wss);
+    wss.on('connection', (ws) => {
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'connection_init') ws.send(JSON.stringify({ type: 'connection_ack' }));
+        else if (msg.type === 'subscribe') {
+          const field = Object.keys(events).find((f) => msg.payload.query.includes(f));
+          if (field) ws.send(JSON.stringify({ id: msg.id, type: 'next', payload: { data: { [field]: events[field] } } }));
+        }
+      });
+    });
+    await new Promise<void>((resolve) => wss.on('listening', () => resolve()));
+    const addr = wss.address();
+    return `ws://localhost:${typeof addr === 'object' && addr ? addr.port : 0}`;
+  }
+
+  async function syncWith(indexerWsUrl: string) {
+    const rx = await import('rxjs');
+    const { startAndSyncFacade } = await import('../lib/facade.ts');
+    const bundle: any = {
+      facade: { start: async () => {}, state: () => rx.concat(rx.of(state({ shielded: indexed(0n, 0n, false) })), rx.NEVER) },
+      seeds: {},
+      seedStartable: {},
+      keystore: {},
+      restoredFromCache: false,
+      indexerWsUrl,
+    };
+    try {
+      return await startAndSyncFacade(bundle, { timeoutMs: 1_000 });
+    } finally {
+      bundle.keepAlive?.unsubscribe();
+    }
+  }
+
+  it('is not synced while the chain has zswap events the shielded wallet has not read', async () => {
+    const url = await indexerWith({ zswapLedgerEvents: { id: 0, maxId: 384 }, dustLedgerEvents: { id: 0, maxId: 385 } });
+    await expect(syncWith(url)).rejects.toThrow('Wallet sync timed out');
+  });
+
+  it('is synced when the chain has no zswap events at all', async () => {
+    const url = await indexerWith({ dustLedgerEvents: { id: 0, maxId: 385 } });
+    await expect(syncWith(url)).resolves.toBeDefined();
+  }, 10_000);
 });

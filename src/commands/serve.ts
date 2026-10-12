@@ -170,7 +170,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       // Reads answer from the state this sync ended on, and from every later
       // one that is synced by the rule the sync used.
       initialState: dustState,
-      isCurrent: (state) => isFacadeSynced(state, syncMode),
+      isCurrent: (state) => isFacadeSynced(state, syncMode, bundle.emptyStreams),
     });
 
     // ── Start WebSocket server ──
