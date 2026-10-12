@@ -8,6 +8,7 @@ import { resolveNetwork } from '../resolve-network.ts';
 import { assertLedgerSupported } from '../ledger-guard.ts';
 import { applyEndpointOverrides, endpointFlags, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../network.ts';
 import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
+import { bindCachesToIndexer, describeIndexerChange } from '../cache-indexer.ts';
 import { loadWalletCache, saveWalletCache } from '../wallet-cache.ts';
 import { suppressRpcNoise } from '../transfer.ts';
 import { createDAppConnector, type DAppConnectorCallbacks } from '../dapp-connector.ts';
@@ -226,6 +227,8 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
 
   // Build & sync facade
   onMessage('Building wallet facade...');
+  const indexerChange = bindCachesToIndexer(networkName, networkConfig.indexerWS);
+  if (indexerChange) onMessage(describeIndexerChange(networkName, indexerChange));
   const cache = loadWalletCache(address, networkName);
   const bundle = await buildFacade(seedBuffer, networkConfig, cache);
 

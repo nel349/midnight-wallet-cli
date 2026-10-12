@@ -160,7 +160,7 @@ export function pickLocalStack(found: LocalStackPorts, need: NeededComponents = 
 export function detectLocalStacks(): LocalStackPorts {
   if (process.env.MN_NO_LOCAL_DETECT === '1') return { node: [], indexer: [], proofServer: [] };
   try {
-    return parseLocalStacks(execSync('docker ps --format "{{.Image}}|{{.Ports}}"', { encoding: 'utf-8', timeout: 5000 }));
+    return parseLocalStacks(execSync('docker ps --format "{{.Image}}|{{.Ports}}"', { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }));
   } catch {
     return { node: [], indexer: [], proofServer: [] };
   }

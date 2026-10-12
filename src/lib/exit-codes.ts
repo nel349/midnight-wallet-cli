@@ -154,7 +154,8 @@ export function classifyError(err: Error): ClassifiedError {
   }
 
   // Stale local cache (e.g. `applied > highest`, `chainId mismatch`)
-  if (msg.includes('stale cache') || msg.includes('chain reset') || msg.includes('chainid mismatch') || msg.includes('applied > highest')) {
+  // "inserted non-linearly": state resumed against an indexer that numbers its events differently.
+  if (msg.includes('stale cache') || msg.includes('chain reset') || msg.includes('chainid mismatch') || msg.includes('applied > highest') || msg.includes('inserted non-linearly')) {
     return { exitCode: EXIT_TX_REJECTED, errorCode: ERROR_CODES.STALE_CACHE };
   }
 

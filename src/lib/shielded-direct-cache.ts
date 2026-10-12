@@ -9,6 +9,7 @@
 // Security: the cached state contains owned coins but NOT the secret keys. Same
 // sensitivity as the wallet file (mode 0o600).
 
+import { bindCachesToIndexer } from './cache-indexer.ts';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, readdirSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
@@ -215,6 +216,8 @@ export async function readShieldedBalanceCached(
   const secretKeys = ledger.ZswapSecretKeys.fromSeed(deriveShieldedSeed(seedBuffer));
   const pubkeyHex = secretKeys.coinPublicKey;
 
+  // State resumed from another indexer's event ids would replay the wrong events.
+  bindCachesToIndexer(network, indexerWS);
   let cached = options.forceFresh ? null : loadShieldedCache(network, pubkeyHex, undefined, options.chainId);
   // A cursor past the chain's latest event: the chain was reset under the cache.
   if (cached && isCursorBeyondTip(cached.lastAppliedEventId, await fetchEventTip(indexerWS, 'zswap'))) {

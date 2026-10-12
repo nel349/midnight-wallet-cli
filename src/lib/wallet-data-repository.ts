@@ -49,6 +49,7 @@ import { getChainGenesisHash } from './chain-id.ts';
 import { assertLedgerSupported, fetchProtocolVersion } from './ledger-guard.ts';
 import { checkBalance, type BalanceSummary } from './balance-subscription.ts';
 import { readDustBalanceDirect, type DustDirectResult, type DustRetention } from './dust-direct.ts';
+import { bindCachesToIndexer, describeIndexerChange } from './cache-indexer.ts';
 import { nativeDustSyncAvailable, runDustSyncNative } from './dust-sync-native.ts';
 import { verbose } from './verbose.ts';
 import { callNodeRpc } from './node-rpc.ts';
@@ -243,6 +244,16 @@ export class WalletDataRepository {
     this.cacheDir = deps.cacheDir;
   }
 
+  /**
+   * Indexer guard: cached sync state resumes from the indexer's own ids, so
+   * state read from another indexer is dropped before it is loaded, and the
+   * caller is told why this sync is a full one.
+   */
+  private keepCachesOfThisIndexer(networkName: string, network: NetworkConfig, onStatus?: (s: string) => void): void {
+    const change = bindCachesToIndexer(networkName, network.indexerWS, this.cacheDir);
+    if (change) onStatus?.(describeIndexerChange(networkName, change));
+  }
+
   // ── Reads ─────────────────────────────────────────
 
   async dust(seed: Buffer, network: NetworkConfig, opts: ReadOptions = {}): Promise<DustView> {
@@ -262,6 +273,7 @@ export class WalletDataRepository {
     // guard has something to compare on the next run.
     const currentChainId = await this.fetchChainId(network.node).catch(() => null);
     validateDustCacheChainId(networkName, currentChainId, this.cacheDir);
+    this.keepCachesOfThisIndexer(networkName, network, opts.onStatus);
     const chainId = currentChainId ?? undefined;
 
     let cached = opts.forceFresh ? null : loadDustCache(networkName, pubkeyHex, this.cacheDir);
@@ -416,6 +428,7 @@ export class WalletDataRepository {
 
     const currentChainId = await this.fetchChainId(network.node).catch(() => null);
     validateWalletCacheChainId(networkName, currentChainId, this.cacheDir);
+    this.keepCachesOfThisIndexer(networkName, network, opts.onStatus);
     const chainId = currentChainId ?? undefined;
 
     // ── Pre-prime the dust-direct cache for write-mode borrowers ──

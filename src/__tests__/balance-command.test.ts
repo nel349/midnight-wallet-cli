@@ -26,14 +26,28 @@ const EMPTY_ADDRESS = deriveUnshieldedAddress(Buffer.from(EMPTY_SEED, 'hex'), 'u
 
 let io: CapturedOutput;
 
+// The command reads and writes wallet caches and config under the home
+// directory: these tests get one of their own, never the developer's. Docker
+// is still found through the real home's configuration.
+const REAL_HOME = os.homedir();
+let origHome: string | undefined;
+let origDockerConfig: string | undefined;
+
 beforeEach(() => {
   process.env.NO_COLOR = '';
   fs.mkdirSync(TEST_DIR, { recursive: true });
+  origHome = process.env.HOME;
+  origDockerConfig = process.env.DOCKER_CONFIG;
+  process.env.DOCKER_CONFIG = origDockerConfig ?? path.join(REAL_HOME, '.docker');
+  process.env.HOME = TEST_DIR;
   io = captureOutput();
 });
 
 afterEach(() => {
   delete process.env.NO_COLOR;
+  process.env.HOME = origHome;
+  if (origDockerConfig === undefined) delete process.env.DOCKER_CONFIG;
+  else process.env.DOCKER_CONFIG = origDockerConfig;
   io.restore();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
