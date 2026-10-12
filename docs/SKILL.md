@@ -23,7 +23,7 @@ Manage wallets, check balances, transfer NIGHT tokens, register dust (fee token)
 
 ### Preprod needs a Blockfrost project id
 
-Midnight shut its own preprod indexer down on 2026-10-09. Blockfrost serves preprod's indexer and node now, and every request needs the user's own project id (created at https://blockfrost.io, one project per network; preprod ids start with `nightpreprod`; requests count against the user's Blockfrost plan). The user sets it once with `midnight config set blockfrost-project-id <project id>` in their own terminal, or `MN_BLOCKFROST_PROJECT_ID` in the MCP server's environment. It is a secret: `midnight_config_get` shows it masked, no tool result contains it, and you should never ask for it in chat or echo it. Preview and the local network need none.
+Midnight shut its own preprod indexer down on 2026-10-09. Blockfrost serves preprod's indexer and node now, and every request needs the user's own project id (created at https://blockfrost.io, one project per network; preprod ids start with `nightpreprod`; requests count against the user's Blockfrost plan). The user sets it once with `midnight config set blockfrost-project-id <project id>` in their own terminal, or `BLOCKFROST_PROJECT_ID` (or `MN_BLOCKFROST_PROJECT_ID`) in the MCP server's environment. It is a secret: `midnight_config_get` shows it masked, no tool result contains it, and you should never ask for it in chat or echo it. Preview and the local network need none.
 
 ## Intent routing (natural language → tool)
 

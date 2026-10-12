@@ -116,7 +116,7 @@ Wallets are network-agnostic — one seed derives addresses for all three networ
 Midnight shut its own preprod indexer down on 2026-10-09; [Blockfrost serves it now](https://docs.midnight.network/guides/networks-and-environments), along with the node RPC, and every request needs your own project id. Create a project for Midnight Preprod at [blockfrost.io](https://blockfrost.io) and give mn its id:
 
 ```bash
-midnight config set blockfrost-project-id <project id>   # or: export MN_BLOCKFROST_PROJECT_ID=<project id>
+midnight config set blockfrost-project-id <project id>   # or: export BLOCKFROST_PROJECT_ID=<project id>  (MN_BLOCKFROST_PROJECT_ID wins if both are set)
 ```
 
 - Without one, a command that reaches preprod stops with `BLOCKFROST_PROJECT_ID_REQUIRED` and these instructions. A refused id is `BLOCKFROST_PROJECT_ID_REJECTED`. Requests count against your Blockfrost plan. (On this ledger-9 build preprod is then refused as a ledger-8 chain, until it forks.)

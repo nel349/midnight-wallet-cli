@@ -173,7 +173,7 @@ export function buildManual(): string {
   out.push(`    ${yellow('blockfrost-project-id')}`);
   out.push(`                   Your Blockfrost project id for preprod, whose indexer and`);
   out.push(`                   node Blockfrost serves. Kept per network, shown masked,`);
-  out.push(`                   never printed. Or: MN_BLOCKFROST_PROJECT_ID.`);
+  out.push(`                   never printed. Or: MN_BLOCKFROST_PROJECT_ID / BLOCKFROST_PROJECT_ID.`);
   out.push('');
   out.push(`    ${bold('Compatibility alias')}`);
   out.push(`    ${yellow('network-id')}     Resolves transparently to ${yellow('network')}.`);

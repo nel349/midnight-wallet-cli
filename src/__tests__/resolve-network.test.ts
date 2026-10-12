@@ -119,6 +119,23 @@ describe('resolveBlockfrostProjectId', () => {
     expect(resolveBlockfrostProjectId('undeployed', TEST_DIR, { MN_BLOCKFROST_PROJECT_ID: 'garbage' })).toBeUndefined();
   });
 
+  it('takes the variable Midnight\'s docs name, after mn\'s own and before the config', () => {
+    const SHARED = 'nightpreprodSharedSharedShared0003';
+    setConfigValue('blockfrost-project-id', FROM_CONFIG, TEST_DIR);
+    expect(resolveBlockfrostProjectId('preprod', TEST_DIR, { BLOCKFROST_PROJECT_ID: SHARED })).toBe(SHARED);
+    expect(resolveBlockfrostProjectId('preprod', TEST_DIR, { BLOCKFROST_PROJECT_ID: `  ${SHARED}\n` })).toBe(SHARED);
+    expect(resolveBlockfrostProjectId('preprod', TEST_DIR, { BLOCKFROST_PROJECT_ID: SHARED, MN_BLOCKFROST_PROJECT_ID: FROM_ENV })).toBe(FROM_ENV);
+  });
+
+  // Other Blockfrost tools use the same variable for another network's id, or another chain's.
+  it('passes over that variable when its id is not this network\'s, without refusing', () => {
+    setConfigValue('blockfrost-project-id', FROM_CONFIG, TEST_DIR);
+    for (const other of ['nightmainnetAbCdEfGhIjKlMnOp', 'mainnetAbCdEfGhIjKlMnOpQrSt', 'not an id', '']) {
+      expect(resolveBlockfrostProjectId('preprod', TEST_DIR, { BLOCKFROST_PROJECT_ID: other })).toBe(FROM_CONFIG);
+    }
+    expect(resolveBlockfrostProjectId('preprod', TEST_DIR + '-none', { BLOCKFROST_PROJECT_ID: 'mainnetAbCdEfGhIjKlMnOpQrSt' })).toBeUndefined();
+  });
+
   it('refuses an environment value that is no project id', () => {
     expect(() => resolveBlockfrostProjectId('preprod', TEST_DIR, { MN_BLOCKFROST_PROJECT_ID: 'nightmainnetAbCdEfGhIjKl' }))
       .toThrow('it should start with "nightpreprod" (preprod)');
@@ -127,8 +144,15 @@ describe('resolveBlockfrostProjectId', () => {
 
 describe('resolveNetwork on preprod', () => {
   let origEnv: string | undefined;
-  beforeEach(() => { origEnv = process.env.MN_BLOCKFROST_PROJECT_ID; delete process.env.MN_BLOCKFROST_PROJECT_ID; });
-  afterEach(() => { if (origEnv !== undefined) process.env.MN_BLOCKFROST_PROJECT_ID = origEnv; });
+  let origShared: string | undefined;
+  beforeEach(() => {
+    origEnv = process.env.MN_BLOCKFROST_PROJECT_ID; delete process.env.MN_BLOCKFROST_PROJECT_ID;
+    origShared = process.env.BLOCKFROST_PROJECT_ID; delete process.env.BLOCKFROST_PROJECT_ID;
+  });
+  afterEach(() => {
+    if (origEnv !== undefined) process.env.MN_BLOCKFROST_PROJECT_ID = origEnv;
+    if (origShared !== undefined) process.env.BLOCKFROST_PROJECT_ID = origShared;
+  });
 
   it('gives Blockfrost\'s endpoints with the project id that is set', () => {
     setConfigValue('blockfrost-project-id', 'nightpreprodConfigConfigConfig0001', TEST_DIR);
