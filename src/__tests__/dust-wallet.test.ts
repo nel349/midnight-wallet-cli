@@ -67,8 +67,13 @@ describe('the SDK\'s own choice of fee coins', () => {
   // its own: drop ConvergingDustTransacting and build the SDK's DustWallet.
   it('never returns when the wallet\'s only coin is in that range', async () => {
     const canary = fileURLToPath(new URL('./helpers/sdk-dust-loop-canary.ts', import.meta.url));
-    const tsx = fileURLToPath(new URL('../../node_modules/.bin/tsx', import.meta.url));
-    const child = spawn(tsx, [canary], { stdio: ['ignore', 'pipe', 'inherit'] });
+    // Node itself, loading tsx, not the tsx command: that one runs the script
+    // in a child of its own, which a kill of the command leaves looping.
+    const child = spawn(process.execPath, ['--import', 'tsx', canary], {
+      cwd: fileURLToPath(new URL('../..', import.meta.url)),
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    const exited = new Promise<void>((resolve) => { child.once('exit', () => resolve()); });
     let output = '';
     child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
     try {
@@ -78,7 +83,9 @@ describe('the SDK\'s own choice of fee coins', () => {
       expect(output).toBe('started\n');
       expect(child.exitCode).toBeNull();
     } finally {
+      // The loop never yields, so only SIGKILL ends it; the test waits to see it gone.
       child.kill('SIGKILL');
+      await exited;
     }
   }, 90_000);
 });
