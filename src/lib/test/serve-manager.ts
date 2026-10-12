@@ -24,6 +24,8 @@ export interface ServeManagerOptions {
   endpoints?: EndpointOverrides;
   wallet?: string;
   onMessage?: (msg: string) => void;
+  /** The longest a request waits for the wallet's Dust to grow to a fee (the connector's default when unset). */
+  dustWaitMs?: number;
 }
 
 /** The network and endpoints a serve for these options must use. */
@@ -260,6 +262,7 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
     // one that is synced by the rule the sync used.
     initialState: syncedState,
     isCurrent: (state) => isFacadeSynced(state, 'full', bundle.emptyStreams),
+    dustWaitMs: options.dustWaitMs,
     callbacks: {
       onPhaseStart: (_connId, _method, phase) => {
         onMessage(`${phase}...`);

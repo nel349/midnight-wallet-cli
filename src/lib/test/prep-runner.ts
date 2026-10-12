@@ -243,6 +243,11 @@ async function stepDust(config: DappTestConfig, callbacks: PrepCallbacks): Promi
   }
 }
 
+// A suite's transactions follow each other closely, and each takes most of
+// the Dust a 1000 NIGHT wallet holds: after a deploy, the fee of the next one
+// takes it about three minutes to generate. The suite waits that out.
+const SUITE_DUST_WAIT_MS = 5 * 60_000;
+
 async function stepMnServe(config: DappTestConfig, ctx: PrepContext, callbacks: PrepCallbacks): Promise<void> {
   callbacks.onMessage('Starting mn serve...');
 
@@ -255,6 +260,7 @@ async function stepMnServe(config: DappTestConfig, ctx: PrepContext, callbacks: 
     port: undefined, // use default
     network: config.network,
     onMessage: (msg) => callbacks.onMessage(`[serve] ${msg}`),
+    dustWaitMs: SUITE_DUST_WAIT_MS,
   });
 
   ctx.serveHandle = handle;

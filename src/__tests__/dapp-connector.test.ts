@@ -18,6 +18,7 @@ import type { FacadeBundle } from '../lib/facade.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import type { RpcHandlerContext } from '../lib/ws-rpc.ts';
 import { PROOF_TIMEOUT_MS } from '../lib/constants.ts';
+import { withDustShortfall } from '../lib/sdk-errors.ts';
 import { classifyError } from '../lib/exit-codes.ts';
 import { FORK_SCHEDULE } from '../lib/network.ts';
 import { deriveUnshieldedAddress, deriveAllShieldedAddresses, deriveShieldedAddress } from '../lib/derive-address.ts';
@@ -1124,6 +1125,117 @@ describe('dapp-connector', () => {
       expect(classifyError(err).errorCode).toBe('DUST_REQUIRED');
       expect(callCount).toBe(10); // DUST_RETRY_ATTEMPTS = 10
       vi.useRealTimers();
+    });
+
+    describe('a shortage that says what the fee takes', () => {
+      // The wallet's own fee planner marks a shortage with the Dust the fee
+      // takes. This wallet holds 0.35 DUST and generates 0.0075 a second, as
+      // a 900 NIGHT wallet on a local ledger-9 chain does.
+      const SPECK = 1_000_000_000_000_000n;
+      const HAS = 350n * SPECK / 1000n;
+      const PER_SECOND = 75n * SPECK / 10_000n;
+      const shortOf = (needed: bigint, available = HAS) => withDustShortfall(Object.assign(new Error('Insufficient Funds: could not balance dust'), {
+        _tag: 'Wallet.InsufficientFunds', tokenType: 'dust',
+      }), { needed, available });
+      /** A wallet state whose Dust grows from HAS at PER_SECOND, counted from when the test starts. */
+      const growingFrom = (start: number) => () => rx.of({
+        ...mockState(),
+        dust: { balance: (at: Date) => HAS + PER_SECOND * BigInt(Math.max(0, Math.floor((at.getTime() - start) / 1000))), availableCoins: [{}], address: 'dust' },
+      });
+
+      it('waits the time the wallet takes to generate the rest, then pays', async () => {
+        vi.useFakeTimers();
+        const written: string[] = [];
+        process.stderr.write = ((chunk: any) => { written.push(String(chunk)); return true; }) as any;
+        // 1 DUST: 0.65 more and a little over, 89 seconds at this rate.
+        const balance = vi.fn().mockRejectedValueOnce(shortOf(SPECK)).mockResolvedValue({ type: 'UNBOUND' });
+        connector = createConnector({ bundleOverrides: { stateFn: growingFrom(Date.now()), balanceUnboundTransaction: balance } });
+
+        const paid = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx());
+        await vi.advanceTimersByTimeAsync(88_000);
+        expect(balance).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1_500);
+        await paid;
+        expect(balance).toHaveBeenCalledTimes(2);
+        expect(written.join('')).toContain('Dust: 0.35 of the 1.00 DUST this fee takes; waiting about 2 minutes for the rest...');
+        vi.useRealTimers();
+      });
+
+      it('refuses at once, with the time, when that is longer than a request waits', async () => {
+        process.stderr.write = (() => true) as any;
+        // 2 DUST: 1.65 more, close to four minutes, past the two a request waits.
+        const balance = vi.fn().mockRejectedValue(shortOf(2n * SPECK));
+        connector = createConnector({ bundleOverrides: { stateFn: growingFrom(Date.now()), balanceUnboundTransaction: balance } });
+
+        const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()).catch((e: any) => e);
+        expect(balance).toHaveBeenCalledTimes(1);
+        expect(err.code).toBe('InternalError');
+        expect(err.message).toBe(
+          "Not enough Dust available for this transaction's fee: the wallet has 0.35 DUST and the fee takes 2.00. "
+          + 'Its registered NIGHT generates the rest in about 4 minutes: retry then, or register more NIGHT to get there sooner.');
+        expect(classifyError(err).errorCode).toBe('DUST_REQUIRED');
+      });
+
+      it('waits longer when the caller allows it', async () => {
+        vi.useFakeTimers();
+        process.stderr.write = (() => true) as any;
+        const balance = vi.fn().mockRejectedValueOnce(shortOf(2n * SPECK)).mockResolvedValue({ type: 'UNBOUND' });
+        connector = createDAppConnector({
+          bundle: createBundleStub({ stateFn: growingFrom(Date.now()), balanceUnboundTransaction: balance }),
+          networkConfig: TEST_NETWORK_CONFIG,
+          approvalOptions: { approveAll: true },
+          dustWaitMs: 5 * 60_000,
+        });
+
+        const paid = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx());
+        await vi.advanceTimersByTimeAsync(226_000);
+        await paid;
+        expect(balance).toHaveBeenCalledTimes(2);
+        vi.useRealTimers();
+      });
+
+      it('says so when the wallet will not generate the fee within a day', async () => {
+        process.stderr.write = (() => true) as any;
+        const balance = vi.fn().mockRejectedValue(shortOf(1_000n * SPECK));
+        connector = createConnector({ bundleOverrides: { stateFn: growingFrom(Date.now()), balanceUnboundTransaction: balance } });
+
+        const err: any = await connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()).catch((e: any) => e);
+        expect(err.message).toContain("the wallet has 0.35 DUST and the fee takes 1000.00. Its registered NIGHT won't generate that within a day");
+        expect(balance).toHaveBeenCalledTimes(1);
+      });
+
+      it('waits for what the wallet was short by on its own clock, which this machine\'s can run ahead of', async () => {
+        vi.useFakeTimers();
+        process.stderr.write = (() => true) as any;
+        // The wallet spends by the chain's clock, 28 seconds behind: its coin held 0.14 DUST when the balance here read 0.35.
+        const behind = HAS - 28n * PER_SECOND;
+        const balance = vi.fn().mockRejectedValueOnce(shortOf(SPECK, behind)).mockResolvedValue({ type: 'UNBOUND' });
+        connector = createConnector({ bundleOverrides: { stateFn: growingFrom(Date.now()), balanceUnboundTransaction: balance } });
+
+        const paid = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx());
+        await vi.advanceTimersByTimeAsync(116_000); // 0.86 more and a little over: 117 seconds
+        expect(balance).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1_500);
+        await paid;
+        expect(balance).toHaveBeenCalledTimes(2);
+        vi.useRealTimers();
+      });
+
+      it('stops waiting once the waits add up to more than a request waits', async () => {
+        vi.useFakeTimers();
+        process.stderr.write = (() => true) as any;
+        // The fee keeps moving ahead of the wallet: each wait fits, together they don't.
+        const start = Date.now();
+        const balance = vi.fn().mockImplementation(() => Promise.reject(shortOf(HAS + 50n * PER_SECOND)));
+        connector = createConnector({ bundleOverrides: { stateFn: growingFrom(start), balanceUnboundTransaction: balance } });
+
+        const failure = connector.handlers.balanceUnsealedTransaction({ tx: AGENT_TX }, ctx()).catch((e: any) => e);
+        await vi.advanceTimersByTimeAsync(130_000);
+        const err: any = await failure;
+        expect(err.message).toContain("Not enough Dust available for this transaction's fee");
+        expect(balance).toHaveBeenCalledTimes(3); // 51 s, 51 s, then a third 51 s would pass two minutes
+        vi.useRealTimers();
+      });
     });
 
     it('asks again at once when a coin comes free during the wait', async () => {

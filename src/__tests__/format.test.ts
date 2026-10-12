@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   header, divider, keyValue,
-  toNight, formatNight, toDust, formatDust, formatAddress,
+  toNight, formatNight, toDust, roughDust, formatDust, formatAddress,
   box, errorMessage, usageMessage, successMessage,
 } from '../ui/format.ts';
 
@@ -85,6 +85,21 @@ describe('formatNight', () => {
 
   it('handles negative values', () => {
     expect(formatNight(-1_500_000n)).toBe('-1.500000 NIGHT');
+  });
+});
+
+describe('roughDust', () => {
+  it('gives DUST to two decimals, rounded down', () => {
+    expect(roughDust(0n)).toBe('0.00');
+    expect(roughDust(468_659_303_068_517n)).toBe('0.46');
+    expect(roughDust(1_000_000_000_000_000n)).toBe('1.00');
+    expect(roughDust(17_089_999_999_999_999n)).toBe('17.08');
+  });
+
+  it('rounds a fee up, so an amount never reads as covering one it falls short of', () => {
+    expect(roughDust(552_017_667_169_256n, true)).toBe('0.56');
+    expect(roughDust(550_000_000_000_000n, true)).toBe('0.55');
+    expect(roughDust(1n, true)).toBe('0.01');
   });
 });
 

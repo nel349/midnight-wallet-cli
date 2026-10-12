@@ -3,7 +3,7 @@
 // (an Effect tagged error carrying tokenType), not just matching strings.
 
 import { describe, it, expect } from 'vitest';
-import { isColdStartRace, isDustShortage } from '../lib/sdk-errors.ts';
+import { dustShortfallOf, isColdStartRace, isDustShortage, withDustShortfall } from '../lib/sdk-errors.ts';
 
 /** wallet-sdk 2.0's dust InsufficientFundsError: tagged, with the token it could not balance. */
 function sdkInsufficientFunds(tokenType: string): Error {
@@ -86,6 +86,33 @@ describe('isDustShortage on what the real wallet SDK rejects with', () => {
       right: { _tag: 'Fail', error: { _tag: 'Wallet.InsufficientFunds', tokenType: 'dust' } },
     }, 'several failures');
     expect(isDustShortage(err)).toBe(true);
+  });
+});
+
+describe('dustShortfallOf: what a Dust shortage says the wallet is short by', () => {
+  const FIBER_FAILURE_CAUSE = Symbol.for('effect/Runtime/FiberFailure/Cause');
+  const shortage = () => sdkInsufficientFunds('dust');
+  const shortfall = { needed: 1_600_000_000_000_000n, available: 350_000_000_000_000n };
+
+  it('reads it from the shortage itself, and leaves the shortage a shortage', () => {
+    const err = withDustShortfall(shortage(), shortfall);
+    expect(dustShortfallOf(err)).toEqual(shortfall);
+    expect(isDustShortage(err)).toBe(true);
+  });
+
+  it('finds it where the SDK puts the shortage: wrapped as a ledger error, inside a FiberFailure\'s cause', () => {
+    const ledgerError = Object.assign(new Error('Error from ledger: Insufficient Funds: could not balance dust'), {
+      _tag: 'LedgerError', cause: withDustShortfall(shortage(), shortfall),
+    });
+    const err = Object.assign(new Error('Error from ledger'), { [FIBER_FAILURE_CAUSE]: { _tag: 'Fail', error: ledgerError } });
+    expect(dustShortfallOf(err)).toEqual(shortfall);
+  });
+
+  it('is undefined for a shortage that carries none, and for anything else', () => {
+    expect(dustShortfallOf(shortage())).toBeUndefined();
+    expect(dustShortfallOf(new Error('No dust tokens found in the wallet state'))).toBeUndefined();
+    expect(dustShortfallOf(undefined)).toBeUndefined();
+    expect(dustShortfallOf('Insufficient Funds')).toBeUndefined();
   });
 });
 

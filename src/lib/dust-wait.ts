@@ -13,7 +13,8 @@ export interface DustBalanceSource {
 
 /** Waits up to this long rather than refusing. */
 export const DUST_SHORT_WAIT_MS = 2 * 60_000;
-const LOOK_AHEAD_MS = 24 * 3_600_000;
+/** How far ahead a wait is looked for: past it, the wallet's NIGHT won't generate the Dust in useful time. */
+export const LOOK_AHEAD_MS = 24 * 3_600_000;
 
 /** Milliseconds until the balance reaches `needed`, in whole seconds: 0 if it already has, null if not within `horizonMs`. */
 export function msUntilDust(dust: DustBalanceSource, needed: bigint, now: Date, horizonMs: number): number | null {

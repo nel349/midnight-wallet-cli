@@ -61,6 +61,16 @@ export function toDust(specks: bigint): string {
   return `${sign}${whole}.${trimmed}`;
 }
 
+/**
+ * Specks as DUST to two decimals, for a sentence: rounded down, or up with
+ * `up` (a fee, so an amount never reads as covering one it falls short of).
+ */
+export function roughDust(specks: bigint, up = false): string {
+  const hundredth = 10n ** BigInt(DUST_DECIMALS - 2);
+  const hundredths = specks / hundredth + (up && specks % hundredth > 0n ? 1n : 0n);
+  return `${hundredths / 100n}.${(hundredths % 100n).toString().padStart(2, '0')}`;
+}
+
 // Format Specks bigint to human-readable DUST with suffix
 export function formatDust(specks: bigint): string {
   return `${toDust(specks)} DUST`;

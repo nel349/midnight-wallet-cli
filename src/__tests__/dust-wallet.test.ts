@@ -12,7 +12,7 @@ import { WalletEntrySchema, mergeWalletEntries } from '@midnightntwrk/wallet-sdk
 import { EitherOps } from '@midnightntwrk/wallet-sdk/utilities';
 import { ConvergingDustTransacting, DustWallet } from '../lib/dust-wallet.ts';
 import { FORK_SCHEDULE } from '../lib/network.ts';
-import { isDustShortage } from '../lib/sdk-errors.ts';
+import { dustShortfallOf, isDustShortage } from '../lib/sdk-errors.ts';
 import {
   CAPTURED_AT, type FeeRange, coinsAt, computeArguments, feeRange, paymentToBalance, timeWhenSmallestReaches, transacting,
 } from './helpers/dust-balancing-case.ts';
@@ -95,6 +95,25 @@ describe('mn\'s choice of fee coins', () => {
     const error = caught(() => EitherOps.getOrThrowLeft(mine.computeBalancingRecipe(...computeArguments(payment, inRange))));
     expect(isDustShortage(error)).toBe(true);
     expect(messages(error)).toContain('Insufficient Funds: could not balance dust');
+  });
+
+  // What lets a caller wait the right time: what the fee takes, and what the wallet's coin held.
+  it('says what it is short by when the only coin is in that range: the fee with its spend added, against the coin', () => {
+    const mine = transacting(ConvergingDustTransacting, { onlySmallest: true });
+    const error = caught(() => EitherOps.getOrThrowLeft(mine.computeBalancingRecipe(...computeArguments(payment, inRange))));
+    const shortfall = dustShortfallOf(error)!;
+    expectSameFee(shortfall.needed, feeRange(payment, inRange).withOneSpend);
+    expect(shortfall.available).toBe(coinsAt(inRange)[0]!.value);
+    expect(shortfall.needed).toBeGreaterThan(shortfall.available);
+  });
+
+  it('says what it is short by when the only coin can\'t cover even the payment\'s own fee', () => {
+    const mine = transacting(ConvergingDustTransacting, { onlySmallest: true });
+    const error = caught(() => EitherOps.getOrThrowLeft(mine.computeBalancingRecipe(...computeArguments(payment, CAPTURED_AT))));
+    expect(isDustShortage(error)).toBe(true);
+    const shortfall = dustShortfallOf(error)!;
+    expectSameFee(shortfall.needed, feeRange(payment, CAPTURED_AT).withOneSpend);
+    expect(shortfall.available).toBe(coinsAt(CAPTURED_AT)[0]!.value);
   });
 
   it('pays with the larger coin alone when the smallest is in that range, and the fee transaction can be built', () => {

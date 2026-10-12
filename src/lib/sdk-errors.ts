@@ -55,6 +55,37 @@ export function isDustShortage(err: unknown): boolean {
   return false;
 }
 
+/** What a Dust shortage carries when the wallet worked out what the fee would take. */
+export interface DustShortfall {
+  /** Dust (Specks) the wallet has to hold before the fee can be paid. */
+  needed: bigint;
+  /** Dust its coins held when that was worked out, at the time the wallet spends by. */
+  available: bigint;
+}
+
+const DUST_SHORTFALL = 'dustShortfall';
+
+/** Mark a Dust shortage with what the fee takes and what the wallet's coins held. */
+export function withDustShortfall<E extends object>(error: E, shortfall: DustShortfall): E {
+  return Object.assign(error, { [DUST_SHORTFALL]: shortfall });
+}
+
+/** The shortfall a Dust shortage carries, wherever in the error's causes it is; undefined when it carries none. */
+export function dustShortfallOf(err: unknown): DustShortfall | undefined {
+  const seen = new Set<unknown>();
+  const pending: unknown[] = [err];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+    const e = current as Record<PropertyKey, unknown>;
+    const found = e[DUST_SHORTFALL] as Partial<DustShortfall> | undefined;
+    if (found && typeof found.needed === 'bigint' && typeof found.available === 'bigint') return found as DustShortfall;
+    pending.push(e.cause, e[FIBER_FAILURE_CAUSE], e.error, e.defect, e.left, e.right);
+  }
+  return undefined;
+}
+
 /**
  * Dust-related — the SDK throws various messages when dust capacity is too
  * low to pay fees. All of these are retryable by waiting for dust generation

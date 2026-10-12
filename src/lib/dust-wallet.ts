@@ -14,6 +14,7 @@ import { V1Builder } from '@midnightntwrk/wallet-sdk/dust/v1';
 import { Migration, Transacting, V2Builder, WalletError } from '@midnightntwrk/wallet-sdk/dust/v2';
 import { LedgerOps } from '@midnightntwrk/wallet-sdk/utilities';
 import { type DustInput, chooseDustCoins, planDustInputs, spreadFeeAcrossInputs } from './dust-balancing-plan.ts';
+import { type DustShortfall, withDustShortfall } from './sdk-errors.ts';
 
 type SdkTransacting = Transacting.TransactingCapabilityImplementation<ledger.FinalizedTransaction>;
 type RecipeArguments = Parameters<SdkTransacting['computeBalancingRecipe']>;
@@ -47,14 +48,41 @@ export class ConvergingDustTransacting extends Transacting.TransactingCapability
       const { fee, inputs } = plan;
       return LedgerOps.ledgerTry(() => ({ fee, recipeInputs: spreadFeeAcrossInputs(inputs, fee) }));
     }
+    const shortfall = this.#shortfall(args);
     // Too little Dust even before a spend is added: the SDK's first choice
-    // refuses it and stops, so its own error stands, unchanged.
-    if (plan.atFirstChoice) return super.computeBalancingRecipe(...args);
+    // refuses it and stops, so its own error stands, with the shortfall added.
+    if (plan.atFirstChoice) {
+      const refused = super.computeBalancingRecipe(...args);
+      if (shortfall && refused._tag === 'Left') withDustShortfall(refused.left, shortfall);
+      return refused;
+    }
     // Enough for the transactions' own fee, not for the fee with the spends
     // added: where the SDK's loop never ends. Refused as the same shortage.
     return LedgerOps.ledgerTry(() => {
-      throw new WalletError.InsufficientFundsError({ message: new NoCoinsCoverIt('dust').message, tokenType: 'dust' });
+      const shortage = new WalletError.InsufficientFundsError({ message: new NoCoinsCoverIt('dust').message, tokenType: 'dust' });
+      throw shortfall ? withDustShortfall(shortage, shortfall) : shortage;
     });
+  }
+
+  /**
+   * What the wallet is short by, so a caller can tell how long its NIGHT
+   * takes to generate it: the fee with a spend of every coin the wallet has,
+   * and what those coins hold at the time the spends are made for (the
+   * wallet's clock for the chain, which a local chain can run behind).
+   * Undefined with no coin to spend, or when the fee can't be worked out.
+   */
+  #shortfall([secretKey, state, transactions, ttl, currentTime, ledgerParams]: RecipeArguments): DustShortfall | undefined {
+    try {
+      const coins = this.getCoins().getAvailableCoinsWithGeneratedDust(state, currentTime);
+      if (coins.length === 0) return undefined;
+      const inputs = coins.map(({ token, value }) => ({ token, value }));
+      return {
+        needed: this.dryRunFee(inputs, transactions, secretKey, state, ttl, currentTime, ledgerParams),
+        available: inputs.reduce((sum, input) => sum + input.value, 0n),
+      };
+    } catch {
+      return undefined;
+    }
   }
 
   /** The SDK balancer's choice of several coins covering `owed`, in the order it takes them. */
