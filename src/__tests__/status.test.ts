@@ -83,6 +83,7 @@ describe('status command', () => {
   let home: string;
   let origHome: string | undefined;
   let origProjectId: string | undefined;
+  let origSharedProjectId: string | undefined;
 
   beforeEach(() => {
     stderr = captureStderr();
@@ -90,6 +91,8 @@ describe('status command', () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-status-test-'));
     origHome = process.env.HOME;
     origProjectId = process.env.MN_BLOCKFROST_PROJECT_ID;
+    origSharedProjectId = process.env.BLOCKFROST_PROJECT_ID;
+    delete process.env.BLOCKFROST_PROJECT_ID;
     process.env.HOME = home;
     process.env.MN_BLOCKFROST_PROJECT_ID = PROJECT_ID;
   });
@@ -101,6 +104,7 @@ describe('status command', () => {
     process.env.HOME = origHome;
     if (origProjectId === undefined) delete process.env.MN_BLOCKFROST_PROJECT_ID;
     else process.env.MN_BLOCKFROST_PROJECT_ID = origProjectId;
+    if (origSharedProjectId !== undefined) process.env.BLOCKFROST_PROJECT_ID = origSharedProjectId;
     fs.rmSync(home, { recursive: true, force: true });
   });
 

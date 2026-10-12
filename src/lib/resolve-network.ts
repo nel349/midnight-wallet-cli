@@ -12,7 +12,7 @@ import {
   resolveNetworkConfig,
   applyEndpointOverrides,
 } from './network.ts';
-import { checkProjectId, usesBlockfrost } from './blockfrost.ts';
+import { checkProjectId, networkOfProjectId, usesBlockfrost } from './blockfrost.ts';
 import { getBlockfrostProjectId, loadCliConfig } from './cli-config.ts';
 
 export interface NetworkResolutionContext {
@@ -51,10 +51,18 @@ export function resolveNetworkName(ctx: NetworkResolutionContext): NetworkName {
 export const BLOCKFROST_PROJECT_ID_ENV = 'MN_BLOCKFROST_PROJECT_ID';
 
 /**
- * The Blockfrost project id for `name`: the environment's, else the one set
- * with `midnight config set`. Undefined on a network Blockfrost doesn't
- * serve, and when none is set (a command that then connects is told so).
- * The environment's is checked, and used only for the network it is for.
+ * The name Midnight's own docs give the variable. Other Blockfrost tools use
+ * it too (for another network's id, or another chain's), so a value that is
+ * not this network's is passed over, not refused.
+ */
+export const SHARED_BLOCKFROST_PROJECT_ID_ENV = 'BLOCKFROST_PROJECT_ID';
+
+/**
+ * The Blockfrost project id for `name`: the environment's (mn's own variable,
+ * then the shared one), else the one set with `midnight config set`.
+ * Undefined on a network Blockfrost doesn't serve, and when none is set (a
+ * command that then connects is told so). mn's own variable is checked; both
+ * are used only for the network their id is for.
  */
 export function resolveBlockfrostProjectId(
   name: NetworkName,
@@ -62,11 +70,13 @@ export function resolveBlockfrostProjectId(
   env: Record<string, string | undefined> = process.env,
 ): string | undefined {
   if (!usesBlockfrost(name)) return undefined;
-  const fromEnv = env[BLOCKFROST_PROJECT_ID_ENV];
-  if (fromEnv !== undefined && fromEnv.trim() !== '') {
-    const { projectId, network } = checkProjectId(fromEnv);
+  const own = env[BLOCKFROST_PROJECT_ID_ENV]?.trim();
+  if (own) {
+    const { projectId, network } = checkProjectId(own);
     if (network === name) return projectId;
   }
+  const shared = env[SHARED_BLOCKFROST_PROJECT_ID_ENV]?.trim();
+  if (shared && /^[A-Za-z0-9]+$/.test(shared) && networkOfProjectId(shared) === name) return shared;
   return getBlockfrostProjectId(loadCliConfig(configDir), name);
 }
 

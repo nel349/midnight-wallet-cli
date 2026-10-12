@@ -290,8 +290,8 @@ const COMMAND_SPECS: CommandSpec[] = [
       "blockfrost-project-id: preprod's indexer and node are served by Blockfrost,",
       'which needs your own project id (create a Midnight preprod project at',
       'https://blockfrost.io). It is filed under the network its prefix names,',
-      'shown masked, and never printed. MN_BLOCKFROST_PROJECT_ID in the',
-      'environment is used instead when set.',
+      'shown masked, and never printed. MN_BLOCKFROST_PROJECT_ID or',
+      'BLOCKFROST_PROJECT_ID in the environment is used instead when set.',
     ],
     examples: [
       'midnight config get network',
@@ -645,7 +645,8 @@ Preprod's indexer and node are served by Blockfrost (Midnight shut its own
 preprod indexer down on 2026-10-09). Every request needs the user's own
 project id, from a Midnight preprod project at https://blockfrost.io:
   midnight config set blockfrost-project-id <project id>
-or MN_BLOCKFROST_PROJECT_ID in the environment. Without one, a command that
+or MN_BLOCKFROST_PROJECT_ID (or BLOCKFROST_PROJECT_ID) in the environment.
+Without one, a command that
 reaches preprod fails with BLOCKFROST_PROJECT_ID_REQUIRED. The project id is
 a secret: mn never prints it. Preview and undeployed need none.
 
