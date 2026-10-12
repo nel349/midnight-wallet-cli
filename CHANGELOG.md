@@ -2,7 +2,7 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
-## [Unreleased]
+## [0.5.7] - 2026-10-11
 
 ### Changed
 
