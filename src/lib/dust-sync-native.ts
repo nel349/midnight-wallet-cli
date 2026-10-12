@@ -1,8 +1,8 @@
 // Native dust-sync bridge: run the Rust `dust-sync` sidecar and adapt its output
 // to a `DustDirectResult`, so it drops into the repository's `fetchDust` seam.
-// ~5x faster cold dust sync (see tasks/dust-native-sidecar-plan.md). If the
-// binary is missing or the run fails, callers fall back to the WASM path — the
-// sidecar is an optional accelerator, never a hard dependency.
+// Several times faster on a cold dust sync. If the binary is missing or the run
+// fails, callers fall back to the WASM path — the sidecar is an optional
+// accelerator, never a hard dependency.
 
 import { assertEndpointUsable } from './blockfrost.ts';
 import { spawn } from 'node:child_process';

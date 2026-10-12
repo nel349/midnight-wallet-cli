@@ -5,11 +5,14 @@
 // The test suite runs on the lockfile's tree, which a consumer never sees. Two
 // features broke that way without a test noticing: a newer @scure/base refused
 // every shielded address, and (on the ledger-8 line) a second copy of the ledger
-// made contract calls fail with "expected instance of LedgerParameters".
+// made contract calls fail with "expected instance of LedgerParameters". A
+// third thing only a packed install shows: a file the code reads at run time
+// that the package's `files` list leaves out (on the ledger-8 line the MCP
+// server's core skill document was one).
 //
 //   node scripts/fresh-install-check.mjs      (after `npm run build`)
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,6 +36,49 @@ function copiesOf(root, name) {
   };
   walk(root);
   return found;
+}
+
+/**
+ * Every resource the MCP server at `server` lists, read over stdio as an MCP
+ * client would: its URI with the length of its text, or with the error.
+ */
+function readMcpResources(server, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(server, [], { env, stdio: ['pipe', 'pipe', 'ignore'] });
+    const results = [];
+    const waiting = new Map();
+    let nextId = 0;
+    let buffered = '';
+    const timer = setTimeout(() => { child.kill(); reject(new Error('the MCP server did not answer in 60 s')); }, 60_000);
+    const done = (outcome) => { clearTimeout(timer); child.kill(); outcome(); };
+    const request = (method, params) => new Promise((answer) => {
+      const id = ++nextId;
+      waiting.set(id, answer);
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    });
+    child.on('error', (error) => done(() => reject(error)));
+    child.stdout.on('data', (chunk) => {
+      buffered += chunk.toString();
+      for (let end = buffered.indexOf('\n'); end >= 0; end = buffered.indexOf('\n')) {
+        const line = buffered.slice(0, end).trim();
+        buffered = buffered.slice(end + 1);
+        if (!line) continue;
+        const message = JSON.parse(line);
+        waiting.get(message.id)?.(message);
+        waiting.delete(message.id);
+      }
+    });
+    (async () => {
+      await request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'fresh-install-check', version: '1' } });
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+      const listed = await request('resources/list', {});
+      for (const { uri } of listed.result.resources) {
+        const read = await request('resources/read', { uri });
+        results.push({ uri, length: read.result?.contents?.[0]?.text?.length ?? 0, error: read.error?.message });
+      }
+      done(() => resolve(results));
+    })().catch((error) => done(() => reject(error)));
+  });
 }
 
 const failures = [];
@@ -74,6 +120,13 @@ try {
     }
   `], join(work, 'node_modules', 'midnight-wallet-cli'));
   check('a shielded address parses', parsed.trim() === 'parsed' && address.length > 90, `${address.length} characters${parsed.trim() === 'parsed' ? '' : `, ${parsed.trim()}`}`);
+
+  // The MCP server reads its skill documents from the installed package.
+  const resources = await readMcpResources(join(work, 'node_modules', '.bin', 'midnight-wallet-mcp'), { ...process.env, HOME: home });
+  check('the MCP server lists its skill resources', resources.length >= 2, `${resources.length}`);
+  for (const { uri, length, error } of resources) {
+    check(`the MCP server serves ${uri}`, error === undefined && length > 0, error ? error.replace(work, '<install>') : `${length} characters`);
+  }
 } catch (error) {
   check('the fresh install and its checks ran', false, String(error.stderr || error.message).trim().split('\n').slice(-3).join(' | '));
 } finally {

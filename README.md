@@ -127,7 +127,7 @@ midnight config set blockfrost-project-id <project id>   # or: export BLOCKFROST
 
 ## Native dust acceleration
 
-The first dust sync for a wallet on a hosted network replays the chain's full dust event history, the slow part of a cold start. On 0.5.x a native (Rust) accelerator does this about 5× faster than the WASM reader (a ~1.45M-event preprod prime drops from ~22 min to ~4.5 min), installed as a per-platform `optionalDependency` (`@nel349/dust-sync-<os>-<arch>`).
+The first dust sync for a wallet on a hosted network replays the chain's full dust event history, the slow part of a cold start. On 0.5.x a native (Rust) reader does this several times faster than the WASM one (preprod's 1.6M events in about 5 minutes; preview's 144k in about 30 seconds against about 2 minutes), installed as a per-platform `optionalDependency` (`@nel349/dust-sync-<os>-<arch>`).
 
 **Not on this ledger-9 build.** The accelerator is built against ledger 8, so this prerelease does not ship it (no `@nel349/dust-sync-*` dependencies) and never runs it: dust sync always uses the WASM reader, and `MN_DUST_SYNC_BIN` and `MN_DISABLE_NATIVE_DUST` are ignored.
 

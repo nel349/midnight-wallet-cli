@@ -4,7 +4,7 @@
 // `DustLocalState` (~5x WASM), and writes a checkpoint the CLI reads straight
 // into its dust cache. Read-only w.r.t. the chain; the dust secret key is read
 // from stdin and zeroized. Output (checkpoint file + final stdout line) mirrors
-// the CLI's `DustDirectResult`. See tasks/dust-native-sidecar-plan.md.
+// the CLI's `DustDirectResult`.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
