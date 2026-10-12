@@ -8,7 +8,7 @@ import { runDeploy, runCall, runState, type StateResult } from '../contract/runn
 import { findContractInfo, type ContractInfo } from '../contract/inspect.ts';
 import { analyzeWitnessDependencies } from './circuit-witness-deps.ts';
 import { findContractSourcePath } from './ai-scaffold.ts';
-import { getChainGenesisHash } from '../chain-id.ts';
+import { contractExists } from '../contract/exists.ts';
 import { loadContractCache, saveContractCache } from './contract-cache.ts';
 
 export interface ActionResult {
@@ -51,12 +51,18 @@ export async function runActions(options: ActionsRunnerOptions): Promise<ActionR
   const { actions, config, dappDir, suiteName, networkConfig, servePort, redeploy, onActionStart, onActionComplete, onMessage } = options;
   const results: ActionResult[] = [];
 
-  // Load cached contract address (test replay), if it is for this chain
+  // Load cached contract address (test replay). The address is only as good
+  // as the chain it was deployed on: after `mn localnet down` and `up` there is
+  // no such contract, so the indexer is asked, and the suite deploys again
+  // when it says there is none.
   const network = config.network ?? 'undeployed';
-  const chainId = await getChainGenesisHash(networkConfig.node);
   let contractAddress: string | undefined;
   if (!redeploy) {
-    contractAddress = loadContractCache(dappDir, suiteName, network, chainId);
+    contractAddress = loadContractCache(dappDir, suiteName, network);
+    if (contractAddress && (await contractExists(networkConfig.indexer, contractAddress)) === false) {
+      onMessage?.(`The contract cached at ${contractAddress.slice(0, 16)}... is not on this chain; deploying again`);
+      contractAddress = undefined;
+    }
   }
 
   const { info } = findContractInfo(dappDir);
@@ -112,7 +118,7 @@ export async function runActions(options: ActionsRunnerOptions): Promise<ActionR
       // ledger state, so a previously-skipped chain shouldn't poison it.
       if (result.contractAddress) {
         contractAddress = result.contractAddress;
-        saveContractCache(dappDir, suiteName, network, contractAddress, chainId);
+        saveContractCache(dappDir, suiteName, network, contractAddress);
         if (action.type === 'contract-deploy') cascadeSkipReason = undefined;
       }
 
