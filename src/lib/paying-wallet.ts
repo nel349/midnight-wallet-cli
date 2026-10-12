@@ -12,6 +12,7 @@ import { applyEndpointOverrides, endpointFlags, type EndpointOverrides, type Net
 import { resolveNetwork } from './resolve-network.ts';
 import { loadWalletConfig, resolveWalletPath } from './wallet-config.ts';
 import { formatNight } from '../ui/format.ts';
+import { OWN_COMMAND_DUST_WAIT_MS } from './dust-wait.ts';
 import type { Spinner } from '../ui/spinner.ts';
 
 /** The network a command acts on, with its endpoints resolved. */
@@ -104,6 +105,7 @@ export async function openPayingServe({ network, endpoints }: PayingTarget, wall
     endpoints,
     wallet,
     onMessage: (msg) => progress.update(msg),
+    dustWaitMs: OWN_COMMAND_DUST_WAIT_MS,
   });
   progress.stop('mn serve ready (port ' + handle.port + ')');
   return { port: handle.port, stop: () => handle.stop() };

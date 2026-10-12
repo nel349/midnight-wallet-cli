@@ -13,6 +13,14 @@ export interface DustBalanceSource {
 
 /** Waits up to this long rather than refusing. */
 export const DUST_SHORT_WAIT_MS = 2 * 60_000;
+/**
+ * How long a serve that mn starts for one of its own commands waits (contract
+ * deploy and call, a test suite, grant): the person who ran the command sees
+ * the wait and can stop it, and five minutes covers a 1000 NIGHT wallet's
+ * next fee after it paid one (a deploy takes about 1.65 DUST on a local
+ * ledger-9 chain, generated in a little over three minutes).
+ */
+export const OWN_COMMAND_DUST_WAIT_MS = 5 * 60_000;
 /** How far ahead a wait is looked for: past it, the wallet's NIGHT won't generate the Dust in useful time. */
 export const LOOK_AHEAD_MS = 24 * 3_600_000;
 
