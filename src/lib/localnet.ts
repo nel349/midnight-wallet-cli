@@ -100,13 +100,15 @@ const EXEC_OPTIONS: ExecSyncOptionsWithStringEncoding = {
  * Returns the version string on success, or throws a descriptive error.
  */
 export function checkDockerAvailable(): string {
+  // The probes' own stderr is kept: without Docker it is the shell's "docker: not found", said better below.
+  const quiet = { ...EXEC_OPTIONS, stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'] };
   try {
-    const output = execSync('docker compose version', { ...EXEC_OPTIONS, timeout: 10_000 });
+    const output = execSync('docker compose version', { ...quiet, timeout: 10_000 });
     return output.trim();
   } catch {
     // Try plain docker first to distinguish "no docker" from "no compose v2"
     try {
-      execSync('docker --version', { ...EXEC_OPTIONS, timeout: 5_000 });
+      execSync('docker --version', { ...quiet, timeout: 5_000 });
       throw new Error(
         'Docker Compose v2 is required.\n' +
         'Install it from https://docs.docker.com/compose/install/'

@@ -3,7 +3,8 @@
 // NIGHT generates it (1000 NIGHT: ~0.0083 DUST/s on a ledger-9 localnet).
 
 import { describe, it, expect, vi } from 'vitest';
-import { DUST_SHORT_WAIT_MS, awaitDustForFee, dustShortError, msUntilDust, sleep } from '../lib/dust-wait.ts';
+import { DUST_SHORT_WAIT_MS, awaitDustForFee, dustShortError, msUntilDust, payWhenDustCovers, planDustWait, sleep } from '../lib/dust-wait.ts';
+import { withDustShortfall } from '../lib/sdk-errors.ts';
 
 const DUST = 10n ** 15n;
 const NOW = new Date('2026-10-05T05:00:00Z');
@@ -99,5 +100,88 @@ describe('sleep', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('a Dust shortage that says what the wallet is short by', () => {
+  // The shape mn's fee planner raises: the SDK's tagged shortage, marked with
+  // what the fee takes and what the wallet's coins held.
+  const shortage = (needed: bigint, available: bigint) => withDustShortfall(
+    Object.assign(new Error('Insufficient Funds: could not balance dust'), { _tag: 'Wallet.InsufficientFunds', tokenType: 'dust' }),
+    { needed, available },
+  );
+  // After a payment: 0.10 DUST, +0.0083 DUST/s.
+  const AFTER_PAYING = growing(100_000_000_000_000n, 8_300_000_000_000n);
+
+  describe('planDustWait', () => {
+    it('times the growth the wallet is short by, a little over: 0.80 more at 0.0083 DUST/s is 99 s', () => {
+      expect(planDustWait(shortage(NEEDED, 100_000_000_000_000n), AFTER_PAYING, NOW)).toEqual({
+        have: 100_000_000_000_000n, needed: NEEDED, waitMs: 99_000,
+      });
+    });
+
+    it('goes by what the coins held on the wallet\'s clock, not by the balance read here', () => {
+      // The chain's clock runs behind: the coins held 0.05 when the balance here read 0.10.
+      expect(planDustWait(shortage(NEEDED, 50_000_000_000_000n), AFTER_PAYING, NOW)!.waitMs).toBe(105_000);
+    });
+
+    it('is never a wait too short to matter', () => {
+      expect(planDustWait(shortage(NEEDED, NEEDED - 1n), AFTER_PAYING, NOW)!.waitMs).toBe(3_000);
+    });
+
+    it('is null when the wallet won\'t generate it within a day', () => {
+      expect(planDustWait(shortage(NEEDED, 0n), growing(0n, 0n), NOW)!.waitMs).toBeNull();
+    });
+
+    it('is undefined for a shortage that carries no shortfall, and for one that isn\'t short', () => {
+      expect(planDustWait(new Error('Insufficient Funds: could not balance dust'), AFTER_PAYING, NOW)).toBeUndefined();
+      expect(planDustWait(shortage(NEEDED, NEEDED), AFTER_PAYING, NOW)).toBeUndefined();
+    });
+  });
+
+  describe('payWhenDustCovers', () => {
+    it('pays at once when there is nothing to wait for', async () => {
+      const pay = vi.fn().mockResolvedValue('recipe');
+      await expect(payWhenDustCovers(pay, AFTER_PAYING, { maxWaitMs: DUST_SHORT_WAIT_MS })).resolves.toBe('recipe');
+      expect(pay).toHaveBeenCalledTimes(1);
+    });
+
+    it('waits the time the plan gives, saying so, then pays', async () => {
+      vi.useFakeTimers({ now: NOW });
+      const statuses: string[] = [];
+      const pay = vi.fn().mockRejectedValueOnce(shortage(NEEDED, 100_000_000_000_000n)).mockResolvedValue('recipe');
+      const paid = payWhenDustCovers(pay, AFTER_PAYING, { maxWaitMs: DUST_SHORT_WAIT_MS, onStatus: (status) => statuses.push(status) });
+      await vi.advanceTimersByTimeAsync(98_000);
+      expect(pay).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_500);
+      await expect(paid).resolves.toBe('recipe');
+      expect(statuses).toEqual(['Waiting about 2 minutes for Dust to cover the fee (0.10 of 0.90 DUST)...']);
+      vi.useRealTimers();
+    });
+
+    it('refuses with the time when the wait is longer than allowed, without waiting', async () => {
+      const pay = vi.fn().mockRejectedValue(shortage(2n * DUST, 100_000_000_000_000n));
+      const err = await payWhenDustCovers(pay, AFTER_PAYING, { maxWaitMs: DUST_SHORT_WAIT_MS }).catch((e: Error) => e) as Error;
+      expect(err.message).toContain('Insufficient dust for transaction fees.');
+      expect(err.message).toContain("This wallet's NIGHT generates that in about 4 minutes; retry then.");
+      expect(pay).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws any other failure as it is', async () => {
+      const other = new Error('Failed to prove transaction');
+      await expect(payWhenDustCovers(() => Promise.reject(other), AFTER_PAYING, { maxWaitMs: DUST_SHORT_WAIT_MS })).rejects.toBe(other);
+    });
+
+    it('stops when cancelled during the wait', async () => {
+      vi.useFakeTimers({ now: NOW });
+      const abort = new AbortController();
+      const pay = vi.fn().mockRejectedValue(shortage(NEEDED, 100_000_000_000_000n));
+      const failure = payWhenDustCovers(pay, AFTER_PAYING, { maxWaitMs: DUST_SHORT_WAIT_MS, signal: abort.signal }).catch((e: Error) => e) as Promise<Error>;
+      await vi.advanceTimersByTimeAsync(5_000);
+      abort.abort();
+      expect((await failure).message).toBe('Operation cancelled');
+      expect(pay).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+    });
   });
 });

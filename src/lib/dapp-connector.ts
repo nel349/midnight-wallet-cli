@@ -15,13 +15,13 @@ import { createApiError, type RpcHandler, type RpcHandlerContext } from './ws-rp
 import { createPhaseTracker, type PhaseTracker } from './phase-tracker.ts';
 import { toHex, fromHex } from './tx-serde.ts';
 import { getNetworkId } from './network-id.ts';
-import { dustShortfallOf, isDustShortage } from './sdk-errors.ts';
+import { isDustShortage } from './sdk-errors.ts';
 import { DEFAULT_FEE_LIMITS, feeLimitRefusal, pendingLimitRefusal, type FeeLimits } from './fee-limits.ts';
 import { inspectTxHex } from './tx-inspect.ts';
 import { expiredIntents, feeOnlyRefusals, readDAppTransaction, type DAppTxStage, type FeeCheckTransaction } from './fee-only-check.ts';
 import { PartlySignedTransactionError, assertSignable, signRecipe } from './sign-recipe.ts';
 import { decodeSignPayload, signedMessageBytes } from './sign-data.ts';
-import { DUST_SHORT_WAIT_MS, LOOK_AHEAD_MS, msUntilDust, sleep } from './dust-wait.ts';
+import { DUST_SHORT_WAIT_MS, planDustWait, sleep, type DustWaitPlan } from './dust-wait.ts';
 import { formatWait } from './dust-registration-plan.ts';
 import { fetchPartialSuccessSegments, type SegmentResult } from './tx-segments.ts';
 import { walletsBelowLedger9 } from './ledger-guard.ts';
@@ -656,25 +656,13 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
   }
 
   /**
-   * How long until the wallet's Dust covers a fee the shortage named, when
-   * that is all there is to wait for: the wallet has less than the fee and
-   * nothing balanced here is holding Dust back. Undefined otherwise. The time
-   * is how long the balance takes to grow by what the wallet was short by:
-   * the shortfall is measured on the wallet's clock for the chain, which
-   * needn't be this machine's.
+   * The wait for a fee the wallet's Dust doesn't cover yet, when that is all
+   * there is to wait for: the shortage says what the wallet is short by, and
+   * nothing balanced here is holding Dust back. Undefined otherwise.
    */
-  function dustGrowthWait(err: unknown): { have: bigint; needed: bigint; waitMs: number | null } | undefined {
-    const shortfall = dustShortfallOf(err);
-    if (!shortfall || latestState === undefined || pendingCount() > 0) return undefined;
-    const { needed, available: have } = shortfall;
-    if (have >= needed) return undefined;
-    const now = new Date();
-    // A little over the shortfall, and never a wait too short to matter: the
-    // fee is worked out again at the next attempt and moves by a few parts in
-    // a thousand, which would otherwise be a string of one-second waits.
-    const target = latestState.dust.balance(now) + (needed - have) * 102n / 100n;
-    const waitMs = msUntilDust(latestState.dust, target, now, LOOK_AHEAD_MS);
-    return { have, needed, waitMs: waitMs === null ? null : Math.max(waitMs, DUST_RETRY_DELAY_MS) };
+  function dustGrowthWait(err: unknown): DustWaitPlan | undefined {
+    if (latestState === undefined || pendingCount() > 0) return undefined;
+    return planDustWait(err, latestState.dust, new Date());
   }
 
   /**

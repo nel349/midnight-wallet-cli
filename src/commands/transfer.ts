@@ -17,6 +17,7 @@ import { header, keyValue, divider, formatAddress, successMessage } from '../ui/
 import { bold, dim } from '../ui/colors.ts';
 import { start as startSpinner, trackElapsed } from '../ui/spinner.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
+import { DUST_SHORT_WAIT_MS, payWhenDustCovers } from '../lib/dust-wait.ts';
 
 export default async function transferCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   rejectNoCacheForWrites(args);
@@ -172,12 +173,18 @@ async function shieldedTransfer(
         if (signal?.aborted) throw new Error('Operation cancelled');
 
         spinner.update('Building shielded transaction...');
-        const recipe = await bundle.facade.transferTransaction(
-          [{
-            type: 'shielded' as const,
-            outputs: [{ type: nightToken, amount, receiverAddress: decodedRecipient }],
-          }],
-          { ttl: new Date(Date.now() + 60 * 60 * 1000) },
+        // Right after another payment the wallet's Dust can be short of this
+        // fee: wait when the rest is moments away, else say how long it takes.
+        const recipe = await payWhenDustCovers(
+          () => bundle.facade.transferTransaction(
+            [{
+              type: 'shielded' as const,
+              outputs: [{ type: nightToken, amount, receiverAddress: decodedRecipient }],
+            }],
+            { ttl: new Date(Date.now() + 60 * 60 * 1000) },
+          ),
+          state.dust,
+          { maxWaitMs: DUST_SHORT_WAIT_MS, onStatus: (status) => spinner.update(status), signal },
         );
 
         spinner.update('Signing...');

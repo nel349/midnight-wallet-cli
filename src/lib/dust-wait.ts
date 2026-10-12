@@ -4,7 +4,9 @@
 // and a ledger-9 transfer costs ~0.85, a gap 1000 NIGHT closes in ~20 seconds.
 
 import { formatWait } from './dust-registration-plan.ts';
-import { toDust } from '../ui/format.ts';
+import { DUST_RETRY_DELAY_MS } from './constants.ts';
+import { dustShortfallOf } from './sdk-errors.ts';
+import { roughDust, toDust } from '../ui/format.ts';
 
 /** What the check reads from the SDK's Dust state. */
 export interface DustBalanceSource {
@@ -65,6 +67,59 @@ export async function awaitDustForFee(
   if (waitMs === null || waitMs > DUST_SHORT_WAIT_MS) throw dustShortError(have, needed, waitMs);
   onStatus?.(`Waiting ${formatWait(waitMs)} for Dust to cover the fee (${toDust(have)} of ${toDust(needed)} DUST)...`);
   await sleep(waitMs, signal);
+}
+
+/** A fee the wallet's Dust doesn't cover yet: what it has, what the fee takes, and how long its NIGHT needs for the rest (null: not within a day). */
+export interface DustWaitPlan {
+  have: bigint;
+  needed: bigint;
+  waitMs: number | null;
+}
+
+/**
+ * The wait for a Dust shortage that says what the wallet is short by (mn's
+ * fee planner marks its shortages so): how long the balance takes to grow by
+ * that much. The shortfall is measured on the wallet's clock for the chain,
+ * which needn't be this machine's, so it is the growth that is timed, not a
+ * balance to reach. Undefined when the error carries no shortfall.
+ */
+export function planDustWait(err: unknown, dust: DustBalanceSource, now: Date): DustWaitPlan | undefined {
+  const shortfall = dustShortfallOf(err);
+  if (!shortfall || shortfall.available >= shortfall.needed) return undefined;
+  const { needed, available: have } = shortfall;
+  // A little over the shortfall, and never a wait too short to matter: the
+  // fee is worked out again at the next attempt and moves by a few parts in
+  // a thousand, which would otherwise be a string of one-second waits.
+  const target = dust.balance(now) + (needed - have) * 102n / 100n;
+  const waitMs = msUntilDust(dust, target, now, LOOK_AHEAD_MS);
+  return { have, needed, waitMs: waitMs === null ? null : Math.max(waitMs, DUST_RETRY_DELAY_MS) };
+}
+
+/**
+ * Run `pay`, a wallet call that pays a fee. When it fails because the Dust
+ * doesn't cover the fee yet, wait for the wallet's NIGHT to generate the rest
+ * and run it again: for as long as the waits fit in `maxWaitMs`, reporting
+ * each; past that, dustShortError with the time. Any other failure is thrown
+ * as it is.
+ */
+export async function payWhenDustCovers<T>(
+  pay: () => Promise<T>,
+  dust: DustBalanceSource,
+  options: { maxWaitMs: number; onStatus?: (status: string) => void; signal?: AbortSignal },
+): Promise<T> {
+  let waitedMs = 0;
+  for (;;) {
+    try {
+      return await pay();
+    } catch (err) {
+      const plan = planDustWait(err, dust, new Date());
+      if (!plan) throw err;
+      if (plan.waitMs === null || waitedMs + plan.waitMs > options.maxWaitMs) throw dustShortError(plan.have, plan.needed, plan.waitMs);
+      options.onStatus?.(`Waiting ${formatWait(plan.waitMs)} for Dust to cover the fee (${roughDust(plan.have)} of ${roughDust(plan.needed, true)} DUST)...`);
+      await sleep(plan.waitMs, options.signal);
+      waitedMs += plan.waitMs;
+    }
+  }
 }
 
 /** Wait `ms`; reject with "Operation cancelled" if `signal` aborts first (or already has). */
