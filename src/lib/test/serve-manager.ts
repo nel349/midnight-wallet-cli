@@ -12,6 +12,7 @@ import { createDAppConnector, type DAppConnectorCallbacks } from '../dapp-connec
 import { createRpcServer, type RpcServer } from '../ws-rpc.ts';
 import { DEFAULT_SERVE_PORT } from '../constants.ts';
 import type { FacadeBundle } from '../facade.ts';
+import type { NetworkName } from '../network.ts';
 import type { ServeHandle } from './types.ts';
 
 export interface ServeManagerOptions {
@@ -19,6 +20,18 @@ export interface ServeManagerOptions {
   network?: string;
   wallet?: string;
   onMessage?: (msg: string) => void;
+}
+
+/**
+ * Why a running serve can't be reused to pay for `wanted`, or undefined if it
+ * can. A serve pays from the wallet it was started with, whatever wallet the
+ * command asking was given. A serve that doesn't say whose it is (it asks its
+ * operator before answering reads) is reused as before: its operator sees and
+ * approves each request.
+ */
+export function serveWalletMismatch(runningAddress: string | null, wanted: { address: string; name: string }): string | undefined {
+  if (runningAddress === null || runningAddress === wanted.address) return undefined;
+  return `it serves the wallet at ${runningAddress}, and this command pays from ${wanted.name} (${wanted.address})`;
 }
 
 // ── Port + serve probe helpers ──────────────────────────────────
@@ -45,20 +58,33 @@ export function isPortInUse(port: number): Promise<boolean> {
  * port-in-use is "our" mn serve (reusable) or some other process.
  */
 export async function probeServeNetwork(port: number): Promise<string | null> {
+  const result = await probeServeRpc(port, 'getConnectionStatus');
+  const id = (result as { networkId?: unknown } | null)?.networkId;
+  return typeof id === 'string' ? id : null;
+}
+
+/** The unshielded address of the wallet a serve on `port` pays from, or null when it doesn't say. */
+export async function probeServeWallet(port: number): Promise<string | null> {
+  const result = await probeServeRpc(port, 'getUnshieldedAddress');
+  const address = (result as { unshieldedAddress?: unknown } | null)?.unshieldedAddress;
+  return typeof address === 'string' ? address : null;
+}
+
+/** One JSON-RPC call to a serve on `port`: its `result`, or null on any error/timeout. */
+async function probeServeRpc(port: number, method: string): Promise<unknown | null> {
   const WebSocket = (await import('ws')).default;
-  return new Promise<string | null>((resolve) => {
+  return new Promise<unknown | null>((resolve) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}`);
     const timeout = setTimeout(() => { try { ws.close(); } catch {} resolve(null); }, 2000);
     ws.on('open', () => {
-      ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getConnectionStatus', params: {} }));
+      ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: {} }));
     });
     ws.on('message', (data: Buffer) => {
       clearTimeout(timeout);
       try {
         const msg = JSON.parse(data.toString());
-        const id = msg?.result?.networkId;
         ws.close();
-        resolve(typeof id === 'string' ? id : null);
+        resolve(msg?.result ?? null);
       } catch {
         ws.close();
         resolve(null);
@@ -74,6 +100,7 @@ export async function probeServeNetwork(port: number): Promise<string | null> {
  * no-op so we don't tear down something we didn't start). If a different
  * network's serve is bound, throws with a clear, actionable message —
  * silently reusing the wrong network leads to deeply confusing test failures.
+ * A serve for another wallet is refused too: it would pay from that wallet.
  * If nothing is bound, starts a fresh serve.
  *
  * Network comparison is case-insensitive: the running serve reports its
@@ -103,6 +130,18 @@ export async function startServeOrReuse(options: ServeManagerOptions): Promise<S
         `but this run needs ${requestedNetwork}. Stop the wrong-network serve first ` +
         `(\`pkill -f 'mn serve'\`) and retry.`,
       );
+    }
+
+    const runningAddress = await probeServeWallet(port);
+    if (runningAddress !== null) {
+      const wanted = loadWalletConfig(resolveWalletPath(options.wallet)).addresses[actualNetwork as NetworkName];
+      const walletMismatch = serveWalletMismatch(runningAddress, { address: wanted, name: options.wallet ?? 'the active wallet' });
+      if (walletMismatch) {
+        throw new Error(
+          `mn serve on port ${port} can't pay for this command: ${walletMismatch}. ` +
+          `Stop it first (\`pkill -f 'mn serve'\`) and retry, or run the command for the wallet it serves.`,
+        );
+      }
     }
 
     onMessage(`Reusing existing mn serve on port ${port}`);
