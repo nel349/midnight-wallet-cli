@@ -20,6 +20,7 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ### Fixed
 
+- **A Dust sync resumes through as many short windows as it needs.** Blockfrost drops a reader slower than its stream (the WASM reader, after about 80 seconds and 80,000 events), and mn resumed at most six times, so a cold preprod sync stopped part way. It now resumes for as long as each attempt moves, within an hour. The native accelerator's source (not shipped on this line yet) keeps a query string when it derives its HTTP URL and hides a project id in its errors.
 - **An `indexer-ws` setting or flag with a query string derives the right HTTP URL.** The HTTP URL kept the path's `/ws` when a query followed it, so every HTTP query of a Blockfrost URL given in full went to the WebSocket path.
 - **Docker's own error no longer appears on `undeployed` commands** when Docker isn't running: the probe for a local stack drops it.
 - **A command no longer lets another wallet's `mn serve` pay for it.** `mn contract deploy`, `mn contract call`, `mn grant` and `mn test run` reuse an `mn serve` already running on the port. They checked its network and its endpoints, not its wallet: with a serve for one wallet running, a command given `--wallet` for another had the first wallet pay, with no word of it. They now refuse, naming both wallets.

@@ -56,15 +56,42 @@ fn parse_args() -> Args {
 }
 
 fn die(msg: &str) -> ! {
-    eprintln!("dust-sync: {msg}");
+    eprintln!("dust-sync: {}", redact_project_id(msg));
     std::process::exit(2);
 }
 
+/// The text with the value of any `project_id=` query parameter hidden. The
+/// indexer URL can carry a Blockfrost project id, and errors quote the URL.
+fn redact_project_id(text: &str) -> String {
+    const KEY: &str = "project_id=";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(KEY) {
+        let value_at = at + KEY.len();
+        out.push_str(&rest[..value_at]);
+        out.push_str("***");
+        let value = &rest[value_at..];
+        let end = value
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '~' | '%' | '-')))
+            .unwrap_or(value.len());
+        rest = &value[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The indexer's HTTP URL for its WebSocket URL: the scheme changed and the
+/// path's trailing `/ws` dropped. A query string stays where it is.
 fn http_from_ws(ws: &str) -> String {
-    let mut s = ws.to_string();
+    let (base, query) = match ws.find('?') {
+        Some(at) => (&ws[..at], &ws[at..]),
+        None => (ws, ""),
+    };
+    let mut s = base.to_string();
     if let Some(rest) = s.strip_prefix("wss://") { s = format!("https://{rest}"); }
     else if let Some(rest) = s.strip_prefix("ws://") { s = format!("http://{rest}"); }
-    s.strip_suffix("/ws").map(|x| x.to_string()).unwrap_or(s)
+    let path = s.strip_suffix("/ws").map(|x| x.to_string()).unwrap_or(s);
+    format!("{path}{query}")
 }
 
 /// Parse a hex string into a 32-byte seed. Pure (testable). Zeroizes its own
@@ -149,11 +176,11 @@ fn spawn_reader(ws_url: String, start_id: i64, tx: mpsc::Sender<WsMsg>) {
         // header it rejects the upgrade with 400 (the TS client sets it too).
         let req = match ws_url.as_str().into_client_request() {
             Ok(mut r) => { r.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("graphql-transport-ws")); r }
-            Err(e) => { eprintln!("dust-sync: ws request: {e}"); let _ = tx.send(WsMsg::Failed); return; }
+            Err(e) => { eprintln!("dust-sync: ws request: {}", redact_project_id(&e.to_string())); let _ = tx.send(WsMsg::Failed); return; }
         };
         let (mut sock, _) = match tungstenite::connect(req) {
             Ok(x) => x,
-            Err(e) => { eprintln!("dust-sync: ws connect: {e}"); let _ = tx.send(WsMsg::Failed); return; }
+            Err(e) => { eprintln!("dust-sync: ws connect: {}", redact_project_id(&e.to_string())); let _ = tx.send(WsMsg::Failed); return; }
         };
         let _ = sock.send(Message::Text(r#"{"type":"connection_init"}"#.into()));
         let sub = serde_json::json!({
@@ -330,6 +357,27 @@ mod tests {
         assert_eq!(http_from_ws("ws://localhost:8088/api/v1/graphql/ws"), "http://localhost:8088/api/v1/graphql");
         // No /ws suffix: protocol swap only.
         assert_eq!(http_from_ws("wss://host/graphql"), "https://host/graphql");
+    }
+
+    // A Blockfrost URL carries its project id as a query: the /ws before it was
+    // kept, and the params query went to the WebSocket path (HTTP 405).
+    #[test]
+    fn http_from_ws_keeps_a_query_string() {
+        assert_eq!(
+            http_from_ws("wss://midnight-preprod.blockfrost.io/api/v0/ws?project_id=nightpreprodAbCd"),
+            "https://midnight-preprod.blockfrost.io/api/v0?project_id=nightpreprodAbCd"
+        );
+        assert_eq!(http_from_ws("wss://host/graphql?ws=/ws"), "https://host/graphql?ws=/ws");
+    }
+
+    #[test]
+    fn redact_project_id_hides_the_value_only() {
+        assert_eq!(
+            redact_project_id("params query: https://h/api/v0?project_id=nightpreprodAbCd0123: status code 405"),
+            "params query: https://h/api/v0?project_id=***: status code 405"
+        );
+        assert_eq!(redact_project_id("a?x=1&project_id=secret&y=2 and b?project_id=other"), "a?x=1&project_id=***&y=2 and b?project_id=***");
+        assert_eq!(redact_project_id("applied 5 / 10"), "applied 5 / 10");
     }
 
     #[test]
