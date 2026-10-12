@@ -71,6 +71,17 @@ export async function probeServeWallet(port: number): Promise<string | null> {
   return typeof address === 'string' ? address : null;
 }
 
+/** The Dust the wallet a serve on `port` pays from can spend right now, in specks; null when the serve doesn't say. */
+export async function probeServeDust(port: number): Promise<bigint | null> {
+  const result = await probeServeRpc(port, 'getDustBalance');
+  const balance = (result as { balance?: unknown } | null)?.balance;
+  try {
+    return typeof balance === 'string' || typeof balance === 'number' ? BigInt(balance) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** One JSON-RPC call to a serve on `port`: its `result`, or null on any error/timeout. */
 async function probeServeRpc(port: number, method: string): Promise<unknown | null> {
   const WebSocket = (await import('ws')).default;

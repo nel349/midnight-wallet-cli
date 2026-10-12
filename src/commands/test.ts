@@ -532,6 +532,7 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
 
         const redeployFlag = hasFlag(args, 'redeploy');
 
+        let currentAction: import('../lib/test/types.ts').TestAction | undefined;
         const actionResults = await runActions({
           actions: actionsConfig.actions,
           config,
@@ -541,6 +542,7 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
           servePort,
           redeploy: redeployFlag,
           onActionStart: (action) => {
+            currentAction = action;
             if (!jsonMode) {
               const spinner = startSpinner(`[${action.id}] ${action.type}${action.circuit ? ` ${action.circuit}` : ''}...`);
               (action as any)._spinner = spinner;
@@ -572,7 +574,8 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
             }
           },
           onMessage: (msg) => {
-            // Messages from the runner (deploy/call progress)
+            // The runner's progress (waiting for Dust, deploying, calling) shows on the action's spinner.
+            if (!jsonMode && currentAction) (currentAction as any)._spinner?.update(`[${currentAction.id}] ${msg.split('\n')[0]}`);
           },
         });
 

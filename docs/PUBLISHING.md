@@ -20,7 +20,7 @@ midnight help && mn help
 npm uninstall -g midnight-wallet-cli
 ```
 
-The main tarball ships only `dist/`, `docs/SKILL.md`, and `NOTICE` (see `files` in `package.json`). The native binaries live in the separate `@nel349/dust-sync-*` packages, not this tarball.
+The main tarball ships only `dist/`, `docs/SKILL.md`, `docs/SKILL-CORE.md` and `NOTICE` (see `files` in `package.json`). Anything else the code reads at run time has to be added there: `node scripts/fresh-install-check.mjs` installs the packed tarball into an empty directory and checks it, MCP resources included. The native binaries live in the separate `@nel349/dust-sync-*` packages, not this tarball.
 
 ## Cut a release
 

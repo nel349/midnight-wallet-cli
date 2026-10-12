@@ -10,6 +10,8 @@ import { analyzeWitnessDependencies } from './circuit-witness-deps.ts';
 import { findContractSourcePath } from './ai-scaffold.ts';
 import { contractExists } from '../contract/exists.ts';
 import { loadContractCache, saveContractCache } from './contract-cache.ts';
+import { waitForFeeDust } from './fee-dust.ts';
+import { probeServeDust } from './serve-manager.ts';
 
 export interface ActionResult {
   id: string;
@@ -192,6 +194,7 @@ async function executeDeploy(action: TestAction, ctx: ExecutionContext): Promise
     };
   }
 
+  await waitForFeeDust(() => probeServeDust(ctx.servePort), { onMessage: ctx.onMessage });
   const result = await runDeploy({
     dappDir: ctx.dappDir,
     networkConfig: ctx.networkConfig,
@@ -255,6 +258,7 @@ async function executeCall(action: TestAction, ctx: ExecutionContext): Promise<A
   // Parse args from object to array
   const args = action.args ? Object.values(action.args) : [];
 
+  await waitForFeeDust(() => probeServeDust(ctx.servePort), { onMessage: ctx.onMessage });
   await runCall({
     dappDir: ctx.dappDir,
     networkConfig: ctx.networkConfig,
