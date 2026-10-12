@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -107,5 +107,31 @@ describe('listResults', () => {
     expect(results[0].timestamp).toBe('2026-03-01T00:00:00Z');
     expect(results[1].timestamp).toBe('2026-02-01T00:00:00Z');
     expect(results[2].timestamp).toBe('2026-01-01T00:00:00Z');
+  });
+});
+
+describe('results beside other files in tests/results', () => {
+  let tempDir: string;
+
+  beforeEach(() => { tempDir = makeTempDir(); });
+  afterEach(() => { rmSync(tempDir, { recursive: true, force: true }); });
+
+  it("is not thrown by the runner's contract cache, which is newer than the result", () => {
+    const result = makeResult({ suite: 'cli-default', timestamp: '2026-10-12T05:54:52.675Z' });
+    writeResult(result, tempDir);
+    writeFileSync(
+      join(tempDir, 'tests', 'results', '.contract-cache-cli-default.json'),
+      JSON.stringify({ address: '7dcfe8f4a778e779', network: 'undeployed', timestamp: '2026-10-12T05:57:38.479Z' }),
+    );
+    expect(listResults(tempDir)).toEqual([result]);
+    expect(readLatestResult(tempDir)).toEqual(result);
+    expect(readLatestResult(tempDir, 'cli-default')).toEqual(result);
+  });
+
+  it('leaves out a JSON file that is not a result', () => {
+    const result = makeResult();
+    writeResult(result, tempDir);
+    writeFileSync(join(tempDir, 'tests', 'results', 'notes.json'), JSON.stringify({ timestamp: '2999-01-01T00:00:00.000Z' }));
+    expect(listResults(tempDir)).toEqual([result]);
   });
 });

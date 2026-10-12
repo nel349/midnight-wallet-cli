@@ -13,11 +13,13 @@ export interface Spinner {
   fail(finalMessage?: string): void;
   /** Write a log line without breaking the spinner animation. */
   log(line: string): void;
+  /** Stop the spinner and erase its line, leaving nothing: the caller writes its own outcome. */
+  clear(): void;
 }
 
 /** A spinner that shows nothing, for `--json` callers: stdout stays the result alone and stderr stays quiet. */
 export function silentSpinner(): Spinner {
-  return { update() {}, stop() {}, fail() {}, log() {} };
+  return { update() {}, stop() {}, fail() {}, log() {}, clear() {} };
 }
 
 let active: Spinner | null = null;
@@ -57,6 +59,12 @@ export function start(message: string): Spinner {
       log(line: string) {
         process.stderr.write(`\r\x1b[K${line}\n`);
         process.stderr.write(`⠋ ${currentMessage}`);
+      },
+      clear() {
+        if (stopped) return;
+        stopped = true;
+        active = null;
+        process.stderr.write('\r\x1b[K');
       },
     };
     active = spinner;
@@ -107,6 +115,13 @@ export function start(message: string): Spinner {
     log(line: string) {
       process.stderr.write(`\r\x1b[K${line}\n`);
       render();
+    },
+    clear() {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+      active = null;
+      process.stderr.write('\r\x1b[K');
     },
   };
 

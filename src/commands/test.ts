@@ -442,26 +442,26 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
     // ── Prep phase ──
     if (!jsonMode) process.stderr.write(bold('  Prep\n'));
 
-    let spinner = startSpinner('Starting prep...');
+    // One spinner per step: it ends on the step's own mark, pass or fail.
+    let spinner: ReturnType<typeof startSpinner> | null = null;
 
     const results = await runPrepSteps(config, dappDir, ctx, {
       onStepStart(step) {
-        spinner.update(`[prep] ${step}...`);
+        spinner = startSpinner(`[prep] ${step}...`);
       },
       onStepComplete(step, status, duration, error) {
         if (status === 'pass') {
-          spinner.stop(`${green('✓')} ${step} (${formatMs(duration)})`);
+          spinner?.stop(`${step} (${formatMs(duration)})`);
         } else {
-          spinner.stop(`${red('✗')} ${step}: ${error ?? 'failed'}`);
+          spinner?.fail(`${step}: ${error ?? 'failed'}`);
         }
-        spinner = startSpinner('');
+        spinner = null;
       },
       onMessage(msg) {
-        spinner.update(msg);
+        spinner?.update(msg);
       },
     });
 
-    spinner.stop('');
     prepResults.push(...results);
 
     if (!jsonMode) process.stderr.write('\n');
@@ -532,6 +532,7 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
 
         const redeployFlag = hasFlag(args, 'redeploy');
 
+        let currentAction: import('../lib/test/types.ts').TestAction | undefined;
         const actionResults = await runActions({
           actions: actionsConfig.actions,
           config,
@@ -541,6 +542,7 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
           servePort,
           redeploy: redeployFlag,
           onActionStart: (action) => {
+            currentAction = action;
             if (!jsonMode) {
               const spinner = startSpinner(`[${action.id}] ${action.type}${action.circuit ? ` ${action.circuit}` : ''}...`);
               (action as any)._spinner = spinner;
@@ -551,11 +553,12 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
               const spinner = (action as any)._spinner;
               if (spinner) {
                 if (result.status === 'pass') {
-                  spinner.stop(`${green('✓')} ${action.id}: ${result.message ?? 'pass'}`);
+                  spinner.stop(`${action.id}: ${result.message ?? 'pass'}`);
                 } else if (result.status === 'skip') {
-                  spinner.stop(`${yellow('⊘')} ${action.id}: ${result.message ?? 'skipped'}`);
+                  spinner.clear();
+                  process.stderr.write(`${yellow('⊘')} ${action.id}: ${result.message ?? 'skipped'}\n`);
                 } else {
-                  spinner.stop(`${red('✗')} ${action.id}: ${result.message ?? 'fail'}`);
+                  spinner.fail(`${action.id}: ${result.message ?? 'fail'}`);
                 }
               }
 
@@ -571,7 +574,8 @@ async function handleRun(args: ParsedArgs, jsonMode: boolean, signal?: AbortSign
             }
           },
           onMessage: (msg) => {
-            // Messages from the runner (deploy/call progress)
+            // The runner's progress (waiting for Dust, deploying, calling) shows on the action's spinner.
+            if (!jsonMode && currentAction) (currentAction as any)._spinner?.update(`[${currentAction.id}] ${msg.split('\n')[0]}`);
           },
         });
 

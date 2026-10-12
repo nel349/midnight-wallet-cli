@@ -197,39 +197,45 @@ const PORT_MAP: Record<string, string> = {
 };
 
 /**
- * Parse `docker compose ps --format json` into structured status.
- * Returns empty array if no containers are running.
+ * The services in `docker compose ps --format json` output: one JSON object
+ * per line, unreadable lines skipped.
+ */
+export function parseServiceStatus(output: string): ServiceStatus[] {
+  const services: ServiceStatus[] = [];
+  for (const line of output.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line) as { Service?: string; State?: string; Health?: string; Image?: string };
+      const name = obj.Service ?? 'unknown';
+      services.push({
+        name,
+        state: obj.State ?? 'unknown',
+        health: obj.Health ?? '',
+        port: PORT_MAP[name] ?? '',
+        image: obj.Image ?? '',
+      });
+    } catch {
+      // skip unparseable lines
+    }
+  }
+  return services;
+}
+
+/**
+ * The localnet's services and their state, stopped ones included (`ps -a`): a
+ * stopped localnet is not the same as none. Empty when there are no containers.
  */
 export function getServiceStatus(): ServiceStatus[] {
   try {
-    const output = dockerCompose('ps --format json');
-    if (!output.trim()) return [];
-
-    // docker compose ps --format json outputs one JSON object per line
-    const lines = output.trim().split('\n');
-    const services: ServiceStatus[] = [];
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const obj = JSON.parse(line) as { Service?: string; State?: string; Health?: string; Image?: string; Publishers?: Array<{ PublishedPort?: number }> };
-        const name = obj.Service ?? 'unknown';
-        services.push({
-          name,
-          state: obj.State ?? 'unknown',
-          health: obj.Health ?? '',
-          port: PORT_MAP[name] ?? '',
-          image: obj.Image ?? '',
-        });
-      } catch {
-        // skip unparseable lines
-      }
-    }
-
-    return services;
+    return parseServiceStatus(dockerCompose('ps -a --format json'));
   } catch {
     return [];
   }
+}
+
+/** Block for `ms` without the shell's `sleep`, which Windows doesn't have. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /**
@@ -252,8 +258,7 @@ export function waitForHealthy(timeoutMs: number = 120_000, intervalMs: number =
       if (healthyOrNoCheck) return true;
     }
 
-    // Sleep for the polling interval
-    execSync(`sleep ${intervalMs / 1000}`, { timeout: intervalMs + 1_000 });
+    sleepSync(intervalMs);
   }
 
   return false;

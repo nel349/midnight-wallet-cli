@@ -12,6 +12,7 @@ import {
   ensureComposeFile,
   getComposePath,
   LocalnetUnavailableError,
+  parseServiceStatus,
 } from '../lib/localnet.ts';
 import helpCommand, { COMMAND_SPECS } from '../commands/help.ts';
 import { COMMAND_BRIEFS } from '../ui/art.ts';
@@ -250,5 +251,24 @@ describe('localnet clean: which containers are mn\'s', () => {
       remove: ['node'],
       keep: [{ name: 'indexer', project: 'my-app' }, { name: 'proof-server', project: '' }],
     });
+  });
+});
+
+describe('parseServiceStatus', () => {
+  it('reads one service per line, stopped ones included', () => {
+    const output = [
+      JSON.stringify({ Service: 'node', State: 'running', Health: 'healthy', Image: 'midnightntwrk/midnight-node:1.0.0' }),
+      JSON.stringify({ Service: 'indexer', State: 'exited', Health: '', Image: 'midnightntwrk/indexer-standalone:4.3.3' }),
+      '',
+    ].join('\n');
+    expect(parseServiceStatus(output)).toEqual([
+      { name: 'node', state: 'running', health: 'healthy', port: '9944', image: 'midnightntwrk/midnight-node:1.0.0' },
+      { name: 'indexer', state: 'exited', health: '', port: '8088', image: 'midnightntwrk/indexer-standalone:4.3.3' },
+    ]);
+  });
+
+  it('skips a line that is not JSON and is empty for no output', () => {
+    expect(parseServiceStatus('time="..." level=warning msg="something"\n')).toEqual([]);
+    expect(parseServiceStatus('')).toEqual([]);
   });
 });

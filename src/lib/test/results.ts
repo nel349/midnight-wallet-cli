@@ -41,16 +41,19 @@ export function listResults(dappDir: string, suite?: string): TestRunResult[] {
     return [];
   }
 
+  // The directory also holds files that are not results (the runner's
+  // `.contract-cache-<suite>.json`, build and agent logs): hidden files are
+  // left out, and so is any JSON that isn't shaped like a result.
   const files = readdirSync(dir)
-    .filter(f => f.endsWith('.json'))
+    .filter(f => f.endsWith('.json') && !f.startsWith('.'))
     .filter(f => !suite || f.startsWith(suite + '_'));
 
   const results: TestRunResult[] = [];
 
   for (const file of files) {
     try {
-      const content = readFileSync(join(dir, file), 'utf-8');
-      results.push(JSON.parse(content));
+      const parsed: unknown = JSON.parse(readFileSync(join(dir, file), 'utf-8'));
+      if (isTestRunResult(parsed)) results.push(parsed);
     } catch {
       // Skip corrupt files
     }
@@ -60,4 +63,14 @@ export function listResults(dappDir: string, suite?: string): TestRunResult[] {
   results.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
   return results;
+}
+
+function isTestRunResult(value: unknown): value is TestRunResult {
+  const result = value as Partial<TestRunResult> | null;
+  return typeof result === 'object' && result !== null
+    && typeof result.suite === 'string'
+    && typeof result.timestamp === 'string'
+    && (result.status === 'pass' || result.status === 'fail')
+    && Array.isArray(result.prep)
+    && Array.isArray(result.assertions);
 }

@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ScaffoldOutput } from './create.ts';
+import type { DappTestConfig } from './types.ts';
 
 export interface WriteOptions {
   /** Project root where dapp.test.json lives. */
@@ -33,10 +34,12 @@ export interface WriteResult {
  *
  * Collision behaviour:
  * - dapp.test.json (project-level): if it already exists with the same
- *   contract name AND the proposed prep is a subset of what's there, we
- *   leave it alone — the user is adding a new suite to an existing
- *   project, not bootstrapping. Conflict (different name) still fails so
- *   we don't silently scribble over their config.
+ *   contract name, it is the user's — they are adding a new suite to an
+ *   existing project, not bootstrapping — and it is left alone, with one
+ *   exception: a browser suite can't run without the UI's build settings
+ *   and the `build-and-serve` step, so whichever of those the file lacks
+ *   are added (see `uiSettingsToAdd`). Conflict (different name) still
+ *   fails so we don't silently scribble over their config.
  * - Suite files: any pre-existing target aborts. The right answer for a
  *   suite-name collision is `--suite <new-name>`, not --force, so the
  *   error message points at that.
@@ -87,7 +90,7 @@ export function writeScaffold(scaffold: ScaffoldOutput, options: WriteOptions): 
   const preserved: string[] = [];
 
   if (dappPolicy.action === 'write') {
-    writeFileSync(dappConfigPath, JSON.stringify(scaffold.dappConfig, null, 2) + '\n');
+    writeFileSync(dappConfigPath, JSON.stringify(dappPolicy.config, null, 2) + '\n');
     written.push(dappConfigPath);
   } else {
     preserved.push(dappConfigPath);
@@ -104,23 +107,45 @@ export function writeScaffold(scaffold: ScaffoldOutput, options: WriteOptions): 
   return { written, preserved };
 }
 
+const UI_SETTINGS = ['port', 'buildCmd', 'buildDir', 'url'] as const;
+const BUILD_STEP = 'build-and-serve';
+
+/**
+ * What an existing project config lacks for a browser suite to run: the UI's
+ * build settings and the prep step that builds and serves it. Settings already
+ * there are the user's and are kept, as is the rest of their prep. Null when
+ * the scaffold is not a browser one or nothing is missing.
+ */
+export function uiSettingsToAdd(existing: Partial<DappTestConfig>, proposed: DappTestConfig): Partial<DappTestConfig> | null {
+  if (!proposed.prep.includes(BUILD_STEP)) return null;
+  const additions: Partial<DappTestConfig> = {};
+  for (const key of UI_SETTINGS) {
+    if (proposed[key] !== undefined && existing[key] === undefined) Object.assign(additions, { [key]: proposed[key] });
+  }
+  const prep = Array.isArray(existing.prep) ? existing.prep : [];
+  if (!prep.includes(BUILD_STEP)) additions.prep = [...prep, BUILD_STEP];
+  return Object.keys(additions).length > 0 ? additions : null;
+}
+
 /**
  * Decide what to do with an existing dapp.test.json. Three outcomes:
- * - 'write' — file doesn't exist OR --force is set; we write our version.
- * - 'preserve' — exists with a compatible name; we leave it alone (the
- *   user is adding a new suite, not re-bootstrapping the project).
+ * - 'write' — file doesn't exist OR --force is set: our version. Or it exists
+ *   with a compatible name but lacks what a browser suite needs: the user's
+ *   file with those settings added.
+ * - 'preserve' — exists with a compatible name and needs nothing; we leave it
+ *   alone (the user is adding a new suite, not re-bootstrapping the project).
  * - throws — exists but for a different contract; refuses to clobber.
  */
 function decideDappConfigPolicy(
   path: string,
   scaffold: ScaffoldOutput,
   force: boolean,
-): { action: 'write' | 'preserve' } {
-  if (force || !existsSync(path)) return { action: 'write' };
+): { action: 'write'; config: unknown } | { action: 'preserve' } {
+  if (force || !existsSync(path)) return { action: 'write', config: scaffold.dappConfig };
 
-  let existing: { name?: unknown };
+  let existing: Partial<DappTestConfig> & { name?: unknown };
   try {
-    existing = JSON.parse(readFileSync(path, 'utf-8')) as { name?: unknown };
+    existing = JSON.parse(readFileSync(path, 'utf-8')) as Partial<DappTestConfig> & { name?: unknown };
   } catch (err) {
     // Corrupt JSON — treat as conflicting; user should clean up by hand.
     // Include the parse error so the user sees what's broken (e.g. line/col),
@@ -138,5 +163,6 @@ function decideDappConfigPolicy(
     );
   }
 
-  return { action: 'preserve' };
+  const additions = uiSettingsToAdd(existing, scaffold.dappConfig);
+  return additions === null ? { action: 'preserve' } : { action: 'write', config: { ...existing, ...additions } };
 }
