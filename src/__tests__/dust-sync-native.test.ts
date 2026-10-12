@@ -8,6 +8,8 @@ import {
   adaptResult,
   resolveSidecarBinary,
   nativeDustSyncAvailable,
+  nativeDustSyncUnavailable,
+  sidecarPackageName,
   runDustSyncNative,
   type SidecarCheckpoint,
 } from '../lib/dust-sync-native.ts';
@@ -111,7 +113,24 @@ describe('binary resolution + gating', () => {
       process.env.MN_DUST_SYNC_BIN = bin;
       process.env.MN_DISABLE_NATIVE_DUST = '1';
       expect(nativeDustSyncAvailable()).toBe(false); // gated off despite a resolvable binary
+      expect(nativeDustSyncUnavailable()).toContain('MN_DISABLE_NATIVE_DUST');
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('gives no reason when a binary resolves and nothing disables it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mn-dustbin-'));
+    try {
+      const bin = join(dir, 'dust-sync');
+      writeFileSync(bin, '#!/bin/sh\n');
+      process.env.MN_DUST_SYNC_BIN = bin;
+      delete process.env.MN_DISABLE_NATIVE_DUST;
+      expect(nativeDustSyncUnavailable()).toBeUndefined();
+      expect(nativeDustSyncAvailable()).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("names the sidecar package after the platform it runs on", () => {
+    expect(sidecarPackageName()).toBe(`@nel349/dust-sync-${process.platform}-${process.arch}`);
   });
 });
 

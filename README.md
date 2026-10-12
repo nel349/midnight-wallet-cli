@@ -98,6 +98,8 @@ midnight balance
 midnight transfer mn_addr_preprod1... 100
 ```
 
+The first command that needs the wallet's Dust (`dust register`, a transfer, `midnight serve`, a contract deploy or call) reads the chain's Dust history first: about 5 minutes on preprod and 30 seconds on preview, once per wallet and network. After that it takes seconds. See [Native dust acceleration](#native-dust-acceleration).
+
 ## Supported Networks
 
 | Network | Description |
@@ -124,12 +126,32 @@ midnight config set blockfrost-project-id <project id>   # or: export BLOCKFROST
 
 ## Native dust acceleration
 
-The first dust sync for a wallet on a hosted network (`preprod`/`preview`) replays the chain's full dust event history — the slow part of a cold start. The CLI bundles a native (Rust) accelerator that does this ~5× faster than the WASM fallback: a ~1.45M-event preprod prime drops from ~22 min to ~4.5 min.
+A wallet's first Dust sync on a hosted network (`preprod`, `preview`) reads the chain's whole Dust event history, and that is the slow part of a first run. mn reads it with a native (Rust) program, the `dust-sync` sidecar, several times faster than the built-in WASM reader. Later runs resume from a cache and take seconds with either reader.
 
-It installs automatically — a per-platform `optionalDependency` (`@nel349/dust-sync-<os>-<arch>`) for macOS (arm64/x64), Linux (x64/arm64), and Windows (x64). No configuration, no install scripts. On any other platform the CLI falls back to the WASM reader, so dust priming still works, just slower.
+| Network | Dust events | First sync, native | First sync, WASM | Later runs |
+|---------|-------------|--------------------|------------------|------------|
+| `preprod` | 1.6M | about 5 min | about 27 min (estimated) | about 6 s |
+| `preview` | 144k | about 30 s | about 2 min | about 10 s |
 
-- `MN_DISABLE_NATIVE_DUST=1` — force the WASM path (to compare, or if a binary misbehaves).
-- `MN_DUST_SYNC_BIN=/path/to/dust-sync` — use your own build instead of the installed binary.
+Measured on 2026-10-11 with 0.5.7 installed from npm on an Apple Silicon Mac (Linux arm64 gave the same preview time). The times grow with the chain. The preprod WASM figure is worked out from that reader's measured 1,000 events a second: Blockfrost closes the connection of a reader that slow about every 75 seconds, and mn resumes each time until the sync is done.
+
+**It installs by itself.** npm adds one optional package for your platform, `@nel349/dust-sync-<os>-<arch>`: macOS (arm64, x64), Linux (x64, arm64; glibc) and Windows (x64). No configuration and no install scripts.
+
+**When it can't be used, mn reads with the WASM reader**: everything works, more slowly. That is the case when:
+
+- the package isn't there: npm ran with `--omit=optional` (or `--no-optional`), or there is no build for the platform;
+- the binary can't start: Alpine and other musl-based Linux (the Linux builds need glibc);
+- `MN_DISABLE_NATIVE_DUST=1` is set;
+- a run of the sidecar fails (mn carries on in WASM from the last saved event).
+
+On a long sync mn says so in one line on stderr, with the reason: `Native Dust reader not installed (@nel349/dust-sync-linux-x64): reading with the built-in one, several times slower on a long sync.` With `--verbose` every sync names its reader: `dust: native sidecar: <path>`, or `dust: native sidecar <reason>, using WASM`.
+
+To get the native reader back, reinstall without leaving optional dependencies out (`npm install -g midnight-wallet-cli`); in a container, use a glibc image (for example `node:22-slim`, not `node:22-alpine`).
+
+- `MN_DUST_SYNC_BIN=/path/to/dust-sync`: use your own build (`cargo build --release` in `sidecar/dust-sync`) in place of the installed one.
+- `MN_DISABLE_NATIVE_DUST=1`: force the WASM reader (to compare, or if a binary misbehaves).
+- The sidecar keeps its own checkpoint beside the wallet cache (`~/.midnight/cache/<network>/dust-native-*.json`), so an interrupted sync resumes; `midnight cache clear` removes it with the rest.
+- On preprod the sidecar is started with the indexer URL, your Blockfrost project id included, as an argument: other processes of your own user can see it while the sync runs.
 
 ## DApp Connector
 

@@ -15,13 +15,27 @@ Manage wallets, check balances, transfer NIGHT tokens, register dust (fee token)
 - **No self-shielding** — a wallet cannot move its own funds from unshielded to shielded. To get shielded NIGHT, receive a shielded transfer from a wallet that already has some (genesis wallet has 250M shielded NIGHT on localnet).
 - **Networks**
   - `undeployed` — local Docker network via `mn localnet up`. Use this for dev iteration.
-  - `preprod` — public testnet. Its indexer and node are served by Blockfrost and need the user's own project id (see "Preprod needs a Blockfrost project id" below). First-time wallet sync processes the full event history and can take significantly longer than subsequent syncs (which restore from cached wallet state). Exact time depends on wallet age, event density, network, and hardware.
-  - `preview` — public preview testnet. Same first-sync trade-off as preprod.
+  - `preprod` — public testnet. Its indexer and node are served by Blockfrost and need the user's own project id (see "Preprod needs a Blockfrost project id" below). The first call that needs the wallet's Dust reads the chain's whole Dust history: about 5 minutes, once per wallet (see "First sync on a hosted network" below).
+  - `preview` — public preview testnet. No project id needed. Same first sync, about 30 seconds.
 - **Proof server** — local HTTP service that generates ZK proofs for transactions. Default port 6300. Version must match the network's ledger version or writes fail with "Custom error 170".
 
 ### Preprod needs a Blockfrost project id
 
 Midnight shut its own preprod indexer down on 2026-10-09. Blockfrost serves preprod's indexer and node now, and every request needs the user's own project id (created at https://blockfrost.io, one project per network; preprod ids start with `nightpreprod`; requests count against the user's Blockfrost plan). The user sets it once with `midnight config set blockfrost-project-id <project id>` in their own terminal, or `BLOCKFROST_PROJECT_ID` (or `MN_BLOCKFROST_PROJECT_ID`) in the MCP server's environment. It is a secret: `midnight_config_get` shows it masked, no tool result contains it, and you should never ask for it in chat or echo it. Preview and the local network need none.
+
+### First sync on a hosted network
+
+The first call that needs a wallet's Dust on `preprod` or `preview` (`midnight_dust_register`, `midnight_dust_status` of a registered wallet, `midnight_transfer`, any contract deploy or call, `mn serve`, `mn dust export`) reads the chain's whole Dust event history before it does anything else. It happens once per wallet and network; later calls resume from a cache and take seconds. A balance of an empty wallet does not trigger it.
+
+| Network | Dust events (2026-10-11) | First sync, native reader | First sync, WASM reader | Later calls |
+|---|---|---|---|---|
+| `preprod` | 1.6M | about 5 min | about 27 min (estimated) | about 6 s |
+| `preview` | 144k | about 30 s | about 2 min | about 10 s |
+
+- **Tell the user before the first such call** how long it will take, and allow the tool call that long. Don't cancel and retry: an interrupted sync resumes from its last checkpoint, so nothing is lost, but nothing is gained either.
+- **The native reader** is the `dust-sync` sidecar: an optional npm package for the platform (`@nel349/dust-sync-<os>-<arch>`; macOS arm64/x64, Linux x64/arm64 on glibc, Windows x64) that installs with the CLI and needs no setup. Without it the CLI reads with its built-in WASM reader: same result, several times slower.
+- **How to tell which reader ran** (CLI): add `--verbose`. Each sync logs `dust: native sidecar: <path>`, or `dust: native sidecar <reason>, using WASM`. On a long sync the CLI also prints one line on stderr without `--verbose`: `Native Dust reader <reason>: reading with the built-in one, several times slower on a long sync.`
+- **If the native reader is not in use**, the reason is one of: `not installed` (npm ran with `--omit=optional`, or the platform has no build), `can't start on this system` (Alpine or another musl Linux: the Linux builds need glibc), `disabled by MN_DISABLE_NATIVE_DUST=1`, or `failed` (a run error; the CLI carries on in WASM). Fixes for the user to run: reinstall without omitting optional dependencies (`npm install -g midnight-wallet-cli`), or use a glibc container image (`node:22-slim`, not `node:22-alpine`). Don't set `MN_DISABLE_NATIVE_DUST` yourself.
 
 ## Intent routing (natural language → tool)
 
@@ -111,10 +125,10 @@ Every MCP tool error returns `{ error: true, code: <ERROR_CODE>, message: <human
 | `INVALID_DUST_PROOF` | Chain rejected the dust spend proof as malformed (substrate "Custom error 170"). Stale commitment tree. | `midnight_cache_clear({ wallet: "<name>" })` then retry. |
 | `STALE_CACHE` | Local wallet cache disagrees with chain (e.g. localnet reset, remote testnet re-indexed). | `midnight_cache_clear({ wallet: "<name>" })` then retry. |
 | `STALE_UTXO` | UTXO was already spent on-chain (substrate "error code 115"). | Re-sync (the next call will refresh state) and retry. |
-| `PROOF_FAILURE` | Proof server rejected or failed to generate the ZK proof. Often a stale commitment tree or unreachable proof server. | Check `midnight_status()`; if proof server healthy, `midnight_cache_clear({ wallet: "<name>" })` then retry. |
+| `PROOF_FAILURE` | Proof server rejected or failed to generate the ZK proof. Often a stale commitment tree or unreachable proof server. | Check that the proof server is running (on localnet: `midnight_localnet_status()`); if it is, `midnight_cache_clear({ wallet: "<name>" })` then retry. |
 | `PROOF_TIMEOUT` | ZK proof generation didn't finish within the deadline. | Retry — proofs can be slow under load. |
-| `SYNC_TIMEOUT` | Long-running wallet sync hit its deadline. Common on a hosted-network first-cold-sync. | Retry; the cache resumes from the last applied event so progress is preserved. |
-| `NETWORK_ERROR` | Indexer/node/proof-server connection refused or DNS failure. | Check `midnight_status()`; if localnet, `midnight_localnet_up()`. |
+| `SYNC_TIMEOUT` | Long-running wallet sync hit its deadline. Common on a hosted-network first-cold-sync. | Retry; the cache resumes from the last applied event so progress is preserved. If first syncs take far longer than the times in "First sync on a hosted network", the native Dust reader is not in use: see that section. |
+| `NETWORK_ERROR` | Indexer/node/proof-server connection refused or DNS failure. | On localnet: `midnight_localnet_status()`, then `midnight_localnet_up()` if it is down. On a hosted network: retry once, then show the message to the user. |
 | `BLOCKFROST_PROJECT_ID_REQUIRED` | The network (preprod) is served by Blockfrost and no project id is set. | Ask the user to create a Midnight preprod project at https://blockfrost.io and run `midnight config set blockfrost-project-id <project id>` themselves. Never ask them to paste the id into the chat. Don't retry until they have. |
 | `BLOCKFROST_PROJECT_ID_REJECTED` | Blockfrost refused the project id (HTTP 403): mistyped, revoked, or for another network. | Ask the user to check it at blockfrost.io and set it again. Don't retry blindly. |
 | `BLOCKFROST_LIMIT_REACHED` | Blockfrost's plan limit or rate limit. | Wait and retry once; if it persists, tell the user it is their Blockfrost plan. |
@@ -128,14 +142,14 @@ Every MCP tool error returns `{ error: true, code: <ERROR_CODE>, message: <human
 ## When to use which network
 
 - **Developing a contract?** → `undeployed` (localnet). No first-sync cost; everything is local.
-- **Integration testing against a hosted chain?** → `preprod`. First sync for a new wallet on this network processes full event history; subsequent syncs restore from cache and are much faster.
+- **Integration testing against a hosted chain?** → `preprod` (needs a Blockfrost project id; first Dust sync about 5 minutes) or `preview` (no project id; about 30 seconds). Later syncs restore from cache and take seconds.
 - **Demoing to users?** → `preview` (if the dApp is deployed there) or `undeployed` (if self-contained).
 - **Mainnet?** → not on this CLI yet. Don't claim it is.
 
 ## What this CLI is NOT
 
 - Not a custody service. Keys are on the user's disk (`~/.midnight/wallets/<name>.json`).
-- Not an instant-sync tool for a first-time wallet on a hosted network. First run replays the chain's event history; the CLI caches state after that so repeat runs are fast. Dust priming specifically uses a bundled native accelerator (~5× faster than the WASM fallback — set `MN_DISABLE_NATIVE_DUST=1` to force WASM), but a cold prime is still minutes, not seconds.
+- Not an instant-sync tool for a first-time wallet on a hosted network. The first call that needs the wallet's Dust reads the chain's Dust history (about 5 minutes on preprod, 30 seconds on preview, with the native reader that installs with the CLI); the CLI caches state after that so later calls take seconds. See "First sync on a hosted network".
 - Not a contract compiler. The project's `package.json` should expose a `compact` script (Midnight convention, e.g. `"compact": "compact compile src/foo.compact src/managed/foo"`) or a `compile` script as a generic fallback. `mn dev` detects whichever is present; create-mn-app and midnight-starship templates ship with the `compact` script already wired.
 
 ## Authoritative references

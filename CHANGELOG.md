@@ -2,6 +2,19 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **The MCP server's core skill resource can be read from an installed package.** `midnight-wallet://skill/core` is the first document an agent is pointed at, and reading it failed with `ENOENT ... docs/SKILL-CORE.md`: the file was missing from the published package (every 0.5.x release since the skill was split in two). It ships now, and the fresh-install check in CI reads every resource the installed MCP server lists.
+- **The skill document no longer points agents at a tool that does not exist.** Two error recipes said to call `midnight_status()`, which this line does not have; they name `midnight_localnet_status()` and what to do on a hosted network.
+
+### Changed
+
+- **mn says when a long Dust sync is not using the native reader.** Without the `dust-sync` sidecar a first Dust sync runs through the built-in WASM reader, several times slower, and nothing said so unless `--verbose` was on. On a sync of more than 50,000 events mn now prints one line on stderr with the reason: `Native Dust reader not installed (@nel349/dust-sync-linux-x64): reading with the built-in one, several times slower on a long sync.` The reasons are `not installed` (npm ran with `--omit=optional`, or no build for the platform), `can't start on this system` (Alpine and other musl Linux, where the glibc binary installs but cannot run), `disabled by MN_DISABLE_NATIVE_DUST=1`, and `failed`. A short sync says nothing.
+- **`--verbose` names the reader on every Dust sync:** `dust: native sidecar: <path>`, or `dust: native sidecar <reason>, using WASM`.
+- **Docs: how long a first sync takes, and what the native reader needs.** The README, `mn manual`, `mn help --agent` and both MCP skill documents give the measured times of a wallet's first Dust sync with 0.5.7 installed from npm (preprod, 1.6M events: about 5 minutes native; preview, 144k events: about 30 seconds native against about 2 minutes in WASM; seconds after that), say which commands trigger it, which platforms the sidecar is built for (macOS arm64 and x64, Linux x64 and arm64 on glibc, Windows x64), how to tell which reader ran, and how to get the native one back.
+
 ## [0.5.7] - 2026-10-11
 
 ### Changed

@@ -1,8 +1,8 @@
 // Native dust-sync bridge: run the Rust `dust-sync` sidecar and adapt its output
 // to a `DustDirectResult`, so it drops into the repository's `fetchDust` seam.
-// ~5x faster cold dust sync (see tasks/dust-native-sidecar-plan.md). If the
-// binary is missing or the run fails, callers fall back to the WASM path — the
-// sidecar is an optional accelerator, never a hard dependency.
+// Several times faster on a cold dust sync. If the binary is missing or the run
+// fails, callers fall back to the WASM path — the sidecar is an optional
+// accelerator, never a hard dependency.
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -61,9 +61,8 @@ export function resolveSidecarBinary(): string | null {
 
   // Phase 3 platform package: @nel349/dust-sync-<os>-<arch>.
   try {
-    const pkg = `@nel349/dust-sync-${process.platform}-${process.arch}`;
     const req = createRequire(import.meta.url);
-    const binPath = join(dirname(req.resolve(`${pkg}/package.json`)), exe);
+    const binPath = join(dirname(req.resolve(`${sidecarPackageName()}/package.json`)), exe);
     if (existsSync(binPath)) return binPath;
   } catch { /* package not installed */ }
 
@@ -76,10 +75,21 @@ function createRequire(url: string) {
   return (globalThis as any).require ?? (require('node:module') as typeof import('node:module')).createRequire(url);
 }
 
+/** The npm package that carries the sidecar for the platform mn is running on. */
+export function sidecarPackageName(): string {
+  return `@nel349/dust-sync-${process.platform}-${process.arch}`;
+}
+
+/** Why the native sidecar is not used here, in words for the user; undefined when it is. */
+export function nativeDustSyncUnavailable(): string | undefined {
+  if (process.env.MN_DISABLE_NATIVE_DUST === '1') return 'disabled by MN_DISABLE_NATIVE_DUST=1';
+  if (resolveSidecarBinary() === null) return `not installed (${sidecarPackageName()})`;
+  return undefined;
+}
+
 /** True when the native sidecar should be used (binary resolves + not disabled). */
 export function nativeDustSyncAvailable(): boolean {
-  if (process.env.MN_DISABLE_NATIVE_DUST === '1') return false;
-  return resolveSidecarBinary() !== null;
+  return nativeDustSyncUnavailable() === undefined;
 }
 
 /**

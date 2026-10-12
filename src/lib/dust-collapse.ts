@@ -4,8 +4,7 @@
 // of the optimization in `midnight-wallet` issue #639.
 //
 // Pure logic only: no I/O, no console. Callers decide when to collapse and how
-// to source the owned index set (owner-match during event replay). See
-// tasks/dust-collapse-plan.md.
+// to source the owned index set (owner-match during event replay).
 
 import * as ledger from '@midnight-ntwrk/ledger-v8';
 

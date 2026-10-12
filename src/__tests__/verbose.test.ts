@@ -60,3 +60,22 @@ describe('verbose', () => {
     writeSpy.mockRestore();
   });
 });
+
+describe('notice', () => {
+  it('writes the line to stderr without verbose being on', () => {
+    const writeSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    verbose.notice('the slow reader is in use');
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(writeSpy.mock.calls[0]![0] as string).toContain('the slow reader is in use\n');
+    writeSpy.mockRestore();
+  });
+
+  it('says the same thing once, and another thing again', () => {
+    const writeSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    verbose.notice('first');
+    verbose.notice('first');
+    verbose.notice('second');
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    writeSpy.mockRestore();
+  });
+});

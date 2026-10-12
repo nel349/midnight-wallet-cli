@@ -51,8 +51,9 @@ import { getChainGenesisHash } from './chain-id.ts';
 import { checkBalance, type BalanceSummary } from './balance-subscription.ts';
 import { readDustBalanceDirect, type DustDirectResult, type DustRetention } from './dust-direct.ts';
 import { bindCachesToIndexer, describeIndexerChange } from './cache-indexer.ts';
-import { nativeDustSyncAvailable, runDustSyncNative } from './dust-sync-native.ts';
-import { verbose } from './verbose.ts';
+import { nativeDustSyncUnavailable, resolveSidecarBinary, runDustSyncNative } from './dust-sync-native.ts';
+import { sayOnLongSync, slowDustReaderNotice, whyNativeReaderFailed } from './slow-dust-notice.ts';
+import { notice, verbose } from './verbose.ts';
 import { callNodeRpc } from './node-rpc.ts';
 import { deriveDustSeed } from './derivation.ts';
 import { deriveUnshieldedAddress } from './derive-address.ts';
@@ -688,23 +689,33 @@ function defaultDustFetcher(
 }
 
 /**
- * Prefer the native sidecar (~5x faster cold dust sync) when it's available;
- * fall back to the WASM reader on a missing binary or any failure. The sidecar
- * is an optional accelerator, so a fallback is a slowdown, never a break.
+ * Prefer the native sidecar (several times faster on a cold dust sync) when
+ * it's available; fall back to the WASM reader on a missing binary or any
+ * failure. The sidecar is an optional accelerator, so a fallback is a slowdown,
+ * never a break, and on a long sync the user is told of it.
  */
 async function nativeOrWasmDustFetcher(
   seed: Buffer,
   network: NetworkConfig,
   opts: Parameters<typeof defaultDustFetcher>[2],
 ): Promise<DustDirectResult> {
-  if (nativeDustSyncAvailable()) {
+  let why = nativeDustSyncUnavailable();
+  if (why === undefined) {
     try {
+      verbose('dust', `native sidecar: ${resolveSidecarBinary()}`);
       return await runDustSyncNative(seed, network, opts);
     } catch (err) {
       verbose('dust', `native sidecar failed, using WASM: ${(err as Error).message}`);
+      why = whyNativeReaderFailed(err);
     }
+  } else {
+    verbose('dust', `native sidecar ${why}, using WASM`);
   }
-  return defaultDustFetcher(seed, network, opts);
+  const unavailable = why;
+  return defaultDustFetcher(seed, network, {
+    ...opts,
+    onProgress: sayOnLongSync(opts.startFromId, opts.onProgress, () => notice(slowDustReaderNotice(unavailable))),
+  });
 }
 
 // ── Helpers ───────────────────────────────────────────────

@@ -34,6 +34,10 @@ You have access to the `midnight-wallet-cli` MCP server. This is the **core** sk
 - **Never** invent a mnemonic, seed, or private key. If the user needs one, call `midnight_wallet_generate`.
 - **Transfers use a two-step confirmation token.** `midnight_transfer` returns a pending token + description; you must show the description verbatim and then call `midnight_confirm_operation({ token })` only after the user explicitly says yes. Full flow in `midnight-wallet://skill/full`.
 
+## Slow first call on preprod and preview
+
+The first call that needs a wallet's Dust on a hosted network (dust register, transfer, contract deploy or call) reads the chain's Dust history first: about 5 minutes on `preprod`, about 30 seconds on `preview`, once per wallet and network. Later calls take seconds. Tell the user before that first call, allow it that long, and don't cancel and retry. If it takes far longer, the CLI's native Dust reader is not in use: fetch `midnight-wallet://skill/full` and read "First sync on a hosted network".
+
 ## When to fetch the full skill
 
 - On any error from a tool call → fetch `midnight-wallet://skill/full`, find the recipe in "Error recovery recipes".

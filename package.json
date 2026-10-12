@@ -36,6 +36,7 @@
   "files": [
     "dist",
     "docs/SKILL.md",
+    "docs/SKILL-CORE.md",
     "NOTICE"
   ],
   "engines": {

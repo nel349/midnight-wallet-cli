@@ -251,6 +251,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--no-cache            Bypass wallet state cache (status only)',
       'MN_DUST_SYNC_BIN=<path>   (env) Use this native dust-sync sidecar binary instead of auto-detecting it',
       'MN_DISABLE_NATIVE_DUST=1  (env) Disable the native sidecar; fall back to the WASM dust sync',
+      '--verbose                 Names the reader a sync used: "dust: native sidecar: <path>", or why it fell back to WASM',
     ],
     examples: [
       'midnight dust register',
@@ -649,6 +650,41 @@ or MN_BLOCKFROST_PROJECT_ID (or BLOCKFROST_PROJECT_ID) in the environment.
 Without one, a command that
 reaches preprod fails with BLOCKFROST_PROJECT_ID_REQUIRED. The project id is
 a secret: mn never prints it. Preview and undeployed need none.
+
+FIRST DUST SYNC (how long a first call takes)
+──────────────────────────────────────────────
+
+The first command that needs a wallet's Dust on a hosted network (dust
+register, dust status of a registered wallet, transfer, serve, contract
+deploy or call, dust export) reads the chain's whole Dust event history.
+Once per wallet and network; later calls resume from a cache in seconds.
+
+  preprod   1.6M events   about 5 min native   about 27 min WASM (estimated)
+  preview   144k events   about 30 s native    about 2 min WASM
+  (measured 2026-10-11; grows with the chain)
+
+Tell the user before the first such call, allow that long, and do not
+cancel and retry: an interrupted sync resumes from its last checkpoint, but
+a retry loop gains nothing. A balance of an empty wallet does not trigger it.
+
+The native reader is the dust-sync sidecar, an optional npm package for the
+platform (@nel349/dust-sync-<os>-<arch>: macOS arm64/x64, Linux x64/arm64 on
+glibc, Windows x64). It installs with mn and needs no setup. Without it mn
+reads with its built-in WASM reader: same result, several times slower.
+
+  How to tell:  add --verbose (stderr, also with --json). Each sync logs
+                "dust: native sidecar: <path>" or
+                "dust: native sidecar <reason>, using WASM".
+                On a long sync mn also prints one line without --verbose:
+                "Native Dust reader <reason>: reading with the built-in one".
+  Reasons:      not installed (npm ran with --omit=optional, or no build for
+                the platform); can't start (Alpine / musl Linux);
+                disabled by MN_DISABLE_NATIVE_DUST=1; failed (a run error).
+  Fix:          reinstall without omitting optional dependencies
+                (npm install -g midnight-wallet-cli); in a container use a
+                glibc image (node:22-slim, not node:22-alpine).
+  Env:          MN_DUST_SYNC_BIN=<path> uses another build of the sidecar;
+                MN_DISABLE_NATIVE_DUST=1 forces the WASM reader.
 
 STRUCTURED JSON OUTPUT
 ──────────────────────
