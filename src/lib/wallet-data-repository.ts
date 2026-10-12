@@ -30,6 +30,7 @@ import {
   StaleCacheError,
   type FacadeBundle,
   type SyncMode,
+  overlayDustDirectSnapshot,
 } from './facade.ts';
 import { isColdStartRace } from './sdk-errors.ts';
 import {
@@ -44,6 +45,7 @@ import {
   saveWalletCache,
   clearWalletCache,
   validateWalletCacheChainId,
+  type WalletCacheData,
 } from './wallet-cache.ts';
 import { getChainGenesisHash } from './chain-id.ts';
 import { assertLedgerSupported, fetchProtocolVersion } from './ledger-guard.ts';
@@ -258,6 +260,27 @@ export class WalletDataRepository {
     if (change) onStatus?.(describeIndexerChange(networkName, change));
   }
 
+  /**
+   * What a wallet with no saved state restores from: a new wallet's state,
+   * with the Dust checkpoint the direct reader already holds in place of its
+   * empty Dust state. Without it the SDK replays the chain's whole Dust history
+   * itself, slowly enough that the first sync attempt of a first `serve` or
+   * transfer on a hosted network always timed out. Null when there is no
+   * checkpoint to start from: the wallet is then built from its keys.
+   */
+  private async freshWalletOnDustCheckpoint(seed: Buffer, network: NetworkConfig, networkName: NetworkName): Promise<WalletCacheData | null> {
+    const checkpoint = loadDustCache(networkName, dustPublicKeyHexFromSeed(seed), this.cacheDir);
+    if (!checkpoint || checkpoint.lastAppliedEventId < 0) return null;
+    const fresh = await buildFacade(seed, network, null);
+    try {
+      const { shielded, unshielded, dust } = fresh.facade as unknown as Record<'shielded' | 'unshielded' | 'dust', { serializeState(): Promise<string> }>;
+      const [shieldedState, unshieldedState, dustState] = await Promise.all([shielded.serializeState(), unshielded.serializeState(), dust.serializeState()]);
+      return { shielded: shieldedState, unshielded: unshieldedState, dust: overlayDustDirectSnapshot(dustState, checkpoint) };
+    } finally {
+      await stopFacade(fresh).catch(() => {});
+    }
+  }
+
   // ── Reads ─────────────────────────────────────────
 
   async dust(seed: Buffer, network: NetworkConfig, opts: ReadOptions = {}): Promise<DustView> {
@@ -468,7 +491,8 @@ export class WalletDataRepository {
         if (opts.signal?.aborted) throw new Error('Operation cancelled');
         const cacheBeforeBuild = opts.forceFresh
           ? null
-          : loadWalletCache(address, networkName, this.cacheDir);
+          : loadWalletCache(address, networkName, this.cacheDir)
+            ?? await this.freshWalletOnDustCheckpoint(seed, network, networkName);
         bundle = await buildFacade(seed, network, cacheBeforeBuild);
         try {
           syncedState = await startAndSyncFacade(bundle, {

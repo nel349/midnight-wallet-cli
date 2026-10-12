@@ -75,6 +75,13 @@ jobs:
       - name: Check CLI package
         run: npm pack --dry-run
 
+      # The tests above run on the lockfile's dependency tree. A user's install
+      # has no lockfile: this installs the packed tarball as they would and
+      # checks the tree npm resolves today (one copy of each ledger package, a
+      # shielded address still parses).
+      - name: Check a fresh install
+        run: node scripts/fresh-install-check.mjs
+
       - name: Connector — Build
         run: npm run build --workspace=packages/connector
 

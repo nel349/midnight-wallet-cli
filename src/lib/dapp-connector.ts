@@ -42,6 +42,20 @@ export interface DAppConnectorOptions {
   /** Under --approve-fees: the most a transaction may cost, and how many may wait unsubmitted. */
   feeLimits?: FeeLimits;
   callbacks?: DAppConnectorCallbacks;
+  /**
+   * The state the caller's own sync ended on. Reads answer from it at once;
+   * without it they are refused ("Wallet not synced yet") until the wallet's
+   * next state that counts as current, which on a hosted indexer can be the
+   * better part of a minute after the server says it is ready.
+   */
+  initialState?: FacadeState;
+  /**
+   * Which wallet states count as current and replace the one reads answer
+   * from. Default: the SDK's own `isSynced`, which also waits for wallets the
+   * caller chose not to sync and for a flag the SDK's Dust wallet doesn't set
+   * on a quiet stream. A caller that synced by another rule passes that rule.
+   */
+  isCurrent?: (state: FacadeState) => boolean;
 }
 
 /** Which token kinds the facade balances a dApp's transaction in. */
@@ -175,13 +189,14 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
 
   // ── State subscription — cache latest synced state ──
 
-  let latestState: FacadeState | undefined;
+  const isCurrent = options.isCurrent ?? ((state: FacadeState) => state.isSynced);
+  let latestState: FacadeState | undefined = options.initialState;
   // From every state, synced or not: the wallets' protocol versions decide
   // which ledger the facade reads a dApp's transaction as.
-  let protocolVersions: FacadeState['protocolVersion'] | undefined;
+  let protocolVersions: FacadeState['protocolVersion'] | undefined = options.initialState?.protocolVersion;
   const subscription = facade.state().subscribe((state) => {
     protocolVersions = state.protocolVersion;
-    if (state.isSynced) latestState = state;
+    if (isCurrent(state)) latestState = state;
   });
 
   function getState(): FacadeState {

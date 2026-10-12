@@ -7,7 +7,7 @@ import { enableVerbose } from '../lib/verbose.ts';
 import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
-import { hasDustAvailable, suppressSdkTransientErrors, waitForDustAvailable } from '../lib/facade.ts';
+import { hasDustAvailable, isFacadeSynced, suppressSdkTransientErrors, waitForDustAvailable } from '../lib/facade.ts';
 import { saveWalletCache } from '../lib/wallet-cache.ts';
 import { defaultRepository } from '../lib/wallet-data-repository.ts';
 import { suppressRpcNoise } from '../lib/transfer.ts';
@@ -103,6 +103,9 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
   // dust=0 corruption — see `connector.hasPendingTxs()` check below).
 
   const spinner = startSpinner('Syncing wallet...');
+  // Skip the (slow) shielded sync where shielded is unusable (no faucet on
+  // preview/preprod). dApps there can only do unshielded + dust anyway.
+  const syncMode = shieldedSyncEnabled(networkName, hasFlag(args, 'force-shielded')) ? 'full' : 'lite';
 
   await defaultRepository().withFacade(seedBuffer, networkConfig, async ({ bundle }) => {
     spinner.stop('Wallet synced');
@@ -164,6 +167,10 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       approvalOptions: { approveAll, approveFees, autoApproveReads },
       feeLimits,
       callbacks: phaseCallbacks,
+      // Reads answer from the state this sync ended on, and from every later
+      // one that is synced by the rule the sync used.
+      initialState: dustState,
+      isCurrent: (state) => isFacadeSynced(state, syncMode),
     });
 
     // ── Start WebSocket server ──
@@ -282,9 +289,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
       throw err;
     }
   }, {
-    // Skip the (slow) shielded sync where shielded is unusable (no faucet on
-    // preview/preprod). dApps there can only do unshielded + dust anyway.
-    syncMode: shieldedSyncEnabled(networkName, hasFlag(args, 'force-shielded')) ? 'full' : 'lite',
+    syncMode,
     // serve accepts write requests from dApps — must be strictly synced.
     requireStrictSync: true,
     // Save logic is conditional (skip if pending txs) — done manually above.
