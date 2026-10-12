@@ -333,6 +333,37 @@ describe('dapp-connector', () => {
         .rejects.toThrow('Wallet not synced yet');
     });
 
+    // On preprod through Blockfrost a server that said "ready" refused reads
+    // for about 40 s: the wallet's next state the SDK calls synced came that late.
+    it('answers at once from the state the caller\'s sync ended on', async () => {
+      const quiet = new rx.Subject<any>();
+      const synced = { unshielded: { balances: { ['00'.repeat(32)]: 5n } } };
+      connector = createDAppConnector({
+        bundle: createBundleStub({ stateFn: () => quiet.asObservable() }),
+        networkConfig: TEST_NETWORK_CONFIG,
+        approvalOptions: { approveAll: true },
+        initialState: synced as any,
+      });
+      expect(await connector.handlers.getUnshieldedBalances({}, ctx())).toEqual({ ['00'.repeat(32)]: 5n });
+    });
+
+    it('moves on to each later state that is current by the caller\'s rule, not only by the SDK\'s', async () => {
+      const states = new rx.Subject<any>();
+      connector = createDAppConnector({
+        bundle: createBundleStub({ stateFn: () => states.asObservable() }),
+        networkConfig: TEST_NETWORK_CONFIG,
+        approvalOptions: { approveAll: true },
+        initialState: { unshielded: { balances: {} } } as any,
+        isCurrent: (state: any) => state.caughtUp === true,
+      });
+      // Not synced by the SDK's rule (a wallet the caller didn't sync is behind), current by the caller's.
+      states.next({ isSynced: false, caughtUp: true, unshielded: { balances: { ['00'.repeat(32)]: 7n } } });
+      expect(await connector.handlers.getUnshieldedBalances({}, ctx())).toEqual({ ['00'.repeat(32)]: 7n });
+      // Behind by the caller's rule: reads keep the last current state.
+      states.next({ isSynced: false, caughtUp: false, unshielded: { balances: { ['00'.repeat(32)]: 9n } } });
+      expect(await connector.handlers.getUnshieldedBalances({}, ctx())).toEqual({ ['00'.repeat(32)]: 7n });
+    });
+
     it('throws Disconnected with correct error code', async () => {
       const neverSynced = new rx.Subject<any>();
       connector = createConnector({

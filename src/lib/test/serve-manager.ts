@@ -5,7 +5,7 @@
 import { Socket } from 'node:net';
 import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
-import { buildFacade, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
+import { buildFacade, isFacadeSynced, startAndSyncFacade, stopFacade, suppressSdkTransientErrors, waitForDustAvailable } from '../facade.ts';
 import { bindCachesToIndexer, describeIndexerChange } from '../cache-indexer.ts';
 import { loadWalletCache, saveWalletCache } from '../wallet-cache.ts';
 import { suppressRpcNoise } from '../transfer.ts';
@@ -203,7 +203,7 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
 
   // Wait for dust
   onMessage('Waiting for dust...');
-  await waitForDustAvailable(bundle);
+  const syncedState = await waitForDustAvailable(bundle);
   onMessage('Dust ready');
 
   // Save cache after sync
@@ -214,6 +214,10 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
     bundle,
     networkConfig,
     approvalOptions: { approveAll: true, autoApproveReads: true },
+    // Reads answer from the state this sync ended on, and from every later
+    // one that is synced by the rule the sync used.
+    initialState: syncedState,
+    isCurrent: (state) => isFacadeSynced(state),
     callbacks: {
       onPhaseStart: (_connId, _method, phase) => {
         onMessage(`${phase}...`);

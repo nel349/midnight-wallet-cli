@@ -45,6 +45,20 @@ export interface DAppConnectorOptions {
   networkConfig: NetworkConfig;
   approvalOptions: ApprovalOptions;
   callbacks?: DAppConnectorCallbacks;
+  /**
+   * The state the caller's own sync ended on. Reads answer from it at once;
+   * without it they are refused ("Wallet not synced yet") until the wallet's
+   * next state that counts as current, which on a hosted indexer can be the
+   * better part of a minute after the server says it is ready.
+   */
+  initialState?: FacadeState;
+  /**
+   * Which wallet states count as current and replace the one reads answer
+   * from. Default: the SDK's own `isSynced`, which also waits for wallets the
+   * caller chose not to sync and for a flag the SDK's Dust wallet doesn't set
+   * on a quiet stream. A caller that synced by another rule passes that rule.
+   */
+  isCurrent?: (state: FacadeState) => boolean;
 }
 
 export interface DAppConnector {
@@ -117,9 +131,10 @@ export function createDAppConnector(options: DAppConnectorOptions): DAppConnecto
 
   // ── State subscription — cache latest synced state ──
 
-  let latestState: FacadeState | undefined;
+  const isCurrent = options.isCurrent ?? ((state: FacadeState) => state.isSynced);
+  let latestState: FacadeState | undefined = options.initialState;
   const subscription = facade.state().pipe(
-    rx.filter((s) => s.isSynced),
+    rx.filter((s) => isCurrent(s)),
   ).subscribe((state) => {
     latestState = state;
   });
