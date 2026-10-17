@@ -6,7 +6,8 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ### Changed
 
-- **`mn grant` runs the account package it installs.** mn now depends on `@kuiralabs/midnight-account-chain` 0.2.0 and drives it by default, so no account build has to be named first. Its proving keys are not in the package (4 GB in all): each is fetched the first time a command proves with it, from the build's release in `kuiralabs/midnight-account-artifacts`, into `~/.midnight/account-artifacts`, and kept only if it matches the package's manifest. A deposit's circuit is 11 MB; each of the owner's other circuits (issue, revoke, rotate the viewing key, append to the inbox) is about 235 MB, fetched once.
+- **`mn grant` runs the account package it installs.** mn now depends on `@kuiralabs/midnight-account-chain` 0.2.1 and drives it by default, so no account build has to be named first. Its proving keys are not in the package (4 GB in all): each is fetched the first time a command proves with it, from the build's release in `kuiralabs/midnight-account-artifacts`, into `~/.midnight/account-artifacts`, and kept only if it matches the package's manifest. A deposit's circuit is 11 MB; each of the owner's other circuits (issue, revoke, rotate the viewing key, append to the inbox) is about 235 MB, fetched once.
+- **`mn grant revoke` on a grant already revoked says so** (`alreadyRevoked`, exit 0) instead of "the roster holds no revocable grant". That is what a revoke run again after one cut short sees: the rerun first finishes the rotation the revocation owes, and the grant is then revoked.
 - **`--account-build <dir>` (or `mn config set account-build <dir>`) still drives a local build instead**, which uses its own proving keys. It must speak interface version 4; an older one is refused with "This account build speaks version 3 of its interface; this mn speaks version 4": update the build.
 
 ## [0.6.0-rc.8] - 2026-10-16
