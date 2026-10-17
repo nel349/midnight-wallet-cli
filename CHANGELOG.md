@@ -2,6 +2,12 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **`mn grant` needs an account build at interface version 3.** The build now takes an optional directory of proving keys (`MIDNIGHT_ACCOUNT_ARTEFACTS_DIR`), which a build loaded by path does not need; nothing mn uses changed. An older build is refused with "This account build speaks version 2 of its interface; this mn speaks version 3": update the build.
+
 ## [0.6.0-rc.8] - 2026-10-16
 
 ### Changed

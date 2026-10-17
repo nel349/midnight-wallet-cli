@@ -178,9 +178,9 @@ describe('running the bridge in a build', () => {
   });
 
   it('refuses a build that speaks another version of the interface', async () => {
-    process.env.STAND_IN_DRIVER_VERSION = '1';
+    process.env.STAND_IN_DRIVER_VERSION = '2';
     try {
-      await expect(accountOnRecord(bridge())).rejects.toThrow('This account build speaks version 1 of its interface; this mn speaks version 2.');
+      await expect(accountOnRecord(bridge())).rejects.toThrow('This account build speaks version 2 of its interface; this mn speaks version 3.');
     } finally {
       delete process.env.STAND_IN_DRIVER_VERSION;
     }

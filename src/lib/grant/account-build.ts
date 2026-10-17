@@ -11,7 +11,7 @@ import { UsageError } from '../errors.ts';
 export const ACCOUNT_BUILD_ENTRY = 'driver.ts';
 
 /** The version of that module's interface this mn speaks. */
-export const ACCOUNT_DRIVER_VERSION = 2;
+export const ACCOUNT_DRIVER_VERSION = 3;
 
 /** The build is TypeScript, which Node.js runs as it is from this version. */
 export const MIN_NODE_FOR_ACCOUNT_BUILD = '22.18.0';
