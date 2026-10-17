@@ -835,6 +835,30 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'midnight_grant_deposit',
+    description: 'Move shielded NIGHT from the wallet into its account, where a grant lets an agent spend it (returns pending token). The wallet needs that much shielded NIGHT, plus Dust for the fee. mn has no command to take it back out.',
+    annotations: { destructiveHint: true, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        amount: { type: 'string', description: 'NIGHT to deposit, e.g. "2" (up to 6 decimals)' },
+        ...GRANT_COMMON_PROPERTIES,
+      },
+      required: ['amount'],
+    },
+    async handler(params) {
+      return captureCommand(await importHandler('grant'), grantArgs('deposit', params, 'amount'));
+    },
+    async check(params) {
+      const args = grantArgs('deposit', params, 'amount');
+      const { prepareGrant } = await import('./lib/grant/prepare.ts');
+      const { request, walletName, target, account } = await prepareGrant(args);
+      await checkSendingWallet(params);
+      if (request.subcommand !== 'deposit' || account === null) throw new Error('A deposit was prepared as something else');
+      return `Deposit ${request.amount} shielded NIGHT (${request.value} in the smallest unit) from wallet ${walletName} into its account ${account.address} on ${target.network}`;
+    },
+  },
+  {
     name: 'midnight_grant_issue',
     description: 'Issue a grant from an agent\'s request link (returns pending token, whose description gives the grant\'s terms as the account build read them). Lets that agent spend from the account within the limits.',
     annotations: { destructiveHint: true, openWorldHint: true },
@@ -967,19 +991,12 @@ const TOOLS: ToolDef[] = [
 ];
 
 /**
- * Tools that require the two-step confirmation flow. On first call, we return
- * a pending token; the agent must call midnight_confirm_operation with the
- * token to actually execute.
+ * Tools that require the two-step confirmation flow: those with a `check`,
+ * which runs only in that flow. On first call, we return a pending token; the
+ * agent must call midnight_confirm_operation with the token to actually
+ * execute. Derived, so a tool given a check can't be left out and run at once.
  */
-const REQUIRES_CONFIRMATION = new Set<string>([
-  'midnight_transfer',
-  'midnight_contract_deploy',
-  'midnight_contract_call',
-  'midnight_grant_deploy',
-  'midnight_grant_issue',
-  'midnight_grant_revoke',
-  'midnight_grant_revoke_all',
-]);
+const REQUIRES_CONFIRMATION = new Set<string>(TOOLS.filter((tool) => tool.check !== undefined).map((tool) => tool.name));
 
 const confirmationStore = createConfirmationStore();
 

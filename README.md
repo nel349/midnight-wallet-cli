@@ -267,7 +267,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 ### Available MCP Tools
 
-Once connected, your AI agent gets access to 37 tools:
+Once connected, your AI agent gets access to 38 tools:
 
 | Tool | Description |
 |------|-------------|
@@ -305,6 +305,7 @@ Once connected, your AI agent gets access to 37 tools:
 | `midnight_grant_list` | Experimental. Every grant on the account, with its limits and whether it is live |
 | `midnight_grant_request` | Experimental. What issuing from an agent's grant request link would grant (who spends, who they can pay, the limits); issues nothing |
 | `midnight_grant_deploy` | Experimental. Deploy the wallet's account and activate its owner key (returns pending token) |
+| `midnight_grant_deposit` | Experimental. Move shielded NIGHT from the wallet into its account, for grants to spend (returns pending token) |
 | `midnight_grant_issue` | Experimental. Issue the grant a request link asks for (returns pending token) |
 | `midnight_grant_revoke` | Experimental. Revoke one grant by id or slot (returns pending token) |
 | `midnight_grant_revoke_all` | Experimental. Revoke every grant on the account (returns pending token) |

@@ -1,5 +1,5 @@
 // grant command — the wallet owner's account, and the grants that let an agent spend from it
-// Usage: midnight grant <deploy|status|list|issue|revoke|revoke-all> [options]
+// Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all> [options]
 //
 // The account's owner code is a local build (--account-build); mn runs its
 // commands with this wallet paying the fees through mn serve.
@@ -7,7 +7,7 @@
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { ERROR_CODES, classifyError } from '../lib/exit-codes.ts';
-import { type AccountBridge, deployAccount, newDevelopmentOwnerKey, runOwnerCommand } from '../lib/grant/bridge.ts';
+import { type AccountBridge, deployAccount, depositIntoAccount, newDevelopmentOwnerKey, runOwnerCommand } from '../lib/grant/bridge.ts';
 import { deployShortOfDustNote } from '../lib/grant/deploy-cost.ts';
 import { prepareGrant } from '../lib/grant/prepare.ts';
 import { type GrantRequest, ownerArguments, paysAFee } from '../lib/grant/request.ts';
@@ -23,6 +23,7 @@ const DEVELOPMENT_KEY_NOTE =
 
 const SPINNER_LABEL: Record<GrantRequest['subcommand'], string> = {
   deploy: 'Deploying the account...',
+  deposit: 'Depositing into the account...',
   status: 'Reading the account...',
   list: 'Reading the grants...',
   issue: 'Reading the grant request...',
@@ -68,6 +69,21 @@ export default async function grantCommand(args: ParsedArgs, _signal?: AbortSign
         process.stderr.write('\n' + yellow('  ' + DEVELOPMENT_KEY_NOTE) + '\n');
         process.stderr.write(dim('  Next: midnight grant status') + '\n\n');
         process.stdout.write(outcome.address + '\n');
+      }
+      return;
+    }
+
+    if (request.subcommand === 'deposit') {
+      const outcome = await depositIntoAccount(paid, request.value);
+      spinner.stop('Deposited');
+      if (jsonMode) {
+        writeJsonResult({ ...common, amount: request.amount, ...outcome });
+      } else {
+        process.stderr.write('\n' + keyValue('Deposited', `${request.amount} NIGHT (${outcome.value} in the smallest unit, as status and --cap count)`) + '\n');
+        process.stderr.write(keyValue('Block', String(outcome.blockHeight)) + '\n');
+        process.stderr.write(keyValue('Transaction', outcome.txHash) + '\n');
+        process.stderr.write('\n' + dim('  Next: midnight grant status') + '\n\n');
+        process.stdout.write(outcome.txHash + '\n');
       }
       return;
     }

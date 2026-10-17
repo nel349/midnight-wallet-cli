@@ -41,6 +41,7 @@ const EXPECTED_TOOLS = [
   'midnight_grant_list',
   'midnight_grant_request',
   'midnight_grant_deploy',
+  'midnight_grant_deposit',
   'midnight_grant_issue',
   'midnight_grant_revoke',
   'midnight_grant_revoke_all',
@@ -64,8 +65,8 @@ describe('MCP tool coverage', () => {
     }
   });
 
-  it('has 37 expected tools', () => {
-    expect(EXPECTED_TOOLS).toHaveLength(37);
+  it('has 38 expected tools', () => {
+    expect(EXPECTED_TOOLS).toHaveLength(38);
   });
 
   it('every COMMAND_SPEC with jsonFields is covered', () => {

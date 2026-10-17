@@ -478,9 +478,10 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'grant',
     description: 'This wallet\'s account, and the grants that let an agent spend from it (experimental)',
-    usage: 'midnight grant <deploy|status|list|issue|revoke|revoke-all> [options]',
+    usage: 'midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all> [options]',
     flags: [
       'deploy                        Deploy this wallet\'s account and activate its owner key',
+      'deposit <amount>              Move <amount> NIGHT of this wallet\'s shielded NIGHT into its account',
       'status                        The account, its owner key and what it holds',
       'list                          Every grant on the account',
       'issue <link>                  Show the grant an agent\'s request link would get; issue it with --yes',
@@ -505,6 +506,7 @@ const COMMAND_SPECS: CommandSpec[] = [
     examples: [
       'midnight config set account-build ~/account-build',
       'midnight grant deploy --dev-owner-key',
+      'midnight grant deposit 2',
       'midnight grant status',
       'midnight grant issue \'<grant request link>\'',
       'midnight grant issue \'<grant request link>\' --cap 500000 --yes',
@@ -516,7 +518,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       network: 'Network name',
       wallet: 'The wallet the account belongs to',
       ownerKey: '"development": a random owner key the mnemonic can\'t recover',
-      address: 'The account\'s contract address (deploy)',
+      address: 'The account\'s contract address (deploy, deposit)',
       resumed: 'An account already on record was completed, not a new one deployed (deploy)',
       activated: 'The owner key was activated by this run (deploy)',
       account: 'The account\'s contract address (status)',
@@ -525,6 +527,10 @@ const COMMAND_SPECS: CommandSpec[] = [
       request: 'Who would spend, who they can pay, and the limits the grant gets (issue)',
       grantId: 'The issued grant\'s id (issue with --yes)',
       revoked: 'The revoked grant\'s id (revoke)',
+      amount: 'The NIGHT deposited, as given (deposit)',
+      value: 'The same in the token\'s smallest unit, as status and --cap count it (deposit)',
+      txHash: 'The deposit\'s transaction (deposit)',
+      blockHeight: 'The block it landed in (deposit)',
     },
   },
   {
@@ -921,6 +927,14 @@ ledger-9 network.
     The owner key is a random development key for now, kept in the
     account's records (~/.midnight/accounts/<network>/<wallet>/), which the
     wallet's mnemonic can't recover.
+
+  midnight grant deposit <amount> [--json]
+    → { address, amount, value, txHash, blockHeight, network, wallet, ownerKey }
+    Moves <amount> NIGHT (up to 6 decimals) of the wallet's shielded NIGHT
+    into its account, where grants spend from; status then shows it held.
+    The wallet needs that much shielded NIGHT (on a local chain:
+    airdrop <n> --shielded) and Dust for the fee. Anyone may deposit, so
+    the owner key signs nothing. mn has no command to take it back out.
 
   midnight grant status [--json]
     → { account, device: { arm, useCounter }, devices, authNonce, encKey, grants, held }

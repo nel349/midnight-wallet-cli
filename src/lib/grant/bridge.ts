@@ -11,6 +11,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { SCRIPT_PRELUDE, executeScript, rpcClientCode, walletProviderCode } from '../contract/runner.ts';
+import { NATIVE_TOKEN_TYPE, TOKEN_MULTIPLIER } from '../constants.ts';
 import { UsageError } from '../errors.ts';
 import type { NetworkConfig } from '../network.ts';
 import { ACCOUNT_BUILD_ENTRY, ACCOUNT_DRIVER_VERSION } from './account-build.ts';
@@ -33,6 +34,8 @@ export type BridgeAction =
   | { kind: 'account' }
   /** Deploy the account and activate its boot device (or finish one that stopped part way). */
   | { kind: 'deploy' }
+  /** Deposit shielded NIGHT from the paying wallet into the account; `value` in the smallest unit, as decimal text. */
+  | { kind: 'deposit'; value: string }
   /** One of the owner's commands, as the build's own command line takes it. */
   | { kind: 'owner'; argv: readonly string[] };
 
@@ -50,6 +53,14 @@ export interface DeployOutcome {
   activated: boolean;
   /** Where the record of an earlier deploy that never reached the chain was moved to. */
   setAside?: string;
+}
+
+export interface DepositOutcome {
+  address: string;
+  /** The deposited value, in the smallest unit, as decimal text. */
+  value: string;
+  txHash: string;
+  blockHeight: number;
 }
 
 export interface OwnerCommandResult {
@@ -129,6 +140,23 @@ const RESULT = `
 process.stdout.write('\\n' + JSON.stringify(result) + '\\n');
 `;
 
+/**
+ * A deposit, refused before the build is called when the wallet's synced
+ * shielded NIGHT (as mn serve holds it) is short: the SDK's own refusal names
+ * neither the token nor the amounts.
+ */
+function depositCode(value: string): string {
+  return `const value = BigInt(${JSON.stringify(value)});
+const balances = await rpcCall('getShieldedBalances', {});
+const held = BigInt(balances?.[${JSON.stringify(NATIVE_TOKEN_TYPE)}] ?? 0);
+const night = (specks) => (specks / ${TOKEN_MULTIPLIER}n) + '.' + String(specks % ${TOKEN_MULTIPLIER}n).padStart(${String(TOKEN_MULTIPLIER).length - 1}, '0') + ' NIGHT';
+if (held < value) {
+  fail(new Error('Not enough shielded NIGHT for this deposit: the wallet holds ' + night(held) + ' shielded and the deposit takes ' + night(value) + '. '
+    + 'Get shielded NIGHT into it first: midnight airdrop <amount> --shielded on a local chain, or midnight transfer <this wallet> <amount> --shielded from another wallet.'));
+}
+const result = await driver.depositOver(wallet, value);`;
+}
+
 /** The script for one action. A wallet-backed action needs the port of the mn serve that pays. */
 export function generateBridgeScript(action: BridgeAction, servePort?: number): string {
   if (action.kind === 'account') {
@@ -141,6 +169,8 @@ process.exit(0);
   if (servePort === undefined) throw new Error(`The ${action.kind} action needs an mn serve to pay`);
   const run = action.kind === 'deploy'
     ? `const result = await driver.deployOver(wallet, process.env.${OWNER_KEY_ENV});`
+    : action.kind === 'deposit'
+    ? depositCode(action.value)
     : `const written = [];
 const exitCode = await driver.runOwnerOver(wallet, ${JSON.stringify(action.argv)}, (text) => { written.push(text); });
 const result = { exitCode, output: written.join('\\n'), errors: reported };`;
@@ -190,6 +220,12 @@ export function accountOnRecord(bridge: AccountBridge): Promise<AccountOnRecord 
  */
 export function deployAccount(bridge: AccountBridge, ownerKey: string): Promise<DeployOutcome> {
   return run<DeployOutcome>(bridge, { kind: 'deploy' }, 'deploy', { [OWNER_KEY_ENV]: ownerKey });
+}
+
+/** Deposits `value` (the smallest unit, as decimal text) of shielded NIGHT from the wallet behind mn serve into the account on record. */
+export async function depositIntoAccount(bridge: AccountBridge, value: string): Promise<DepositOutcome> {
+  if (!/^[1-9]\d*$/.test(value)) throw new Error(`A deposit's value is a positive whole number of the smallest unit; got "${value}"`);
+  return run<DepositOutcome>(bridge, { kind: 'deposit', value }, 'deposit');
 }
 
 /** Runs one of the owner's commands, paid through mn serve. */

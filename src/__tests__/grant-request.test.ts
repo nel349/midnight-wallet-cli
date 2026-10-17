@@ -20,6 +20,12 @@ describe('resolveGrantRequest', () => {
     expect(request('revoke', GRANT_ID)).toEqual({ subcommand: 'revoke', target: GRANT_ID });
   });
 
+  it('reads a deposit in NIGHT, and its value in the smallest unit the account counts in', () => {
+    expect(request('deposit', '2')).toEqual({ subcommand: 'deposit', amount: '2', value: '2000000' });
+    expect(request('deposit', '0.3')).toEqual({ subcommand: 'deposit', amount: '0.3', value: '300000' });
+    expect(request('deposit', '0.000001')).toEqual({ subcommand: 'deposit', amount: '0.000001', value: '1' });
+  });
+
   it('reads an issue: the link, the limits given, and whether it is confirmed', () => {
     expect(request('issue', LINK)).toEqual({ subcommand: 'issue', link: LINK, limits: {}, confirmed: false });
     expect(request('issue', LINK, '--cap', '500000', '--per-call', '300000', '--max-coin', '2000000', '--expires-in', '3600', '--yes')).toEqual({
@@ -29,8 +35,8 @@ describe('resolveGrantRequest', () => {
   });
 
   it.each([
-    [[], 'Usage: midnight grant <deploy|status|list|issue|revoke|revoke-all>'],
-    [['grants'], 'Usage: midnight grant <deploy|status|list|issue|revoke|revoke-all>'],
+    [[], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all>'],
+    [['grants'], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all>'],
     [['status', 'extra'], 'midnight grant status takes no argument; unexpected: extra'],
     [['deploy', 'now'], 'midnight grant deploy takes no argument; unexpected: now'],
     [['issue'], 'Missing the grant request link.'],
@@ -39,6 +45,12 @@ describe('resolveGrantRequest', () => {
     [['issue', LINK, '--cap', '1.5'], '--cap must be a whole number; got "1.5"'],
     [['issue', LINK, '--per-call', '-5'], '--per-call must be a whole number; got "-5"'],
     [['issue', LINK, '--expires-in', '0'], '--expires-in must be at least 1 second'],
+    [['deposit'], 'Missing the amount of NIGHT to deposit.'],
+    [['deposit', '2', '3'], 'midnight grant deposit takes one amount of NIGHT; unexpected: 3'],
+    [['deposit', '0'], 'Invalid amount: "0" — must be greater than 0'],
+    [['deposit', '1.0000001'], 'NIGHT has 6 decimals, this has 7'],
+    [['deposit', 'all'], 'Invalid amount: "all"'],
+    [['deposit', '2', '--yes'], '--yes only applies to: midnight grant issue'],
     [['revoke'], 'Missing the grant to revoke.'],
     [['revoke', 'the-first-one'], 'A grant is named by its id (64 hex characters) or its slot (a number); got "the-first-one"'],
     [['status', '--yes'], '--yes only applies to: midnight grant issue'],
@@ -53,7 +65,7 @@ describe('resolveGrantRequest', () => {
 describe('ownerArguments', () => {
   const owner = (argv: string[], json = false) => {
     const parsed = request(...argv);
-    if (parsed.subcommand === 'deploy') throw new Error('deploy is not an owner command');
+    if (parsed.subcommand === 'deploy' || parsed.subcommand === 'deposit') throw new Error(`${parsed.subcommand} is not an owner command`);
     return ownerArguments(parsed, json);
   };
 
@@ -70,6 +82,7 @@ describe('ownerArguments', () => {
 describe('paysAFee', () => {
   it('is true of what submits transactions, false of what only reads', () => {
     expect(paysAFee(request('deploy', '--dev-owner-key'))).toBe(true);
+    expect(paysAFee(request('deposit', '1'))).toBe(true);
     expect(paysAFee(request('revoke', '0'))).toBe(true);
     expect(paysAFee(request('revoke-all'))).toBe(true);
     expect(paysAFee(request('issue', LINK, '--yes'))).toBe(true);

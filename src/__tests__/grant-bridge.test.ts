@@ -10,9 +10,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { WebSocketServer } from 'ws';
 import {
-  UnreachableByAccountBuildError, accountOnRecord, bridgeEnvironment, deployAccount, generateBridgeScript, newDevelopmentOwnerKey,
+  UnreachableByAccountBuildError, accountOnRecord, bridgeEnvironment, deployAccount, depositIntoAccount, generateBridgeScript, newDevelopmentOwnerKey,
   runOwnerCommand, type AccountBridge,
 } from '../lib/grant/bridge.ts';
+import { classifyError } from '../lib/exit-codes.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import { createStandInAccountBuild } from './helpers/stand-in-account-build.ts';
 
@@ -42,7 +43,10 @@ beforeAll(async () => {
   serve.on('connection', (socket) => {
     socket.on('message', (data) => {
       const { id, method } = JSON.parse(data.toString());
-      const result = method === 'getShieldedAddresses' ? { shieldedCoinPublicKey: 'c0'.repeat(32), shieldedEncryptionPublicKey: 'e0'.repeat(32) } : null;
+      // As mn serve sends them: bigints as decimal text, keyed by token type (NIGHT is all zeros).
+      const result = method === 'getShieldedAddresses' ? { shieldedCoinPublicKey: 'c0'.repeat(32), shieldedEncryptionPublicKey: 'e0'.repeat(32) }
+        : method === 'getShieldedBalances' ? { ['0'.repeat(64)]: '5000000', ['ff'.repeat(32)]: '90000000' }
+        : null;
       socket.send(JSON.stringify({ jsonrpc: '2.0', id, result }));
     });
   });
@@ -80,6 +84,7 @@ describe('generateBridgeScript', () => {
 
   it('needs an mn serve for anything that pays', () => {
     expect(() => generateBridgeScript({ kind: 'deploy' })).toThrow('The deploy action needs an mn serve to pay');
+    expect(() => generateBridgeScript({ kind: 'deposit', value: '1' })).toThrow('The deposit action needs an mn serve to pay');
   });
 
   it('never carries the owner key: the script reads it from its environment', () => {
@@ -127,6 +132,36 @@ describe('running the bridge in a build', () => {
     expect(fs.readdirSync(buildDir).sort()).toEqual(['driver.ts', 'node_modules']);
   });
 
+  it('deposits with the wallet behind mn serve, the value reaching the build as a bigint', async () => {
+    messages.length = 0;
+    expect(await depositIntoAccount(bridge(), '2000000')).toEqual({ address: 'ab'.repeat(32), value: '2000000', txHash: 'd0'.repeat(32), blockHeight: 412 });
+    expect(recorded('deposit')).toEqual({ value: '2000000', coinPublicKey: 'c0'.repeat(32) });
+    expect(messages).toContain('deposit_shielded: 21.0 s');
+    expect(fs.readdirSync(buildDir).sort()).toEqual(['driver.ts', 'node_modules']);
+  });
+
+  it('refuses a deposit the wallet\'s shielded NIGHT can\'t cover before the build is called, saying what it holds', async () => {
+    fs.rmSync(path.join(recordsDir, 'deposit.json'), { force: true });
+    const refused = depositIntoAccount(bridge(), '5000001');
+    await expect(refused).rejects.toThrow('Not enough shielded NIGHT for this deposit: the wallet holds 5.000000 NIGHT shielded and the deposit takes 5.000001 NIGHT. '
+      + 'Get shielded NIGHT into it first: midnight airdrop <amount> --shielded on a local chain');
+    const error = await refused.then(() => new Error('the deposit ran'), (e: unknown) => e as Error);
+    expect(classifyError(error)).toEqual({ exitCode: 5, errorCode: 'INSUFFICIENT_BALANCE' });
+    expect(fs.existsSync(path.join(recordsDir, 'deposit.json'))).toBe(false);
+    // Exactly what it holds is enough.
+    expect((await depositIntoAccount(bridge(), '5000000')).value).toBe('5000000');
+  });
+
+  it('reports a failed deposit as the build\'s own error', async () => {
+    await expect(depositIntoAccount(bridge(), '999')).rejects.toThrow('Insufficient shielded balance');
+  });
+
+  it('refuses a deposit value that is not a positive whole number before anything runs', async () => {
+    for (const value of ['0', '1.5', '-3', '', '1e6', '0x10']) {
+      await expect(depositIntoAccount(bridge(), value)).rejects.toThrow(`A deposit's value is a positive whole number of the smallest unit; got "${value}"`);
+    }
+  });
+
   it('runs an owner command and returns what it wrote as its result', async () => {
     messages.length = 0;
     const result = await runOwnerCommand(bridge(), ['grants', '--json']);
@@ -143,9 +178,9 @@ describe('running the bridge in a build', () => {
   });
 
   it('refuses a build that speaks another version of the interface', async () => {
-    process.env.STAND_IN_DRIVER_VERSION = '2';
+    process.env.STAND_IN_DRIVER_VERSION = '1';
     try {
-      await expect(accountOnRecord(bridge())).rejects.toThrow('This account build speaks version 2 of its interface; this mn speaks version 1.');
+      await expect(accountOnRecord(bridge())).rejects.toThrow('This account build speaks version 1 of its interface; this mn speaks version 2.');
     } finally {
       delete process.env.STAND_IN_DRIVER_VERSION;
     }

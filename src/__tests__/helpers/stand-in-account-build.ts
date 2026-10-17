@@ -13,7 +13,7 @@ const DRIVER = `
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const DRIVER_VERSION: number = Number(process.env.STAND_IN_DRIVER_VERSION ?? 1);
+export const DRIVER_VERSION: number = Number(process.env.STAND_IN_DRIVER_VERSION ?? 2);
 const records = process.env.MIDNIGHT_ACCOUNT_STATE_DIR as string;
 const seen = (what: string, value: unknown): void => writeFileSync(join(records, what + '.json'), JSON.stringify(value));
 
@@ -32,6 +32,13 @@ export const deployOver = async (wallet: Wallet, deviceSk?: string) => {
   if (deviceSk === 'ee'.repeat(32)) throw new Error('the deploy failed for want of Dust');
   seen('account', { address: 'ab'.repeat(32), arm: 'k1' });
   return { address: 'ab'.repeat(32), resumed: false, activated: true };
+};
+
+export const depositOver = async (wallet: Wallet, value: bigint) => {
+  console.log('deposit_shielded: 21.0 s');
+  seen('deposit', { value: typeof value === 'bigint' ? value.toString() : 'not a bigint', coinPublicKey: wallet.getCoinPublicKey() });
+  if (value === 999n) throw new Error('Insufficient shielded balance');
+  return { address: 'ab'.repeat(32), value: value.toString(), txHash: 'd0'.repeat(32), blockHeight: 412 };
 };
 
 export const runOwnerOver = async (wallet: Wallet, argv: readonly string[], out: (text: string) => void): Promise<number> => {

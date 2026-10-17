@@ -4,12 +4,15 @@
 
 import { type ParsedArgs, getFlag, hasFlag } from '../argv.ts';
 import { UsageError } from '../errors.ts';
+import { nightToMicro, parseAmount } from '../transfer.ts';
 
-export const GRANT_SUBCOMMANDS = ['deploy', 'status', 'list', 'issue', 'revoke', 'revoke-all'] as const;
+export const GRANT_SUBCOMMANDS = ['deploy', 'deposit', 'status', 'list', 'issue', 'revoke', 'revoke-all'] as const;
 export type GrantSubcommand = typeof GRANT_SUBCOMMANDS[number];
 
 export type GrantRequest =
   | { subcommand: 'deploy'; devOwnerKey: boolean }
+  /** `amount` as given, in NIGHT; `value` the same in the smallest unit, as decimal text. */
+  | { subcommand: 'deposit'; amount: string; value: string }
   | { subcommand: 'status' }
   | { subcommand: 'list' }
   | { subcommand: 'issue'; link: string; limits: GrantLimits; confirmed: boolean }
@@ -33,6 +36,7 @@ const LIMIT_FLAGS = [['cap', 'cap'], ['per-call', 'perCall'], ['max-coin', 'maxC
 export const GRANT_USAGE =
   `Usage: midnight grant <${GRANT_SUBCOMMANDS.join('|')}>\n\n` +
   `  deploy       Deploy this wallet's account, which holds what an agent may spend\n` +
+  `  deposit      Move shielded NIGHT from this wallet into its account\n` +
   `  status       The account, its owner key and what it holds\n` +
   `  list         Every grant on the account\n` +
   `  issue        Show a grant request (an agent's link); issue it with --yes\n` +
@@ -72,6 +76,11 @@ export function resolveGrantRequest(args: ParsedArgs): GrantRequest {
     case 'deploy':
       positionalsFor(args, subcommand, 0, 'no argument');
       return { subcommand, devOwnerKey: hasFlag(args, 'dev-owner-key') };
+    case 'deposit': {
+      const [amount] = positionalsFor(args, subcommand, 1, 'one amount of NIGHT');
+      if (amount === undefined) throw new UsageError('Missing the amount of NIGHT to deposit.\nUsage: midnight grant deposit <amount>');
+      return { subcommand, amount, value: nightToMicro(parseAmount(amount)).toString() };
+    }
     case 'status':
     case 'list':
     case 'revoke-all':
@@ -109,6 +118,7 @@ export function resolveGrantRequest(args: ParsedArgs): GrantRequest {
 export function paysAFee(request: GrantRequest): boolean {
   switch (request.subcommand) {
     case 'deploy':
+    case 'deposit':
     case 'revoke':
     case 'revoke-all':
       return true;
@@ -132,8 +142,8 @@ export function describeGrantTerms(terms: unknown): string {
   return Object.entries(terms).map(([name, value]) => `${name} ${typeof value === 'string' ? value : JSON.stringify(value)}`).join(', ');
 }
 
-/** The request as the account build's own command line takes it. Deploy is not one of its commands. */
-export function ownerArguments(request: Exclude<GrantRequest, { subcommand: 'deploy' }>, json: boolean): string[] {
+/** The request as the account build's own command line takes it. Deploy and deposit are not among its commands. */
+export function ownerArguments(request: Exclude<GrantRequest, { subcommand: 'deploy' | 'deposit' }>, json: boolean): string[] {
   const tail = json ? ['--json'] : [];
   switch (request.subcommand) {
     case 'status':

@@ -248,10 +248,10 @@ not currently supported; if added, output will be `{"key": "...", "value": "..."
 
 ## MCP tool names
 
-Every tool name shipped in `src/mcp-server.ts` is stable, except the seven
+Every tool name shipped in `src/mcp-server.ts` is stable, except the eight
 `midnight_grant_*` tools, which are experimental: their names, parameters
 and results can change in any release until they are declared stable here.
-Current 37 tools:
+Current 38 tools:
 
 ```
 # Wallet management
@@ -290,8 +290,8 @@ midnight_test_create
 # Grants (experimental)
 midnight_grant_status         midnight_grant_list
 midnight_grant_request        midnight_grant_deploy
-midnight_grant_issue          midnight_grant_revoke
-midnight_grant_revoke_all
+midnight_grant_deposit        midnight_grant_issue
+midnight_grant_revoke         midnight_grant_revoke_all
 ```
 
 Tool **parameter names** are also stable (the experimental tools excepted). A new optional parameter is
