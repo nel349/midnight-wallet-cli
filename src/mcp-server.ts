@@ -111,7 +111,7 @@ function transferArgs(params: Record<string, unknown>): ParsedArgs {
 const GRANT_COMMON_PROPERTIES = {
   wallet: { type: 'string', description: 'The wallet that owns the account and pays the fees' },
   network: { type: 'string', enum: ['undeployed'], description: 'Only undeployed (a local ledger-9 stack)' },
-  'account-build': { type: 'string', description: 'The account build\'s directory (default: the account-build config key)' },
+  'account-build': { type: 'string', description: 'A local account build\'s directory, to drive instead of the installed account package (default: the account-build config key)' },
 };
 
 /** A grant tool's params as `grant <subcommand> [positional]`, the named param moved to the positional. */
@@ -780,7 +780,7 @@ const TOOLS: ToolDef[] = [
   // ── Grants: the wallet owner's account (experimental) ────────────
   {
     name: 'midnight_grant_status',
-    description: 'The wallet\'s account: address, owner key, what it holds, number of grants. Needs an account build (see skill).',
+    description: 'The wallet\'s account: address, owner key, what it holds, number of grants (see skill).',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: { type: 'object', properties: { ...GRANT_COMMON_PROPERTIES } },
     async handler(params) {

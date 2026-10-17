@@ -42,18 +42,18 @@ export class NoAccountError extends Error {
 export async function prepareGrant(args: ParsedArgs): Promise<PreparedGrant> {
   const request = resolveGrantRequest(args);
 
-  const buildDir = resolveAccountBuild(getFlag(args, 'account-build'), loadCliConfig()['account-build']);
-  checkAccountBuild(buildDir);
+  const build = resolveAccountBuild(getFlag(args, 'account-build'), loadCliConfig()['account-build']);
+  checkAccountBuild(build);
   assertNodeRunsAccountBuild();
 
   const target = resolvePayingTarget(args, 'grant', request.subcommand);
   const walletName = accountWalletName(getFlag(args, 'wallet'));
   const recordsDir = accountRecordsDir(target.network, walletName);
   // Refuses a network the build can't reach before anything is created.
-  bridgeEnvironment(target.networkConfig, recordsDir);
+  bridgeEnvironment(target.networkConfig, recordsDir, build);
   ensureAccountRecordsDir(recordsDir);
 
-  const bridge: AccountBridge = { buildDir, recordsDir, networkConfig: target.networkConfig };
+  const bridge: AccountBridge = { build, recordsDir, networkConfig: target.networkConfig };
   const account = await accountOnRecord(bridge);
   if (request.subcommand === 'deploy') {
     if (account === null && !request.devOwnerKey) throw new UsageError(NO_DEV_OWNER_KEY);

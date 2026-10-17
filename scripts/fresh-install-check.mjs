@@ -123,6 +123,24 @@ try {
   `], join(work, 'node_modules', 'midnight-wallet-cli'));
   check('a shielded address parses', parsed.trim() === 'parsed' && address.length > 90, `${address.length} characters${parsed.trim() === 'parsed' ? '' : `, ${parsed.trim()}`}`);
 
+  // mn grant drives the account package it installed: its driver must load from
+  // the installed tree and answer that the new wallet has no account. Asking
+  // that reaches no chain, and the package fetches no proving key for it.
+  let grant = '';
+  try {
+    execFileSync(mn, ['grant', 'status', '--wallet', 'check', '--network', 'undeployed', '--node', 'ws://127.0.0.1:9', '--indexer-ws', 'ws://127.0.0.1:9/api/v4/graphql/ws', '--proof-server', 'http://127.0.0.1:9'], {
+      cwd: work, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME: home },
+    });
+    grant = 'answered without an error';
+  } catch (error) {
+    grant = String(error.stderr ?? error.message);
+  }
+  check('mn grant drives the installed account package', /Wallet "check" has no account on undeployed yet/.test(grant), grant.includes('has no account') ? 'no account yet, as for a new wallet' : grant.trim().split('\n').slice(-2).join(' | '));
+  const cached = existsSync(join(home, '.midnight', 'account-artifacts')) ? readdirSync(join(home, '.midnight', 'account-artifacts')) : [];
+  check('its proving-artefact cache is under ~/.midnight, empty of keys', cached.length === 1 && readdirSync(join(home, '.midnight', 'account-artifacts', cached[0])).join() === 'compiler', cached.join(', '));
+  const chains = copiesOf(work, '@kuiralabs/midnight-account-chain');
+  check('one copy of @kuiralabs/midnight-account-chain', chains.length === 1, chains.join(', '));
+
   // The MCP server reads its skill documents from the installed package.
   const { tools, resources } = await askMcpServer(join(work, 'node_modules', '.bin', 'midnight-wallet-mcp'), { ...process.env, HOME: home });
   check('the MCP server lists its skill resources', resources.length >= 2, `${resources.length}`);

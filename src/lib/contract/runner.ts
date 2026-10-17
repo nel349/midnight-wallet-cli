@@ -149,9 +149,9 @@ export async function runCall(options: CallOptions): Promise<CallResult> {
 // ── Shared script fragments ──
 
 /** Minimal JSON-RPC client over WebSocket that talks to mn serve. */
-export function rpcClientCode(servePort: number): string {
+export function rpcClientCode(servePort: number, wsSpecifier: string = 'ws'): string {
   return `
-import WebSocket from 'ws';
+import WebSocket from ${JSON.stringify(wsSpecifier)};
 
 const RPC_URL = 'ws://127.0.0.1:${servePort}';
 let rpcId = 0;

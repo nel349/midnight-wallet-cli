@@ -13,7 +13,7 @@ const DRIVER = `
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const DRIVER_VERSION: number = Number(process.env.STAND_IN_DRIVER_VERSION ?? 3);
+export const DRIVER_VERSION: number = Number(process.env.STAND_IN_DRIVER_VERSION ?? 4);
 const records = process.env.MIDNIGHT_ACCOUNT_STATE_DIR as string;
 const seen = (what: string, value: unknown): void => writeFileSync(join(records, what + '.json'), JSON.stringify(value));
 

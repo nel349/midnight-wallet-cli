@@ -487,7 +487,8 @@ const COMMAND_SPECS: CommandSpec[] = [
       'issue <link>                  Show the grant an agent\'s request link would get; issue it with --yes',
       'revoke <grant id | slot>      Revoke one grant',
       'revoke-all                    Revoke every grant',
-      '--account-build <dir>         The account build to drive (or: midnight config set account-build <dir>)',
+      '--account-build <dir>         A local account build to drive instead of the installed account',
+      '                              package (or: midnight config set account-build <dir>)',
       '--dev-owner-key               deploy: accept a random development owner key, which the',
       '                              wallet\'s mnemonic can\'t recover',
       '--yes                         issue: issue the grant (without it the grant is only shown)',
@@ -504,7 +505,6 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--json                        Output structured JSON',
     ],
     examples: [
-      'midnight config set account-build ~/account-build',
       'midnight grant deploy --dev-owner-key',
       'midnight grant deposit 2',
       'midnight grant status',
@@ -910,8 +910,12 @@ puts in it, and a grant lets an agent spend from it within limits, on the
 agent's own key. An agent asks with a grant request link; the owner issues
 or refuses, and can revoke at any time.
 
-mn runs the account owner's code from a local account build, with this
-wallet paying the fees through mn serve. Name the build once:
+mn runs the account owner's code from the account package it installs
+(@kuiralabs/midnight-account-chain), with this wallet paying the fees
+through mn serve. The package's proving keys are fetched the first time a
+command proves with them (up to a few hundred MB each), into
+~/.midnight/account-artifacts, each checked against the package's manifest.
+To drive a local build instead:
   midnight config set account-build <dir>
 It needs Node.js 22.18 or newer and reaches only an undeployed (local)
 ledger-9 network.

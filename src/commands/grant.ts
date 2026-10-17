@@ -1,8 +1,10 @@
 // grant command — the wallet owner's account, and the grants that let an agent spend from it
 // Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all> [options]
 //
-// The account's owner code is a local build (--account-build); mn runs its
-// commands with this wallet paying the fees through mn serve.
+// The account's owner code is the account package mn installs
+// (@kuiralabs/midnight-account-chain), or a local build named with
+// --account-build; mn runs its commands with this wallet paying the fees
+// through mn serve.
 
 import { type ParsedArgs, getFlag, hasFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';

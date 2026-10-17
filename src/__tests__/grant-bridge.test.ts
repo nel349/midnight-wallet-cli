@@ -14,6 +14,7 @@ import {
   runOwnerCommand, type AccountBridge,
 } from '../lib/grant/bridge.ts';
 import { classifyError } from '../lib/exit-codes.ts';
+import { type AccountBuild, installedAccountPackage } from '../lib/grant/account-build.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 import { createStandInAccountBuild } from './helpers/stand-in-account-build.ts';
 
@@ -30,7 +31,8 @@ let recordsDir: string;
 let serve: WebSocketServer;
 let servePort: number;
 const messages: string[] = [];
-const bridge = (): AccountBridge => ({ buildDir, recordsDir, networkConfig: NETWORK, servePort, onMessage: (m) => messages.push(m) });
+const bridge = (): AccountBridge => ({ build: { kind: 'directory', dir: buildDir }, recordsDir, networkConfig: NETWORK, servePort, onMessage: (m) => messages.push(m) });
+const LOCAL: AccountBuild = { kind: 'directory', dir: '/builds/chain' };
 const recorded = (what: string) => JSON.parse(fs.readFileSync(path.join(recordsDir, `${what}.json`), 'utf8'));
 
 beforeAll(async () => {
@@ -69,6 +71,17 @@ describe('bridgeEnvironment', () => {
     expect(bridgeEnvironment({ ...NETWORK, node: 'wss://node.example:443' }, '/r').MIDNIGHT_ACCOUNT_NODE_URL).toBe('https://node.example:443');
   });
 
+  it('names a cache under ~/.midnight for the installed package\'s proving artefacts, and none for a local build, which has its own', () => {
+    const origHome = process.env.HOME;
+    process.env.HOME = '/home/norm';
+    try {
+      expect(bridgeEnvironment(NETWORK, '/records', installedAccountPackage()).MIDNIGHT_ACCOUNT_ARTEFACTS_DIR).toBe('/home/norm/.midnight/account-artifacts');
+      expect(bridgeEnvironment(NETWORK, '/records', LOCAL)).not.toHaveProperty('MIDNIGHT_ACCOUNT_ARTEFACTS_DIR');
+    } finally {
+      process.env.HOME = origHome;
+    }
+  });
+
   it('refuses a network the build can\'t reach', () => {
     expect(() => bridgeEnvironment({ ...NETWORK, networkId: 'PreProd' }, '/r')).toThrow(UnreachableByAccountBuildError);
     expect(() => bridgeEnvironment({ ...NETWORK, networkId: 'PreProd' }, '/r')).toThrow('reaches only an undeployed (local) network; this is PreProd');
@@ -77,20 +90,28 @@ describe('bridgeEnvironment', () => {
 
 describe('generateBridgeScript', () => {
   it('asks which account is on record without a wallet or mn serve', () => {
-    const script = generateBridgeScript({ kind: 'account' });
+    const script = generateBridgeScript({ kind: 'account' }, LOCAL);
     expect(script).not.toContain('ws://127.0.0.1');
     expect(script).toContain('driver.accountOnRecord()');
   });
 
   it('needs an mn serve for anything that pays', () => {
-    expect(() => generateBridgeScript({ kind: 'deploy' })).toThrow('The deploy action needs an mn serve to pay');
-    expect(() => generateBridgeScript({ kind: 'deposit', value: '1' })).toThrow('The deposit action needs an mn serve to pay');
+    expect(() => generateBridgeScript({ kind: 'deploy' }, LOCAL)).toThrow('The deploy action needs an mn serve to pay');
+    expect(() => generateBridgeScript({ kind: 'deposit', value: '1' }, LOCAL)).toThrow('The deposit action needs an mn serve to pay');
   });
 
   it('never carries the owner key: the script reads it from its environment', () => {
-    const script = generateBridgeScript({ kind: 'deploy' }, 9932);
+    const script = generateBridgeScript({ kind: 'deploy' }, LOCAL, 9932);
     expect(script).toContain('process.env.MN_GRANT_OWNER_KEY');
     expect(script).toContain('ws://127.0.0.1:9932');
+  });
+
+  it('imports everything from the installed package by URL, so it runs from anywhere', () => {
+    const build = installedAccountPackage();
+    if (build.kind !== 'package') throw new Error('not the package');
+    const script = generateBridgeScript({ kind: 'deposit', value: '1' }, build, 9932);
+    for (const url of [build.driverUrl, build.typesUrl, build.wsUrl]) expect(script).toContain(JSON.stringify(url));
+    expect(script).not.toMatch(/from '(ws|@midnight-ntwrk\/[^']+)'/);
   });
 });
 
@@ -180,9 +201,37 @@ describe('running the bridge in a build', () => {
   it('refuses a build that speaks another version of the interface', async () => {
     process.env.STAND_IN_DRIVER_VERSION = '2';
     try {
-      await expect(accountOnRecord(bridge())).rejects.toThrow('This account build speaks version 2 of its interface; this mn speaks version 3.');
+      await expect(accountOnRecord(bridge())).rejects.toThrow('This account build speaks version 2 of its interface; this mn speaks version 4.');
     } finally {
       delete process.env.STAND_IN_DRIVER_VERSION;
     }
+  });
+});
+
+describe('running the bridge in the installed account package', () => {
+  let home: string;
+  let records: string;
+  let origHome: string | undefined;
+
+  beforeAll(() => {
+    home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mn-account-home-')));
+    records = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mn-account-records-')));
+    origHome = process.env.HOME;
+    process.env.HOME = home;
+  });
+
+  afterAll(() => {
+    process.env.HOME = origHome;
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(records, { recursive: true, force: true });
+  });
+
+  it('runs the package\'s own driver from the records directory, which it leaves as it found it', async () => {
+    expect(await accountOnRecord({ build: installedAccountPackage(), recordsDir: records, networkConfig: NETWORK })).toBeNull();
+    expect(fs.readdirSync(records)).toEqual([]);
+    // The package placed its build's manifest in its artefact cache, and fetched nothing.
+    const [cache, ...more] = fs.readdirSync(path.join(home, '.midnight', 'account-artifacts'));
+    expect(more).toEqual([]);
+    expect(fs.readdirSync(path.join(home, '.midnight', 'account-artifacts', cache ?? ''))).toEqual(['compiler']);
   });
 });

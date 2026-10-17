@@ -6,7 +6,8 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ### Changed
 
-- **`mn grant` needs an account build at interface version 3.** The build now takes an optional directory of proving keys (`MIDNIGHT_ACCOUNT_ARTEFACTS_DIR`), which a build loaded by path does not need; nothing mn uses changed. An older build is refused with "This account build speaks version 2 of its interface; this mn speaks version 3": update the build.
+- **`mn grant` runs the account package it installs.** mn now depends on `@kuiralabs/midnight-account-chain` 0.2.0 and drives it by default, so no account build has to be named first. Its proving keys are not in the package (4 GB in all): each is fetched the first time a command proves with it, from the build's release in `kuiralabs/midnight-account-artifacts`, into `~/.midnight/account-artifacts`, and kept only if it matches the package's manifest. A deposit's circuit is 11 MB; each of the owner's other circuits (issue, revoke, rotate the viewing key, append to the inbox) is about 235 MB, fetched once.
+- **`--account-build <dir>` (or `mn config set account-build <dir>`) still drives a local build instead**, which uses its own proving keys. It must speak interface version 4; an older one is refused with "This account build speaks version 3 of its interface; this mn speaks version 4": update the build.
 
 ## [0.6.0-rc.8] - 2026-10-16
 

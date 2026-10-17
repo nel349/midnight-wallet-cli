@@ -1,9 +1,13 @@
-// Runs one action inside the account build: a generated script, placed in the
-// build's directory so its imports resolve there, imports the build's module
-// for outside callers and hands it a wallet backed by mn serve. The script's
-// working directory is the account's records directory, where the build keeps
-// its private-state stores; the records themselves go where
-// MIDNIGHT_ACCOUNT_STATE_DIR says, which is the same place.
+// Runs one action in the account build: a generated script imports the
+// build's module for outside callers and hands it a wallet backed by mn serve.
+// For a local build the script is placed in the build's directory, so its
+// imports resolve there; for the installed package it imports the driver and
+// midnight-js-types by the URLs mn's own dependencies resolve to, and is placed
+// in the records directory. The script's working directory is the account's
+// records directory, where the build keeps its private-state stores; the
+// records themselves go where MIDNIGHT_ACCOUNT_STATE_DIR says, which is the
+// same place. The package fetches its proving artefacts as it first proves
+// with each, into the cache MIDNIGHT_ACCOUNT_ARTEFACTS_DIR names.
 //
 // The build logs its progress with console.log. The script sends that to
 // stderr, where mn shows it as progress, and writes the action's result as one
@@ -14,12 +18,12 @@ import { SCRIPT_PRELUDE, executeScript, rpcClientCode, walletProviderCode } from
 import { NATIVE_TOKEN_TYPE, TOKEN_MULTIPLIER } from '../constants.ts';
 import { UsageError } from '../errors.ts';
 import type { NetworkConfig } from '../network.ts';
-import { ACCOUNT_BUILD_ENTRY, ACCOUNT_DRIVER_VERSION } from './account-build.ts';
+import { ACCOUNT_BUILD_ENTRY, ACCOUNT_DRIVER_VERSION, type AccountBuild, accountArtifactsDir } from './account-build.ts';
 
 /** Where and how an action runs. */
 export interface AccountBridge {
-  /** The account build's directory. */
-  buildDir: string;
+  /** The account build. */
+  build: AccountBuild;
   /** The account's records directory (must exist). */
   recordsDir: string;
   networkConfig: NetworkConfig;
@@ -87,8 +91,12 @@ export class UnreachableByAccountBuildError extends UsageError {
 /** The WebSocket URL of a node as the http(s) URL the build takes. */
 const httpOf = (url: string): string => url.replace(/^ws/, 'http');
 
-/** What the build reads from its environment: its endpoints, as URLs, and where its records go. */
-export function bridgeEnvironment(networkConfig: NetworkConfig, recordsDir: string): Record<string, string> {
+/**
+ * What the build reads from its environment: its endpoints, as URLs, where its
+ * records go, and for the installed package where it caches its proving
+ * artefacts (a local build has its own).
+ */
+export function bridgeEnvironment(networkConfig: NetworkConfig, recordsDir: string, build?: AccountBuild): Record<string, string> {
   if (networkConfig.networkId.toLowerCase() !== 'undeployed') {
     throw new UnreachableByAccountBuildError(networkConfig.networkId);
   }
@@ -97,13 +105,20 @@ export function bridgeEnvironment(networkConfig: NetworkConfig, recordsDir: stri
     MIDNIGHT_ACCOUNT_INDEXER_URL: networkConfig.indexer,
     MIDNIGHT_ACCOUNT_PROOF_SERVER_URL: networkConfig.proofServer,
     MIDNIGHT_ACCOUNT_STATE_DIR: recordsDir,
+    ...(build?.kind === 'package' ? { MIDNIGHT_ACCOUNT_ARTEFACTS_DIR: accountArtifactsDir() } : {}),
   };
 }
 
 /** The owner key a deploy is given, read by the script from its environment: never on a command line, never in the script. */
 const OWNER_KEY_ENV = 'MN_GRANT_OWNER_KEY';
 
-const DRIVER_IMPORT = `
+/** How the script names a module: a local build's by its place beside the script, the package's by its URL. */
+const driverUrlCode = (build: AccountBuild): string => build.kind === 'package'
+  ? JSON.stringify(build.driverUrl)
+  : `pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), ${JSON.stringify(ACCOUNT_BUILD_ENTRY)})).href`;
+const typesSpecifier = (build: AccountBuild): string => (build.kind === 'package' ? build.typesUrl : '@midnight-ntwrk/midnight-js-types');
+
+const driverImport = (build: AccountBuild): string => `
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -113,15 +128,15 @@ const reported = [];
 console.log = (...args) => process.stderr.write(args.join(' ') + '\\n');
 console.error = (...args) => { reported.push(args.join(' ')); };
 
-const driver = await import(pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), ${JSON.stringify(ACCOUNT_BUILD_ENTRY)})).href);
+const driver = await import(${driverUrlCode(build)});
 if (driver.DRIVER_VERSION !== ${ACCOUNT_DRIVER_VERSION}) {
   fail(new Error('This account build speaks version ' + driver.DRIVER_VERSION + ' of its interface; this mn speaks version ${ACCOUNT_DRIVER_VERSION}. Update the older of the two.'));
 }
 `;
 
 /** One object offering both of midnight-js's provider interfaces, as the build takes its paying wallet. */
-const PAYING_WALLET = `
-import { createWalletProvider, createMidnightProvider, Transaction } from '@midnight-ntwrk/midnight-js-types';
+const payingWallet = (build: AccountBuild): string => `
+import { createWalletProvider, createMidnightProvider, Transaction } from ${JSON.stringify(typesSpecifier(build))};
 const toHex = (bytes) => Buffer.from(bytes).toString('hex');
 const fromHex = (hex) => new Uint8Array(Buffer.from(hex, 'hex'));
 
@@ -157,10 +172,10 @@ if (held < value) {
 const result = await driver.depositOver(wallet, value);`;
 }
 
-/** The script for one action. A wallet-backed action needs the port of the mn serve that pays. */
-export function generateBridgeScript(action: BridgeAction, servePort?: number): string {
+/** The script for one action in `build`. A wallet-backed action needs the port of the mn serve that pays. */
+export function generateBridgeScript(action: BridgeAction, build: AccountBuild, servePort?: number): string {
   if (action.kind === 'account') {
-    return `${SCRIPT_PRELUDE}${DRIVER_IMPORT}
+    return `${SCRIPT_PRELUDE}${driverImport(build)}
 const result = driver.accountOnRecord() ?? null;
 ${RESULT}
 process.exit(0);
@@ -175,8 +190,8 @@ process.exit(0);
 const exitCode = await driver.runOwnerOver(wallet, ${JSON.stringify(action.argv)}, (text) => { written.push(text); });
 const result = { exitCode, output: written.join('\\n'), errors: reported };`;
   return `${SCRIPT_PRELUDE}
-${rpcClientCode(servePort)}
-${PAYING_WALLET}${DRIVER_IMPORT}
+${rpcClientCode(servePort, build.kind === 'package' ? build.wsUrl : 'ws')}
+${payingWallet(build)}${driverImport(build)}
 ${run}
 ${RESULT}
 rpcClose();
@@ -195,13 +210,15 @@ function parseResult<T>(stdout: string, what: string): T {
 }
 
 async function run<T>(bridge: AccountBridge, action: BridgeAction, what: string, extraEnv: Record<string, string> = {}): Promise<T> {
+  const { build } = bridge;
   const stdout = await executeScript({
-    dir: bridge.buildDir,
-    script: generateBridgeScript(action, bridge.servePort),
+    dir: build.kind === 'package' ? bridge.recordsDir : build.dir,
+    script: generateBridgeScript(action, build, bridge.servePort),
     cwd: bridge.recordsDir,
-    env: { ...bridgeEnvironment(bridge.networkConfig, bridge.recordsDir), ...extraEnv },
+    env: { ...bridgeEnvironment(bridge.networkConfig, bridge.recordsDir, build), ...extraEnv },
     onMessage: bridge.onMessage,
-    // The build has its own dependencies installed; its node_modules is left alone.
+    // A local build has its own dependencies installed, and the package's are
+    // imported by URL: no node_modules is touched.
     overlaySdk: false,
     label: 'grant',
   });

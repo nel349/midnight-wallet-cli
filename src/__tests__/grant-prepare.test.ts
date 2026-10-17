@@ -8,6 +8,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { parseArgs } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
+import { installedAccountPackage } from '../lib/grant/account-build.ts';
 import { UnreachableByAccountBuildError } from '../lib/grant/bridge.ts';
 import { NO_DEV_OWNER_KEY, NoAccountError, prepareGrant } from '../lib/grant/prepare.ts';
 import { STAND_IN_ACCOUNT, createStandInAccountBuild } from './helpers/stand-in-account-build.ts';
@@ -42,15 +43,18 @@ describe('prepareGrant', () => {
     await expect(prepare('revoke', '--wallet', 'alice')).rejects.not.toThrow('account-build');
   });
 
-  it('says how to name an account build when none is named', async () => {
-    await expect(prepare('status', '--wallet', 'alice')).rejects.toThrow('midnight config set account-build <dir>');
+  it('drives the installed account package when no build is named', async () => {
+    const prepared = await prepare('deploy', '--dev-owner-key', '--wallet', 'alice');
+    expect(prepared.bridge.build).toEqual(installedAccountPackage());
+    expect(prepared.account).toBeNull();
+    await expect(prepare('status', '--wallet', 'alice')).rejects.toThrow(NoAccountError);
   });
 
   it('takes the account build from the config when no flag names one', async () => {
     fs.mkdirSync(path.join(home, '.midnight'), { recursive: true });
     fs.writeFileSync(path.join(home, '.midnight', 'config.json'), JSON.stringify({ network: 'undeployed', 'account-build': buildDir }));
     const prepared = await prepare('deploy', '--dev-owner-key', '--wallet', 'alice');
-    expect(prepared.bridge.buildDir).toBe(buildDir);
+    expect(prepared.bridge.build).toEqual({ kind: 'directory', dir: buildDir });
   });
 
   it('refuses a network the build can\'t reach, creating nothing', async () => {
@@ -63,7 +67,7 @@ describe('prepareGrant', () => {
     expect(prepared.account).toBeNull();
     expect(prepared.walletName).toBe('alice');
     expect(prepared.target.network).toBe('undeployed');
-    expect(prepared.bridge).toMatchObject({ buildDir, recordsDir: recordsOf('alice') });
+    expect(prepared.bridge).toMatchObject({ build: { kind: 'directory', dir: buildDir }, recordsDir: recordsOf('alice') });
     expect(prepared.bridge.servePort).toBeUndefined();
     expect(fs.statSync(recordsOf('alice')).mode & 0o777).toBe(0o700);
   });
