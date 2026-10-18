@@ -47,6 +47,8 @@ export interface RunnerOptions {
   contractName: string;
   servePort: number;
   onMessage?: (msg: string) => void;
+  /** Cancels the run: the script's process is stopped. */
+  signal?: AbortSignal;
 }
 
 export interface DeployOptions extends RunnerOptions {
@@ -81,6 +83,8 @@ export interface StateOptions {
   contractName: string;
   contractAddress: string;
   onMessage?: (msg: string) => void;
+  /** Cancels the run: the script's process is stopped. */
+  signal?: AbortSignal;
 }
 
 export interface DeployResult {
@@ -113,7 +117,7 @@ export function indexerEnvironment(networkConfig: NetworkConfig): Record<string,
 
 export async function runState(options: StateOptions): Promise<StateResult> {
   const script = generateStateScript(options);
-  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: indexerEnvironment(options.networkConfig) });
+  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: indexerEnvironment(options.networkConfig), signal: options.signal });
   try {
     return JSON.parse(result) as StateResult;
   } catch {
@@ -129,7 +133,7 @@ export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
     ...indexerEnvironment(options.networkConfig),
     ...(options.privateStateSecretKey ? { MN_PRIVATE_STATE_SECRET: options.privateStateSecretKey } : {}),
   };
-  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: extraEnv });
+  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: extraEnv, signal: options.signal });
   try {
     return JSON.parse(result) as DeployResult;
   } catch {
@@ -139,7 +143,7 @@ export async function runDeploy(options: DeployOptions): Promise<DeployResult> {
 
 export async function runCall(options: CallOptions): Promise<CallResult> {
   const script = generateCallScript(options);
-  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: indexerEnvironment(options.networkConfig) });
+  const result = await executeScript({ dir: options.dappDir, script, onMessage: options.onMessage, env: indexerEnvironment(options.networkConfig), signal: options.signal });
   try {
     return JSON.parse(result) as CallResult;
   } catch {
@@ -609,13 +613,21 @@ export interface ScriptRun {
   overlaySdk?: boolean;
   /** What the script is for: part of its (hidden, removed afterwards) file name. Default "contract". */
   label?: string;
+  /** Stops the run when it aborts: the script's process is killed, and the run fails as cancelled. */
+  signal?: AbortSignal;
 }
+
+// How long a cancelled script has to exit on SIGTERM before it is killed outright.
+const CANCEL_GRACE_MS = 5_000;
+// What a cancelled run fails with; classifyError reads it as CANCELLED.
+const CANCELLED_MESSAGE = 'Operation cancelled';
 
 /** Random bytes in a generated script's name, beside the time. */
 const SCRIPT_NAME_RANDOM_BYTES = 4;
 
 /** Runs a generated script and returns what it wrote to stdout. Throws its marked error when it fails. */
-export async function executeScript({ dir: dappDir, script, onMessage, env: extraEnv, cwd, overlaySdk = true, label = 'contract' }: ScriptRun): Promise<string> {
+export async function executeScript({ dir: dappDir, script, onMessage, env: extraEnv, cwd, overlaySdk = true, label = 'contract', signal }: ScriptRun): Promise<string> {
+  if (signal?.aborted) throw new Error(CANCELLED_MESSAGE);
   // ESM resolution walks up from the importing file's location to find
   // node_modules; NODE_PATH does NOT work for ESM. Three different files
   // need to resolve bare imports during a deploy:
@@ -660,6 +672,18 @@ export async function executeScript({ dir: dappDir, script, onMessage, env: extr
     // Untrimmed, so a marked error line split across two pipe reads stays whole.
     let stderrRaw = '';
 
+    let killTimer: NodeJS.Timeout | undefined;
+    const cancel = () => {
+      child.kill('SIGTERM');
+      killTimer = setTimeout(() => child.kill('SIGKILL'), CANCEL_GRACE_MS);
+    };
+    signal?.addEventListener('abort', cancel, { once: true });
+    const settle = () => {
+      signal?.removeEventListener('abort', cancel);
+      clearTimeout(killTimer);
+      cleanup();
+    };
+
     child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
     });
@@ -671,7 +695,11 @@ export async function executeScript({ dir: dappDir, script, onMessage, env: extr
     });
 
     child.on('close', (code) => {
-      cleanup();
+      settle();
+      if (signal?.aborted) {
+        reject(new Error(CANCELLED_MESSAGE));
+        return;
+      }
       if (code !== 0) {
         reject(new Error(scriptFailureMessage(stderrRaw, code)));
         return;
@@ -680,7 +708,7 @@ export async function executeScript({ dir: dappDir, script, onMessage, env: extr
     });
 
     child.on('error', (err) => {
-      cleanup();
+      settle();
       reject(err);
     });
   });

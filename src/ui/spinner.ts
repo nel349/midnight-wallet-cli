@@ -17,9 +17,22 @@ export interface Spinner {
   clear(): void;
 }
 
-/** A spinner that shows nothing, for `--json` callers: stdout stays the result alone and stderr stays quiet. */
+// Where what a spinner says goes besides the terminal, while a command runs
+// for the MCP server: it sends each message to the client as progress. None
+// otherwise.
+let progressTarget: ((message: string) => void) | null = null;
+
+export function setProgressTarget(target: ((message: string) => void) | null): void {
+  progressTarget = target;
+}
+
+const report = (message: string | undefined): void => {
+  if (message !== undefined) progressTarget?.(message);
+};
+
+/** A spinner that shows nothing, for `--json` callers: stdout stays the result alone and stderr stays quiet. What it would say still reaches the progress target. */
 export function silentSpinner(): Spinner {
-  return { update() {}, stop() {}, fail() {}, log() {}, clear() {} };
+  return { update: report, stop: report, fail() {}, log: report, clear() {} };
 }
 
 let active: Spinner | null = null;
@@ -35,6 +48,7 @@ function stripAnsi(str: string): string {
 
 export function start(message: string): Spinner {
   let stopped = false;
+  report(message);
 
   if (!isColorEnabled()) {
     let currentMessage = message;
@@ -42,12 +56,14 @@ export function start(message: string): Spinner {
     const spinner: Spinner = {
       update(msg: string) {
         currentMessage = msg;
+        report(msg);
         process.stderr.write(`\r⠋ ${currentMessage}\x1b[K`);
       },
       stop(finalMessage?: string) {
         if (stopped) return;
         stopped = true;
         active = null;
+        report(finalMessage);
         process.stderr.write(`\r✓ ${finalMessage ?? currentMessage}\x1b[K\n`);
       },
       fail(finalMessage?: string) {
@@ -57,6 +73,7 @@ export function start(message: string): Spinner {
         process.stderr.write(`\r✗ ${finalMessage ?? currentMessage}\x1b[K\n`);
       },
       log(line: string) {
+        report(line);
         process.stderr.write(`\r\x1b[K${line}\n`);
         process.stderr.write(`⠋ ${currentMessage}`);
       },
@@ -95,12 +112,14 @@ export function start(message: string): Spinner {
   const spinner: Spinner = {
     update(msg: string) {
       currentMessage = msg;
+      report(msg);
     },
     stop(finalMessage?: string) {
       if (stopped) return;
       stopped = true;
       clearInterval(timer);
       active = null;
+      report(finalMessage);
       const final = finalMessage ?? currentMessage;
       process.stderr.write(`\r\x1b[32m✓\x1b[0m ${final}\x1b[K\n`);
     },
@@ -113,6 +132,7 @@ export function start(message: string): Spinner {
       process.stderr.write(`\r\x1b[31m✗\x1b[0m ${final}\x1b[K\n`);
     },
     log(line: string) {
+      report(line);
       process.stderr.write(`\r\x1b[K${line}\n`);
       render();
     },

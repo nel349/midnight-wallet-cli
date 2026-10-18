@@ -47,6 +47,7 @@ export const depositOver = async (wallet: Wallet, value: bigint) => {
 export const runOwnerOver = async (wallet: Wallet, argv: readonly string[], out: (text: string) => void): Promise<number> => {
   console.log('issue_grant (k1): 24.0 s');
   seen('owner', { argv, coinPublicKey: wallet.getCoinPublicKey() });
+  if (argv[0] === 'wait') { seen('waiting', { pid: process.pid }); await new Promise(() => setInterval(() => {}, 1000)); }
   if (argv[0] === 'nope') { console.error('usage: status | grants'); return 2; }
   if (argv[0] === 'revoke') { console.error('the roster holds no revocable grant ' + argv[1]); return 1; }
   out(JSON.stringify({ grants: [], asked: argv }, null, 2));

@@ -210,6 +210,26 @@ describe('running the bridge in a build', () => {
     expect(await runOwnerCommand(bridge(), ['nope'])).toEqual({ exitCode: 2, output: '', errors: ['usage: status | grants'] });
   });
 
+  it('stops the build when the run is cancelled: its process ends, its script is removed, and the run says it was cancelled', async () => {
+    const controller = new AbortController();
+    const running = runOwnerCommand({ ...bridge(), signal: controller.signal }, ['wait']);
+    const waiting = path.join(recordsDir, 'waiting.json');
+    while (!fs.existsSync(waiting)) await new Promise((resolve) => setTimeout(resolve, 50));
+    const { pid } = recorded('waiting');
+    controller.abort();
+    const refused = await running.then(() => undefined, (err: Error) => err);
+    expect(refused?.message).toBe('Operation cancelled');
+    expect(classifyError(refused!).errorCode).toBe('CANCELLED');
+    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+    expect(fs.readdirSync(buildDir).filter((name) => name.startsWith('.mn-grant-'))).toEqual([]);
+  }, 60_000);
+
+  it('starts nothing when the run was cancelled before it began', async () => {
+    fs.rmSync(path.join(recordsDir, 'owner.json'), { force: true });
+    await expect(runOwnerCommand({ ...bridge(), signal: AbortSignal.abort() }, ['status'])).rejects.toThrow('Operation cancelled');
+    expect(fs.existsSync(path.join(recordsDir, 'owner.json'))).toBe(false);
+  });
+
   it('refuses a build that speaks another version of the interface', async () => {
     process.env.STAND_IN_DRIVER_VERSION = '2';
     try {

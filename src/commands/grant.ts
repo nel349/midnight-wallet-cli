@@ -38,7 +38,7 @@ function isShortOfDust(err: Error): boolean {
   return errorCode === ERROR_CODES.DUST_REQUIRED || errorCode === ERROR_CODES.INSUFFICIENT_BALANCE;
 }
 
-export default async function grantCommand(args: ParsedArgs, _signal?: AbortSignal): Promise<void> {
+export default async function grantCommand(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   const { request, target, walletName, bridge, account } = await prepareGrant(args);
   const jsonMode = hasFlag(args, 'json');
   const walletFlag = getFlag(args, 'wallet');
@@ -55,7 +55,7 @@ export default async function grantCommand(args: ParsedArgs, _signal?: AbortSign
   const funds = paysAFee(request) ? await assertWalletCanPay(target, walletFlag, jsonMode ? silentSpinner() : startSpinner('Checking wallet...')) : undefined;
   const serve = await openPayingServe(target, walletFlag, jsonMode ? silentSpinner() : startSpinner('Starting mn serve...'));
   const spinner = jsonMode ? silentSpinner() : startSpinner(SPINNER_LABEL[request.subcommand]);
-  const paid: AccountBridge = { ...bridge, servePort: serve.port, onMessage: (message) => spinner.update(message) };
+  const paid: AccountBridge = { ...bridge, servePort: serve.port, onMessage: (message) => spinner.update(message), signal };
   const common = { subcommand: request.subcommand, network: target.network, wallet: walletName, ownerKey: 'development' };
 
   try {

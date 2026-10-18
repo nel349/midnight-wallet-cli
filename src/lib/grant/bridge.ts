@@ -32,6 +32,8 @@ export interface AccountBridge {
   servePort?: number;
   /** Each line of the build's progress. */
   onMessage?: (message: string) => void;
+  /** Cancels the action: the build's process is stopped. */
+  signal?: AbortSignal;
 }
 
 export type BridgeAction =
@@ -230,6 +232,7 @@ async function run<T>(bridge: AccountBridge, action: BridgeAction, what: string,
     // imported by URL: no node_modules is touched.
     overlaySdk: false,
     label: 'grant',
+    signal: bridge.signal,
   });
   return parseResult<T>(stdout, what);
 }

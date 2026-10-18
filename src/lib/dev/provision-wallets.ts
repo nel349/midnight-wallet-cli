@@ -137,7 +137,7 @@ async function invokeWalletGenerate(name: string, signal: AbortSignal | undefine
     flags: { network: 'undeployed' },
   };
   const { default: handler } = await import('../../commands/wallet.ts');
-  await captureCommand(handler, args, signal);
+  await captureCommand(handler, args, { signal });
 }
 
 async function invokeAirdrop(name: string, amountNight: number, signal: AbortSignal | undefined): Promise<void> {
@@ -148,7 +148,7 @@ async function invokeAirdrop(name: string, amountNight: number, signal: AbortSig
     flags: { wallet: name, network: 'undeployed' },
   };
   const { default: handler } = await import('../../commands/airdrop.ts');
-  await captureCommand(handler, args, signal);
+  await captureCommand(handler, args, { signal });
 }
 
 async function invokeNeedsDust(name: string, signal: AbortSignal | undefined): Promise<boolean> {
@@ -159,7 +159,7 @@ async function invokeNeedsDust(name: string, signal: AbortSignal | undefined): P
     flags: { wallet: name, network: 'undeployed' },
   };
   const { default: handler } = await import('../../commands/dust.ts');
-  const status = await captureCommand(handler, args, signal) as { registered?: unknown; unregisteredUtxos?: unknown };
+  const status = await captureCommand(handler, args, { signal }) as { registered?: unknown; unregisteredUtxos?: unknown };
   return status.registered === false && typeof status.unregisteredUtxos === 'number' && status.unregisteredUtxos > 0;
 }
 
@@ -171,5 +171,5 @@ async function invokeDustRegister(name: string, signal: AbortSignal | undefined)
     flags: { wallet: name, network: 'undeployed' },
   };
   const { default: handler } = await import('../../commands/dust.ts');
-  await captureCommand(handler, args, signal);
+  await captureCommand(handler, args, { signal });
 }

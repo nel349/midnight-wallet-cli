@@ -11,8 +11,12 @@ import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  type ProgressToken,
+  type ServerNotification,
+  type ServerRequest,
 } from '@modelcontextprotocol/sdk/types.js';
-import { captureCommand } from './lib/run-command.ts';
+import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { type CommandRun, captureCommand } from './lib/run-command.ts';
 import { classifyError, ERROR_CODES } from './lib/exit-codes.ts';
 import { trimAgentMessage } from './lib/error-trim.ts';
 import { FULL_FLAG, type ParsedArgs } from './lib/argv.ts';
@@ -57,7 +61,8 @@ interface ToolDef {
     properties: Record<string, { type: string; description?: string; enum?: string[] }>;
     required?: string[];
   };
-  handler: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  /** Runs the tool; `call` carries the client's cancellation and takes the run's progress. */
+  handler: (params: Record<string, unknown>, call: CommandRun) => Promise<Record<string, unknown>>;
   /**
    * For a tool behind confirmation: checks the arguments before a token is
    * issued, throwing what the handler would, so the user is never asked to
@@ -65,7 +70,7 @@ interface ToolDef {
    * request comes to as the check found it, and the user is asked to confirm
    * that instead of the tool's arguments.
    */
-  check?: (params: Record<string, unknown>) => Promise<string | void>;
+  check?: (params: Record<string, unknown>, call: CommandRun) => Promise<string | void>;
 }
 
 // Helper: build ParsedArgs from MCP tool parameters
@@ -188,14 +193,14 @@ const TOOLS: ToolDef[] = [
       },
       required: ['name'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const name = params.name as string;
       const args = buildArgs('wallet', params, 'generate');
       args.positionals = [name];
       delete args.flags.name;
       if (params.force === 'true' || params.force === true) args.flags.force = true;
       const handler = await importHandler('wallet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -211,7 +216,7 @@ const TOOLS: ToolDef[] = [
         },
       },
     },
-    async handler({ full }: { full?: boolean } = {}) {
+    async handler({ full }: { full?: boolean }, call) {
       const flags: Record<string, string | true> = { json: true };
       if (full) flags[FULL_FLAG] = true;
       const args: ParsedArgs = {
@@ -221,7 +226,7 @@ const TOOLS: ToolDef[] = [
         flags,
       };
       const handler = await importHandler('wallet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -235,7 +240,7 @@ const TOOLS: ToolDef[] = [
       },
       required: ['name'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const name = params.name as string;
       const args: ParsedArgs = {
         command: 'wallet',
@@ -244,7 +249,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true },
       };
       const handler = await importHandler('wallet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -261,7 +266,7 @@ const TOOLS: ToolDef[] = [
         },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const name = params.name as string | undefined;
       const full = params.full as boolean | undefined;
       const flags: Record<string, string | true> = { json: true };
@@ -273,7 +278,7 @@ const TOOLS: ToolDef[] = [
         flags,
       };
       const handler = await importHandler('wallet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -287,7 +292,7 @@ const TOOLS: ToolDef[] = [
       },
       required: ['name'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const name = params.name as string;
       const args: ParsedArgs = {
         command: 'wallet',
@@ -296,7 +301,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true },
       };
       const handler = await importHandler('wallet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -309,10 +314,10 @@ const TOOLS: ToolDef[] = [
         wallet: { type: 'string' },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('info', params);
       const handler = await importHandler('info');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -332,13 +337,13 @@ const TOOLS: ToolDef[] = [
         },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const address = params.address as string | undefined;
       const args = buildArgs('balance', params, address);
       // Remove address from flags since it's a positional (subcommand)
       delete args.flags.address;
       const handler = await importHandler('balance');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -354,10 +359,10 @@ const TOOLS: ToolDef[] = [
       },
       required: ['seed'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('address', params);
       const handler = await importHandler('address');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -370,10 +375,10 @@ const TOOLS: ToolDef[] = [
         network: { type: 'string', enum: ['preprod', 'preview', 'undeployed'] },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('genesis-address', params);
       const handler = await importHandler('genesis-address');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -386,10 +391,10 @@ const TOOLS: ToolDef[] = [
         network: { type: 'string', description: 'Network to read (default: the selected one)' },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('inspect-cost', params.network ? { network: params.network } : {});
       const handler = await importHandler('inspect-cost');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -405,12 +410,12 @@ const TOOLS: ToolDef[] = [
       },
       required: ['amount'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const amount = params.amount as string;
       const args = buildArgs('airdrop', params, amount);
       delete args.flags.amount;
       const handler = await importHandler('airdrop');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -426,9 +431,9 @@ const TOOLS: ToolDef[] = [
       },
       required: ['to', 'amount'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const handler = await importHandler('transfer');
-      return captureCommand(handler, transferArgs(params));
+      return captureCommand(handler, transferArgs(params), call);
     },
     async check(params) {
       const { resolveTransferRequest } = await import('./lib/transfer-request.ts');
@@ -445,10 +450,10 @@ const TOOLS: ToolDef[] = [
         wallet: { type: 'string' },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('dust', params, 'register');
       const handler = await importHandler('dust');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -469,10 +474,10 @@ const TOOLS: ToolDef[] = [
         },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('dust', params, 'status');
       const handler = await importHandler('dust');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -487,7 +492,7 @@ const TOOLS: ToolDef[] = [
       },
       required: ['key'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const key = params.key as string;
       const args: ParsedArgs = {
         command: 'config',
@@ -496,7 +501,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true, ...(params.network ? { network: params.network as string } : {}) },
       };
       const handler = await importHandler('config');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -512,7 +517,7 @@ const TOOLS: ToolDef[] = [
       },
       required: ['key', 'value'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const key = params.key as string;
       const value = params.value as string;
       const args: ParsedArgs = {
@@ -522,7 +527,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true, ...(params.network ? { network: params.network as string } : {}) },
       };
       const handler = await importHandler('config');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -536,10 +541,10 @@ const TOOLS: ToolDef[] = [
         wallet: { type: 'string' },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('cache', params, 'clear');
       const handler = await importHandler('cache');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -554,7 +559,7 @@ const TOOLS: ToolDef[] = [
       },
       required: ['key'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const key = params.key as string;
       const args: ParsedArgs = {
         command: 'config',
@@ -563,7 +568,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true, ...(params.network ? { network: params.network as string } : {}) },
       };
       const handler = await importHandler('config');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -574,7 +579,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {},
     },
-    async handler() {
+    async handler(_params, call) {
       const args: ParsedArgs = {
         command: 'localnet',
         subcommand: 'up',
@@ -582,7 +587,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true },
       };
       const handler = await importHandler('localnet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -593,7 +598,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {},
     },
-    async handler() {
+    async handler(_params, call) {
       const args: ParsedArgs = {
         command: 'localnet',
         subcommand: 'stop',
@@ -601,7 +606,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true },
       };
       const handler = await importHandler('localnet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -612,7 +617,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {},
     },
-    async handler() {
+    async handler(_params, call) {
       const args: ParsedArgs = {
         command: 'localnet',
         subcommand: 'down',
@@ -620,7 +625,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true },
       };
       const handler = await importHandler('localnet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -631,7 +636,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {},
     },
-    async handler() {
+    async handler(_params, call) {
       const args: ParsedArgs = {
         command: 'localnet',
         subcommand: 'status',
@@ -639,7 +644,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true },
       };
       const handler = await importHandler('localnet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -650,7 +655,7 @@ const TOOLS: ToolDef[] = [
       type: 'object',
       properties: {},
     },
-    async handler() {
+    async handler(_params, call) {
       const args: ParsedArgs = {
         command: 'localnet',
         subcommand: 'clean',
@@ -658,7 +663,7 @@ const TOOLS: ToolDef[] = [
         flags: { json: true },
       };
       const handler = await importHandler('localnet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   // {
@@ -675,7 +680,7 @@ const TOOLS: ToolDef[] = [
   //     const args = buildArgs('status', params);
   //     if (params.all === 'true' || params.all === true) args.flags.all = true;
   //     const handler = await importHandler('status');
-  //     return captureCommand(handler, args);
+  //     return captureCommand(handler, args, call);
   //   },
   // },
   // status command disabled — currently being reworked
@@ -693,10 +698,10 @@ const TOOLS: ToolDef[] = [
         name: { type: 'string', description: 'Specific contract name to inspect when the project has multiple (see siblings field)' },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('contract', params, 'inspect');
       const handler = await importHandler('contract');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -715,10 +720,10 @@ const TOOLS: ToolDef[] = [
       },
       required: ['address'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('contract', params, 'state');
       const handler = await importHandler('contract');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
   {
@@ -736,10 +741,10 @@ const TOOLS: ToolDef[] = [
         name: { type: 'string', description: 'Specific contract name when the project has multiple' },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('contract', params, 'deploy');
       const handler = await importHandler('contract');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
     async check(params) {
       const { resolveContractDeployRequest } = await import('./lib/contract/request.ts');
@@ -765,10 +770,10 @@ const TOOLS: ToolDef[] = [
       },
       required: ['address', 'circuit'],
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('contract', params, 'call');
       const handler = await importHandler('contract');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
     async check(params) {
       const { resolveContractCallRequest } = await import('./lib/contract/request.ts');
@@ -783,8 +788,8 @@ const TOOLS: ToolDef[] = [
     description: 'The wallet\'s account: address, owner key, what it holds, number of grants (see skill).',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: { type: 'object', properties: { ...GRANT_COMMON_PROPERTIES } },
-    async handler(params) {
-      return captureCommand(await importHandler('grant'), grantArgs('status', params));
+    async handler(params, call) {
+      return captureCommand(await importHandler('grant'), grantArgs('status', params), call);
     },
   },
   {
@@ -792,8 +797,8 @@ const TOOLS: ToolDef[] = [
     description: 'Every grant on the wallet\'s account, with its limits and whether it is live.',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: { type: 'object', properties: { ...GRANT_COMMON_PROPERTIES } },
-    async handler(params) {
-      return captureCommand(await importHandler('grant'), grantArgs('list', params));
+    async handler(params, call) {
+      return captureCommand(await importHandler('grant'), grantArgs('list', params), call);
     },
   },
   {
@@ -812,8 +817,8 @@ const TOOLS: ToolDef[] = [
       },
       required: ['link'],
     },
-    async handler(params) {
-      return captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link'));
+    async handler(params, call) {
+      return captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link'), call);
     },
   },
   {
@@ -827,8 +832,8 @@ const TOOLS: ToolDef[] = [
         ...GRANT_COMMON_PROPERTIES,
       },
     },
-    async handler(params) {
-      return captureCommand(await importHandler('grant'), grantArgs('deploy', params));
+    async handler(params, call) {
+      return captureCommand(await importHandler('grant'), grantArgs('deploy', params), call);
     },
     async check(params) {
       await checkGrant(grantArgs('deploy', params), params);
@@ -846,8 +851,8 @@ const TOOLS: ToolDef[] = [
       },
       required: ['amount'],
     },
-    async handler(params) {
-      return captureCommand(await importHandler('grant'), grantArgs('deposit', params, 'amount'));
+    async handler(params, call) {
+      return captureCommand(await importHandler('grant'), grantArgs('deposit', params, 'amount'), call);
     },
     async check(params) {
       const args = grantArgs('deposit', params, 'amount');
@@ -874,15 +879,15 @@ const TOOLS: ToolDef[] = [
       },
       required: ['link'],
     },
-    async handler(params) {
-      return captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link', { yes: true }));
+    async handler(params, call) {
+      return captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link', { yes: true }), call);
     },
     // The link is read by the account build before a token is issued: a link
     // that isn't one is refused here, and the user confirms the grant's terms
     // as the build reports them, not a link they can't read.
-    async check(params) {
+    async check(params, call) {
       await checkGrant(grantArgs('issue', params, 'link', { yes: true }), params);
-      const shown = await captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link'));
+      const shown = await captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link'), call);
       const { describeGrantTerms } = await import('./lib/grant/request.ts');
       return `Issue a grant on ${shown.wallet}'s account on ${shown.network}, letting an agent spend from it within these terms `
         + `(amounts in the token's smallest unit; limits not given took the account build's defaults): ${describeGrantTerms(shown.request)}`;
@@ -900,8 +905,8 @@ const TOOLS: ToolDef[] = [
       },
       required: ['grant'],
     },
-    async handler(params) {
-      return captureCommand(await importHandler('grant'), grantArgs('revoke', params, 'grant'));
+    async handler(params, call) {
+      return captureCommand(await importHandler('grant'), grantArgs('revoke', params, 'grant'), call);
     },
     async check(params) {
       await checkGrant(grantArgs('revoke', params, 'grant'), params);
@@ -912,8 +917,8 @@ const TOOLS: ToolDef[] = [
     description: 'Revoke every grant on the wallet\'s account (returns pending token).',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: { type: 'object', properties: { ...GRANT_COMMON_PROPERTIES } },
-    async handler(params) {
-      return captureCommand(await importHandler('grant'), grantArgs('revoke-all', params));
+    async handler(params, call) {
+      return captureCommand(await importHandler('grant'), grantArgs('revoke-all', params), call);
     },
     async check(params) {
       await checkGrant(grantArgs('revoke-all', params), params);
@@ -944,10 +949,10 @@ const TOOLS: ToolDef[] = [
         force: { type: 'boolean', description: 'Overwrite existing files instead of aborting on collision' },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('test', params, 'create');
       const handler = await importHandler('test');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
 
@@ -962,12 +967,12 @@ const TOOLS: ToolDef[] = [
         tail: { type: 'string', description: 'Number of lines to retrieve (default 200)' },
       },
     },
-    async handler(params) {
+    async handler(params, call) {
       const args = buildArgs('localnet', params, 'logs');
       // tail default: 200 if not specified by agent
       if (!args.flags.tail) args.flags.tail = '200';
       const handler = await importHandler('localnet');
-      return captureCommand(handler, args);
+      return captureCommand(handler, args, call);
     },
   },
 
@@ -1079,9 +1084,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 // Handle tool calls
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const { name, arguments: rawParams } = request.params;
   const params = (rawParams ?? {}) as Record<string, unknown>;
+  const call = toolCall(request.params._meta?.progressToken, extra);
 
   // Step 2 of confirmation: redeem the token and execute the original tool.
   if (name === 'midnight_confirm_operation') {
@@ -1090,14 +1096,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (!pending) {
       return errorResponse(new Error('Unknown or expired confirmation token. The first-step tool call may need to be re-issued.'));
     }
-    return executeTool(pending.tool, pending.args);
+    return executeTool(pending.tool, pending.args, call);
   }
 
   // Step 1 of confirmation: return a pending token instead of executing.
   if (REQUIRES_CONFIRMATION.has(name)) {
     let found: string | void;
     try {
-      found = await TOOLS.find((t) => t.name === name)?.check?.(params);
+      found = await TOOLS.find((t) => t.name === name)?.check?.(params, call);
     } catch (err) {
       return errorResponse(err instanceof Error ? err : new Error(String(err)));
     }
@@ -1121,8 +1127,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
-  return executeTool(name, params);
+  return executeTool(name, params, call);
 });
+
+/**
+ * A tool call's run: it stops when the client cancels the call, and when the
+ * client asked for progress (a progress token), each message the command's
+ * spinners say goes to it as a progress notification. A message the same as
+ * the one before is not sent again.
+ */
+function toolCall(progressToken: ProgressToken | undefined, extra: RequestHandlerExtra<ServerRequest, ServerNotification>): CommandRun {
+  if (progressToken === undefined) return { signal: extra.signal };
+  let progress = 0;
+  let last: string | undefined;
+  return {
+    signal: extra.signal,
+    onProgress: (message) => {
+      if (message === last) return;
+      last = message;
+      progress += 1;
+      // Progress is a courtesy to the client: one it fails to take must not fail the tool.
+      extra.sendNotification({ method: 'notifications/progress', params: { progressToken, progress, message } }).catch(() => {});
+    },
+  };
+}
 
 /**
  * Stamp every MCP response with the server's PKG_VERSION so callers can
@@ -1134,12 +1162,12 @@ function stamp<T extends Record<string, unknown>>(payload: T): T & { _serverVers
   return { ...payload, _serverVersion: PKG_VERSION };
 }
 
-async function executeTool(name: string, params: Record<string, unknown>) {
+async function executeTool(name: string, params: Record<string, unknown>, call: CommandRun) {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) return errorResponse(new Error(`Unknown tool: ${name}`));
 
   try {
-    const result = await tool.handler(params);
+    const result = await tool.handler(params, call);
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(stamp(result), null, 2) }],
     };

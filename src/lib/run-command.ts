@@ -3,8 +3,16 @@
 
 import { type ParsedArgs, MINIMAL_FLAG } from './argv.ts';
 import { setCaptureTarget } from './json-output.ts';
+import { setProgressTarget } from '../ui/spinner.ts';
 
 type CommandHandler = (args: ParsedArgs, signal?: AbortSignal) => Promise<void>;
+
+export interface CommandRun {
+  /** Cancels the command: those that wait, or run a script, stop when it aborts. */
+  signal?: AbortSignal;
+  /** Each message the command's spinners say while it runs, --json mode included. */
+  onProgress?: (message: string) => void;
+}
 
 /**
  * Execute a command handler with --json mode, capturing the JSON result.
@@ -27,16 +35,19 @@ type CommandHandler = (args: ParsedArgs, signal?: AbortSignal) => Promise<void>;
  * that as "agent explicitly wants the full shape" and emit the human
  * shape instead.
  *
+ * What the command's spinners say goes to `onProgress` while it runs.
+ *
  * Returns the parsed JSON object. Throws the original error if the
  * handler throws.
  */
 export async function captureCommand(
   handler: CommandHandler,
   args: ParsedArgs,
-  signal?: AbortSignal,
+  { signal, onProgress }: CommandRun = {},
 ): Promise<Record<string, unknown>> {
   const chunks: string[] = [];
   setCaptureTarget((json) => chunks.push(json));
+  setProgressTarget(onProgress ?? null);
 
   try {
     args.flags.json = true;
@@ -50,5 +61,6 @@ export async function captureCommand(
     return JSON.parse(raw);
   } finally {
     setCaptureTarget(null);
+    setProgressTarget(null);
   }
 }

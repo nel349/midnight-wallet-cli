@@ -2,6 +2,12 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **MCP tool calls report progress, and stop when cancelled.** A call that carries a progress token gets what the command says as it runs, as numbered progress notifications: the steps a terminal shows (the wallet check, mn serve starting and syncing, the transactions it balances and submits, the account build's proofs and each proving artefact it fetches), though the command runs in `--json` mode. A client that resets its timeout on progress keeps waiting through a first issue or revoke. A call the client cancels stops: a grant or contract command's script is stopped, and the mn serve it started with it. A transaction already submitted when the cancel comes may still land, so read the state (`midnight_grant_status`, a balance) before running the call again.
+
 ## [0.6.0-rc.9] - 2026-10-17
 
 ### Changed

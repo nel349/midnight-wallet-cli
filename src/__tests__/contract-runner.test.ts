@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as ledger from '@midnightntwrk/ledger-v9';
@@ -32,6 +32,9 @@ import {
   generateStateScript,
   SCRIPT_PRELUDE,
   indexerEnvironment,
+  runCall,
+  runDeploy,
+  runState,
 } from '../lib/contract/runner.ts';
 import type { NetworkConfig } from '../lib/network.ts';
 
@@ -249,4 +252,19 @@ describe('generated scripts', () => {
       }
     });
   }
+});
+
+describe('a cancelled run', () => {
+  it('starts no script for a deploy, a call or a state read whose run was cancelled, and says it was cancelled', async () => {
+    const dappDir = mkdtempSync(join(tmpdir(), 'mn-cancelled-run-'));
+    try {
+      const common = { dappDir, networkConfig: NETWORK, managedDir: join(dappDir, 'managed', 'counter'), contractName: 'counter', signal: AbortSignal.abort() };
+      await expect(runDeploy({ ...common, servePort: 9932 })).rejects.toThrow('Operation cancelled');
+      await expect(runCall({ ...common, servePort: 9932, contractAddress: 'ab'.repeat(32), circuit: 'increment' })).rejects.toThrow('Operation cancelled');
+      await expect(runState({ ...common, contractAddress: 'ab'.repeat(32) })).rejects.toThrow('Operation cancelled');
+      expect(readdirSync(dappDir)).toEqual([]);
+    } finally {
+      rmSync(dappDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -43,11 +43,11 @@ export default async function contractCommand(args: ParsedArgs, signal?: AbortSi
     case 'inspect':
       return handleInspect(args);
     case 'deploy':
-      return handleDeploy(args);
+      return handleDeploy(args, signal);
     case 'call':
-      return handleCall(args);
+      return handleCall(args, signal);
     case 'state':
-      return handleState(args);
+      return handleState(args, signal);
   }
 }
 
@@ -104,7 +104,7 @@ async function handleInspect(args: ParsedArgs): Promise<void> {
 
 // ── Deploy ──
 
-async function handleDeploy(args: ParsedArgs): Promise<void> {
+async function handleDeploy(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
   const { dappDir, info, constructorArgs, privateStateSecretKey } = resolveContractDeployRequest(args);
 
@@ -144,6 +144,7 @@ async function handleDeploy(args: ParsedArgs): Promise<void> {
       args: constructorArgs,
       privateStateSecretKey,
       onMessage: (msg) => spinner.update(msg),
+      signal,
     });
 
     spinner.stop('Contract deployed');
@@ -196,7 +197,7 @@ function writeNextStepsHint(address: string, circuits: { name: string; arguments
 
 // ── Call ──
 
-async function handleCall(args: ParsedArgs): Promise<void> {
+async function handleCall(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
   const { dappDir, info, address, circuit, callArgs } = resolveContractCallRequest(args);
 
@@ -231,6 +232,7 @@ async function handleCall(args: ParsedArgs): Promise<void> {
       args: callArgs,
       servePort: serve.port,
       onMessage: (msg) => spinner.update(msg),
+      signal,
     });
 
     spinner.stop(`${circuit} called`);
@@ -257,7 +259,7 @@ async function handleCall(args: ParsedArgs): Promise<void> {
 
 // ── State ──
 
-async function handleState(args: ParsedArgs): Promise<void> {
+async function handleState(args: ParsedArgs, signal?: AbortSignal): Promise<void> {
   const jsonMode = hasFlag(args, 'json');
   const dappDir = resolve(getFlag(args, 'path') ?? process.cwd());
   const scanDir = resolveScanDir(args);
@@ -288,6 +290,7 @@ async function handleState(args: ParsedArgs): Promise<void> {
       contractName: info.name,
       contractAddress: address,
       onMessage: (msg) => spinner.update(msg),
+      signal,
     });
 
     spinner.stop('State retrieved');

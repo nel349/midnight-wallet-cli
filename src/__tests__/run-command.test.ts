@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { captureCommand } from '../lib/run-command.ts';
+import { silentSpinner, start as startSpinner } from '../ui/spinner.ts';
 import { parseArgs, type ParsedArgs } from '../lib/argv.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
 import * as fs from 'fs';
@@ -147,6 +148,45 @@ describe('captureCommand', () => {
       await captureCommand(captureArgs(sink), { command: 'x', subcommand: undefined, positionals: [], flags: { _minimal: true, _full: true } });
       expect(sink.args?.flags._minimal).toBe(true);
       expect(sink.args?.flags._full).toBe(true);
+    });
+  });
+
+  describe('progress and cancellation', () => {
+    const noArgs = (): ParsedArgs => ({ command: 'x', subcommand: undefined, positionals: [], flags: {} });
+
+    it('sends what a command\'s spinner says to onProgress, a --json command\'s silent spinner too', async () => {
+      const said: string[] = [];
+      await captureCommand(async () => {
+        const quiet = silentSpinner();
+        quiet.update('Starting mn serve...');
+        quiet.stop('mn serve ready (port 9932)');
+        const shown = startSpinner('Checking balance on undeployed...');
+        shown.update('Syncing transactions... 40%');
+        shown.log('fetching keys/deposit_shielded.prover (11 MB), once, from github.com');
+        shown.stop('Synced 3 transactions');
+      }, noArgs(), { onProgress: (message) => said.push(message) });
+      expect(said).toEqual([
+        'Starting mn serve...',
+        'mn serve ready (port 9932)',
+        'Checking balance on undeployed...',
+        'Syncing transactions... 40%',
+        'fetching keys/deposit_shielded.prover (11 MB), once, from github.com',
+        'Synced 3 transactions',
+      ]);
+    });
+
+    it('sends nothing once the run is over, even when it failed', async () => {
+      const said: string[] = [];
+      await expect(captureCommand(async () => { throw new Error('refused'); }, noArgs(), { onProgress: (message) => said.push(message) })).rejects.toThrow('refused');
+      silentSpinner().update('a later command');
+      expect(said).toEqual([]);
+    });
+
+    it('hands the command the run\'s signal', async () => {
+      const controller = new AbortController();
+      let seen: AbortSignal | undefined;
+      await captureCommand(async (_args, signal) => { seen = signal; }, noArgs(), { signal: controller.signal });
+      expect(seen).toBe(controller.signal);
     });
   });
 });
