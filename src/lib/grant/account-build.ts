@@ -34,7 +34,7 @@ export const MIN_NODE_FOR_ACCOUNT_BUILD = '22.18.0';
 const ACCOUNT_ARTIFACTS_DIR_NAME = 'account-artifacts';
 
 export type AccountBuild =
-  /** The installed account package: its driver, midnight-js-types and ws as the file URLs mn's own dependencies resolve to. */
+  /** The installed account package: its driver and the midnight-js-types it uses, and mn's ws, as file URLs. */
   | { kind: 'package'; driverUrl: string; typesUrl: string; wsUrl: string }
   /** A local checkout, named by --account-build or the account-build config key. */
   | { kind: 'directory'; dir: string };
@@ -42,10 +42,12 @@ export type AccountBuild =
 /** The installed account package, resolved from mn's own dependencies. */
 export function installedAccountPackage(from: string = import.meta.url): AccountBuild {
   const require = createRequire(from);
+  const driver = require.resolve(ACCOUNT_PACKAGE_DRIVER);
   return {
     kind: 'package',
-    driverUrl: pathToFileURL(require.resolve(ACCOUNT_PACKAGE_DRIVER)).href,
-    typesUrl: pathToFileURL(require.resolve(MIDNIGHT_JS_TYPES)).href,
+    driverUrl: pathToFileURL(driver).href,
+    // The package's own copy, the one its midnight-js reads the wallet with.
+    typesUrl: pathToFileURL(createRequire(driver).resolve(MIDNIGHT_JS_TYPES)).href,
     wsUrl: pathToFileURL(require.resolve(WEBSOCKET_CLIENT)).href,
   };
 }

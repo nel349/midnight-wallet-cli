@@ -1,13 +1,14 @@
 // Runs one action in the account build: a generated script imports the
 // build's module for outside callers and hands it a wallet backed by mn serve.
 // For a local build the script is placed in the build's directory, so its
-// imports resolve there; for the installed package it imports the driver and
-// midnight-js-types by the URLs mn's own dependencies resolve to, and is placed
+// imports resolve there; for the installed package it imports the driver,
+// the midnight-js-types it uses and mn's ws by their file URLs, and is placed
 // in the records directory. The script's working directory is the account's
 // records directory, where the build keeps its private-state stores; the
 // records themselves go where MIDNIGHT_ACCOUNT_STATE_DIR says, which is the
-// same place. The package fetches its proving artefacts as it first proves
-// with each, into the cache MIDNIGHT_ACCOUNT_ARTEFACTS_DIR names.
+// same place. The package fetches each proving artefact as it first needs it,
+// into the cache MIDNIGHT_ACCOUNT_ARTEFACTS_DIR names, saying so for each
+// large one.
 //
 // The build logs its progress with console.log. The script sends that to
 // stderr, where mn shows it as progress, and writes the action's result as one
@@ -94,9 +95,12 @@ const httpOf = (url: string): string => url.replace(/^ws/, 'http');
 /**
  * What the build reads from its environment: its endpoints, as URLs, where its
  * records go, and for the installed package where it caches its proving
- * artefacts (a local build has its own).
+ * artefacts (a local build has its own). What else the build would act on is
+ * cleared (undefined), so nothing set in the user's shell reaches it: a
+ * profile would move the records where mn never looks, and the artefacts'
+ * cache and source are mn's to name.
  */
-export function bridgeEnvironment(networkConfig: NetworkConfig, recordsDir: string, build?: AccountBuild): Record<string, string> {
+export function bridgeEnvironment(networkConfig: NetworkConfig, recordsDir: string, build: AccountBuild): Record<string, string | undefined> {
   if (networkConfig.networkId.toLowerCase() !== 'undeployed') {
     throw new UnreachableByAccountBuildError(networkConfig.networkId);
   }
@@ -105,12 +109,17 @@ export function bridgeEnvironment(networkConfig: NetworkConfig, recordsDir: stri
     MIDNIGHT_ACCOUNT_INDEXER_URL: networkConfig.indexer,
     MIDNIGHT_ACCOUNT_PROOF_SERVER_URL: networkConfig.proofServer,
     MIDNIGHT_ACCOUNT_STATE_DIR: recordsDir,
-    ...(build?.kind === 'package' ? { MIDNIGHT_ACCOUNT_ARTEFACTS_DIR: accountArtifactsDir() } : {}),
+    MIDNIGHT_ACCOUNT_ARTEFACTS_DIR: build.kind === 'package' ? accountArtifactsDir() : undefined,
+    MIDNIGHT_ACCOUNT_ARTEFACTS_SOURCE: undefined,
+    BENCH_PROFILE: undefined,
   };
 }
 
 /** The owner key a deploy is given, read by the script from its environment: never on a command line, never in the script. */
 const OWNER_KEY_ENV = 'MN_GRANT_OWNER_KEY';
+
+/** How to stop driving a local build, for the installed package. */
+const UNNAME_LOCAL_BUILD = 'midnight config unset account-build, and no --account-build';
 
 /** How the script names a module: a local build's by its place beside the script, the package's by its URL. */
 const driverUrlCode = (build: AccountBuild): string => build.kind === 'package'
@@ -130,7 +139,7 @@ console.error = (...args) => { reported.push(args.join(' ')); };
 
 const driver = await import(${driverUrlCode(build)});
 if (driver.DRIVER_VERSION !== ${ACCOUNT_DRIVER_VERSION}) {
-  fail(new Error('This account build speaks version ' + driver.DRIVER_VERSION + ' of its interface; this mn speaks version ${ACCOUNT_DRIVER_VERSION}. Update the older of the two.'));
+  fail(new Error('This account build speaks version ' + driver.DRIVER_VERSION + ' of its interface; this mn speaks version ${ACCOUNT_DRIVER_VERSION}. ${build.kind === 'package' ? 'Reinstall mn.' : `Update the build, or drive the account package mn installs instead: ${UNNAME_LOCAL_BUILD}.`}'));
 }
 `;
 

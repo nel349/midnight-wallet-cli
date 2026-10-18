@@ -62,13 +62,13 @@ afterAll(async () => {
 
 describe('bridgeEnvironment', () => {
   it('gives the build its endpoints as http URLs and its records directory', () => {
-    expect(bridgeEnvironment(NETWORK, '/records')).toEqual({
+    expect(bridgeEnvironment(NETWORK, '/records', LOCAL)).toMatchObject({
       MIDNIGHT_ACCOUNT_NODE_URL: 'http://localhost:29944',
       MIDNIGHT_ACCOUNT_INDEXER_URL: 'http://localhost:28088/api/v4/graphql',
       MIDNIGHT_ACCOUNT_PROOF_SERVER_URL: 'http://localhost:26300',
       MIDNIGHT_ACCOUNT_STATE_DIR: '/records',
     });
-    expect(bridgeEnvironment({ ...NETWORK, node: 'wss://node.example:443' }, '/r').MIDNIGHT_ACCOUNT_NODE_URL).toBe('https://node.example:443');
+    expect(bridgeEnvironment({ ...NETWORK, node: 'wss://node.example:443' }, '/r', LOCAL).MIDNIGHT_ACCOUNT_NODE_URL).toBe('https://node.example:443');
   });
 
   it('names a cache under ~/.midnight for the installed package\'s proving artefacts, and none for a local build, which has its own', () => {
@@ -76,15 +76,15 @@ describe('bridgeEnvironment', () => {
     process.env.HOME = '/home/norm';
     try {
       expect(bridgeEnvironment(NETWORK, '/records', installedAccountPackage()).MIDNIGHT_ACCOUNT_ARTEFACTS_DIR).toBe('/home/norm/.midnight/account-artifacts');
-      expect(bridgeEnvironment(NETWORK, '/records', LOCAL)).not.toHaveProperty('MIDNIGHT_ACCOUNT_ARTEFACTS_DIR');
+      expect(bridgeEnvironment(NETWORK, '/records', LOCAL).MIDNIGHT_ACCOUNT_ARTEFACTS_DIR).toBeUndefined();
     } finally {
       process.env.HOME = origHome;
     }
   });
 
   it('refuses a network the build can\'t reach', () => {
-    expect(() => bridgeEnvironment({ ...NETWORK, networkId: 'PreProd' }, '/r')).toThrow(UnreachableByAccountBuildError);
-    expect(() => bridgeEnvironment({ ...NETWORK, networkId: 'PreProd' }, '/r')).toThrow('reaches only an undeployed (local) network; this is PreProd');
+    expect(() => bridgeEnvironment({ ...NETWORK, networkId: 'PreProd' }, '/r', LOCAL)).toThrow(UnreachableByAccountBuildError);
+    expect(() => bridgeEnvironment({ ...NETWORK, networkId: 'PreProd' }, '/r', LOCAL)).toThrow('reaches only an undeployed (local) network; this is PreProd');
   });
 });
 
@@ -125,7 +125,16 @@ describe('running the bridge in a build', () => {
     expect(ownerKey).toMatch(/^[0-9a-f]{64}$/);
     messages.length = 0;
 
-    const outcome = await deployAccount(bridge(), ownerKey);
+    // Set in the shell, none reaches the build: a profile would move its
+    // records, and the artefacts it proves with are its own.
+    const shell = { BENCH_PROFILE: 'k1', MIDNIGHT_ACCOUNT_ARTEFACTS_DIR: '/elsewhere', MIDNIGHT_ACCOUNT_ARTEFACTS_SOURCE: 'relative/source' };
+    Object.assign(process.env, shell);
+    let outcome;
+    try {
+      outcome = await deployAccount(bridge(), ownerKey);
+    } finally {
+      for (const name of Object.keys(shell)) delete process.env[name];
+    }
 
     expect(outcome).toEqual({ address: 'ab'.repeat(32), resumed: false, activated: true });
     expect(recorded('deploy')).toEqual({
@@ -137,6 +146,9 @@ describe('running the bridge in a build', () => {
       node: 'http://localhost:29944',
       indexer: 'http://localhost:28088/api/v4/graphql',
       proofServer: 'http://localhost:26300',
+      profile: null,
+      artefactsDir: null,
+      artefactsSource: null,
     });
     // The build's console.log progress reaches mn as messages, not as output.
     expect(messages).toContain('wave 1: deployed');
@@ -227,7 +239,20 @@ describe('running the bridge in the installed account package', () => {
   });
 
   it('runs the package\'s own driver from the records directory, which it leaves as it found it', async () => {
-    expect(await accountOnRecord({ build: installedAccountPackage(), recordsDir: records, networkConfig: NETWORK })).toBeNull();
+    // Whatever the shell set: the package's own cache and source are mn's to
+    // name, its records are not moved by a profile, and the Node.js it runs
+    // on is mn's own, not the first on PATH.
+    const shell = { BENCH_PROFILE: 'k1', MIDNIGHT_ACCOUNT_ARTEFACTS_SOURCE: 'relative/source', PATH: '/nowhere' };
+    const before = { ...process.env };
+    Object.assign(process.env, shell);
+    try {
+      expect(await accountOnRecord({ build: installedAccountPackage(), recordsDir: records, networkConfig: NETWORK })).toBeNull();
+    } finally {
+      for (const name of Object.keys(shell)) {
+        if (before[name] === undefined) delete process.env[name];
+        else process.env[name] = before[name];
+      }
+    }
     expect(fs.readdirSync(records)).toEqual([]);
     // The package placed its build's manifest in its artefact cache, and fetched nothing.
     const [cache, ...more] = fs.readdirSync(path.join(home, '.midnight', 'account-artifacts'));

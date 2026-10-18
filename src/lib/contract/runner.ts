@@ -3,6 +3,7 @@
 // The generated script only needs contract SDK + RPC client — no wallet SDK.
 
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { writeFileSync, unlinkSync, existsSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -600,7 +601,8 @@ export interface ScriptRun {
   script: string;
   /** Each line the script writes to stderr, other than its marked error. */
   onMessage?: (msg: string) => void;
-  env?: Record<string, string>;
+  /** Set over mn's own environment; a variable given as undefined is cleared. */
+  env?: Record<string, string | undefined>;
   /** The script's working directory; `dir` when not given. */
   cwd?: string;
   /** Make mn's own SDK packages resolvable from `dir` when it lacks them. Default true. */
@@ -608,6 +610,9 @@ export interface ScriptRun {
   /** What the script is for: part of its (hidden, removed afterwards) file name. Default "contract". */
   label?: string;
 }
+
+/** Random bytes in a generated script's name, beside the time. */
+const SCRIPT_NAME_RANDOM_BYTES = 4;
 
 /** Runs a generated script and returns what it wrote to stdout. Throws its marked error when it fails. */
 export async function executeScript({ dir: dappDir, script, onMessage, env: extraEnv, cwd, overlaySdk = true, label = 'contract' }: ScriptRun): Promise<string> {
@@ -624,7 +629,8 @@ export async function executeScript({ dir: dappDir, script, onMessage, env: extr
   const userNodeModules = join(dappDir, 'node_modules');
   const overlayPaths = overlaySdk ? overlayMidnightSdk(userNodeModules) : [];
 
-  const scriptPath = join(dappDir, `.mn-${label}-${Date.now()}.mjs`);
+  // Unique to this run, so two at once in one directory never share a script.
+  const scriptPath = join(dappDir, `.mn-${label}-${Date.now()}-${randomBytes(SCRIPT_NAME_RANDOM_BYTES).toString('hex')}.mjs`);
   writeFileSync(scriptPath, script);
 
   const cleanup = () => {
@@ -639,7 +645,8 @@ export async function executeScript({ dir: dappDir, script, onMessage, env: extr
   };
 
   return new Promise<string>((resolve, reject) => {
-    const child = spawn('node', [scriptPath], {
+    // The Node.js running mn, which passed its version checks, not whichever is first on PATH.
+    const child = spawn(process.execPath, [scriptPath], {
       cwd: cwd ?? dappDir,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {

@@ -28,6 +28,9 @@ export const deployOver = async (wallet: Wallet, deviceSk?: string) => {
     deviceSk, cwd: process.cwd(), coinPublicKey: wallet.getCoinPublicKey(), encryptionPublicKey: wallet.getEncryptionPublicKey(),
     eras: wallet.supportedEras, node: process.env.MIDNIGHT_ACCOUNT_NODE_URL, indexer: process.env.MIDNIGHT_ACCOUNT_INDEXER_URL,
     proofServer: process.env.MIDNIGHT_ACCOUNT_PROOF_SERVER_URL,
+    // What the shell may have set, which a real build would act on.
+    profile: process.env.BENCH_PROFILE ?? null, artefactsDir: process.env.MIDNIGHT_ACCOUNT_ARTEFACTS_DIR ?? null,
+    artefactsSource: process.env.MIDNIGHT_ACCOUNT_ARTEFACTS_SOURCE ?? null,
   });
   if (deviceSk === 'ee'.repeat(32)) throw new Error('the deploy failed for want of Dust');
   seen('account', { address: 'ab'.repeat(32), arm: 'k1' });

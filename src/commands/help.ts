@@ -912,9 +912,11 @@ or refuses, and can revoke at any time.
 
 mn runs the account owner's code from the account package it installs
 (@kuiralabs/midnight-account-chain), with this wallet paying the fees
-through mn serve. The package's proving keys are fetched the first time a
-command proves with them (up to a few hundred MB each), into
-~/.midnight/account-artifacts, each checked against the package's manifest.
+through mn serve. The package's proving artefacts are fetched from GitHub
+the first time a command needs them, into ~/.midnight/account-artifacts,
+each checked against the package's manifest: the verifier keys (under
+0.1 MB) when a command first reads the account, and each circuit's proving
+key (up to a few hundred MB) when one first proves with it, said as it goes.
 To drive a local build instead:
   midnight config set account-build <dir>
 It needs Node.js 22.18 or newer and reaches only an undeployed (local)
