@@ -55,8 +55,15 @@ export const ERROR_CODES = {
   BLOCKFROST_LIMIT_REACHED: 'BLOCKFROST_LIMIT_REACHED',
   /** An endpoint set by flag or config was shut down by its operator. Recovery: unset it (`mn config unset indexer-ws`). */
   ENDPOINT_SHUT_DOWN: 'ENDPOINT_SHUT_DOWN',
+  /** mn's passphrase was wrong, or a sealed secret was changed. Recovery: run it again with the passphrase mn was protected with. */
+  WRONG_PASSPHRASE: 'WRONG_PASSPHRASE',
+  /** A secret was needed and no passphrase could be had. Recovery: set MN_PASSPHRASE, or run at a terminal. */
+  PASSPHRASE_REQUIRED: 'PASSPHRASE_REQUIRED',
   UNKNOWN: 'UNKNOWN',
 } as const;
+
+/** Errors about mn's passphrase, the caller's to fix, classified by their code before any usage error. */
+const PASSPHRASE_ERROR_CODES: ReadonlySet<string> = new Set([ERROR_CODES.WRONG_PASSPHRASE, ERROR_CODES.PASSPHRASE_REQUIRED]);
 
 /** Typed setup errors that carry their own `code`; classified by it, not by message text. */
 const SETUP_ERROR_CODES: ReadonlySet<string> = new Set([
@@ -85,10 +92,13 @@ interface ClassifiedError {
 export function classifyError(err: Error): ClassifiedError {
   // A usage error is the caller's to fix, whatever its text (the CLI and MCP agree on this).
   // (Tested through `unknown`: UsageError has Error's shape, so narrowing `err` itself would leave `never`.)
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'string' && PASSPHRASE_ERROR_CODES.has(code)) {
+    return { exitCode: EXIT_INVALID_ARGS, errorCode: code as ErrorCode };
+  }
   if (isUsageError(err as unknown)) {
     return { exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.INVALID_ARGS };
   }
-  const code = (err as { code?: unknown }).code;
   if (typeof code === 'string' && SETUP_ERROR_CODES.has(code)) {
     return { exitCode: EXIT_NETWORK_ERROR, errorCode: code as ErrorCode };
   }

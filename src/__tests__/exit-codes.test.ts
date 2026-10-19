@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { classifyError, humanizeNetworkError, ERROR_CODES, EXIT_GENERAL_ERROR, EXIT_NETWORK_ERROR, EXIT_INVALID_ARGS } from '../lib/exit-codes.ts';
 import { NodeTooOldForAccountError, UnreachableByAccountError } from '../lib/grant/account.ts';
 import { NoAccountError } from '../lib/grant/prepare.ts';
+import { WrongPassphraseError } from '../lib/keystore.ts';
+import { NoPassphraseError } from '../lib/passphrase.ts';
 
 describe('humanizeNetworkError', () => {
   it('rewrites the empty-reason node-fetch tail with URL + cause hint', () => {
@@ -84,6 +86,11 @@ describe('classifyError: mn grant', () => {
 
   it('says a Node.js too old for the account package is an unsupported Node.js', () => {
     expect(classifyError(new NodeTooOldForAccountError('22.10.0'))).toEqual({ exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNSUPPORTED_NODE });
+  });
+
+  it("names a wrong passphrase, and a missing one, as the caller's to fix", () => {
+    expect(classifyError(new WrongPassphraseError())).toEqual({ exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.WRONG_PASSPHRASE });
+    expect(classifyError(new NoPassphraseError())).toEqual({ exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.PASSPHRASE_REQUIRED });
   });
 });
 
