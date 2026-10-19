@@ -5,6 +5,8 @@
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import * as rx from 'rxjs';
+// The wallet SDK's own copy of Effect (mn declares none of its own): its submit runs on it.
+import { Effect } from 'effect';
 
 // Stub SDK address encoding — MidnightBech32m.encode returns a mock
 
@@ -23,6 +25,7 @@ import { classifyError } from '../lib/exit-codes.ts';
 import { FORK_SCHEDULE } from '../lib/network.ts';
 import { deriveUnshieldedAddress, deriveAllShieldedAddresses, deriveShieldedAddress } from '../lib/derive-address.ts';
 import { DustAddress, MidnightBech32m, UnshieldedAddress } from '@midnightntwrk/wallet-sdk/address-format';
+import { SubmissionError } from '@midnightntwrk/wallet-sdk/capabilities/submission';
 import type { FeeLimits } from '../lib/fee-limits.ts';
 import type { ApprovalOptions } from '../lib/approval.ts';
 import {
@@ -862,6 +865,22 @@ describe('dapp-connector', () => {
       expect(bundle.facade.adoptTransaction).toHaveBeenCalledWith(new Uint8Array([0xbe, 0xef]), 'Finalized');
       expect(submit).toHaveBeenCalledWith({ stage: 'Finalized', hex: 'beef' });
       expect(result).toEqual({ txHash: 'tx-id' });
+    });
+
+    it("forwards the node's refusal when the wallet SDK's submit fails, not only its own wrapper's words", async () => {
+      // The wallet SDK runs its Effect submit with Effect.runPromise, which
+      // rejects with a FiberFailure: the SubmissionError it failed with, and
+      // the node's answer that error wraps, are under a symbol, not `cause`.
+      const nodeAnswer = new Error('1010: Invalid Transaction: Custom error: 139');
+      const sdkFailure = Effect.runPromise(Effect.fail(new SubmissionError({ message: 'Transaction submission error', cause: nodeAnswer })));
+      sdkFailure.catch(() => {});
+      const bundle = createBundleStub({ submitTransaction: () => sdkFailure });
+      connector = createDAppConnector({ bundle, networkConfig: TEST_NETWORK_CONFIG, approvalOptions: { approveAll: true } });
+
+      const err: any = await connector.handlers.submitTransaction({ tx: 'beef' }, ctx()).catch((e: any) => e);
+
+      expect(err.message).toContain('Transaction submission error');
+      expect(err.message).toContain('1010: Invalid Transaction: Custom error: 139');
     });
 
     it('reports bytes the wallet cannot read as InvalidRequest, naming the stage, without balancing', async () => {

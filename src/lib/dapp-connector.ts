@@ -79,14 +79,35 @@ export interface DAppConnector {
 
 // ── Factory ──
 
+/** Where a FiberFailure keeps the Cause its Effect failed with. The wallet
+ *  SDK runs its Effects with Effect.runPromise, which rejects with one: the
+ *  error the Effect failed with, and what that wraps, are under this symbol,
+ *  not `cause`. */
+const FIBER_FAILURE_CAUSE = Symbol.for('effect/Runtime/FiberFailure/Cause');
+
+/** The error a FiberFailure's Effect failed or died with; undefined for anything else. */
+function fiberFailureOf(err: object): unknown {
+  const cause = (err as Record<symbol, { _tag?: string; error?: unknown; defect?: unknown } | undefined>)[FIBER_FAILURE_CAUSE];
+  if (cause?._tag === 'Fail') return cause.error;
+  if (cause?._tag === 'Die') return cause.defect;
+  return undefined;
+}
+
 /** Extract a human-readable detail string from an SDK/chain error.
- *  Walks nested cause chains including Effect Data.TaggedError objects. */
+ *  Walks nested cause chains including Effect Data.TaggedError objects, and
+ *  into the error a FiberFailure holds. */
 function extractErrorDetail(err: unknown): string {
   const parts: string[] = [];
   let current: unknown = err;
   const seen = new Set<unknown>();
   while (current && !seen.has(current)) {
     seen.add(current);
+    // A FiberFailure says only its failure's message: read the failure itself.
+    const failure = typeof current === 'object' ? fiberFailureOf(current) : undefined;
+    if (failure !== undefined) {
+      current = failure;
+      continue;
+    }
     const anyErr = current as any;
     // Effect Data.TaggedError or standard Error
     if (current instanceof Error || (typeof current === 'object' && anyErr._tag)) {

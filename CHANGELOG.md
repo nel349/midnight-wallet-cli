@@ -12,6 +12,10 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 - **A cancelled grant command stops at its next step.** An MCP call cancelled mid-command stops once the step it is in has landed, not while it proves: the command records each step before submitting it, so stopping there is as safe as an interruption, and running the command again finishes what it left. Read the state (`midnight_grant_status`) before running it again.
 - **`list` no longer suggests `revoke-exhausted`**, a command of the account build's own command line that mn never had.
 
+### Fixed
+
+- **A transaction the node refuses says why.** When a submit through `mn serve`'s DApp connector (and `mn grant`, which pays through the same code) failed, it reported only `Transaction submission error`: the wallet SDK's error keeps the node's answer where mn did not look. It now carries the node's own words, such as `1010: Invalid Transaction: Custom error: 139`, so an app can tell the node refused it, and why.
+
 ### Removed
 
 - **`--account-build <dir>` and the `account-build` config key.** mn runs the account package it installs; a local build would load a second copy of the libraries beside mn's own. An `account-build` key left in `~/.midnight/config.json` is ignored.
