@@ -19,7 +19,7 @@ export type GrantRequest =
   | { subcommand: 'revoke'; target: string }
   | { subcommand: 'revoke-all' };
 
-/** Limits an issue may set, each a whole number as text; the account build's defaults stand for those not given. */
+/** Limits an issue may set, each a whole number as text; mn's defaults stand for those not given. */
 export interface GrantLimits {
   /** The most the grant may ever pay, in the token's smallest unit. */
   cap?: string;
@@ -131,32 +131,13 @@ export function paysAFee(request: GrantRequest): boolean {
 }
 
 /**
- * What an issue would grant, as the account build reports it, in one line for
- * the user to confirm. Every field the build gives is said, under the build's
+ * What an issue would grant, as the account package reads it, in one line for
+ * the user to confirm. Every field the package gives is said, under the package's
  * own name for it, so nothing it reports is left out or reworded.
  */
 export function describeGrantTerms(terms: unknown): string {
   if (terms === null || typeof terms !== 'object' || Array.isArray(terms) || Object.keys(terms).length === 0) {
-    throw new Error('The account build reported no terms for this grant request.');
+    throw new Error('The account package reported no terms for this grant request.');
   }
   return Object.entries(terms).map(([name, value]) => `${name} ${typeof value === 'string' ? value : JSON.stringify(value)}`).join(', ');
-}
-
-/** The request as the account build's own command line takes it. Deploy and deposit are not among its commands. */
-export function ownerArguments(request: Exclude<GrantRequest, { subcommand: 'deploy' | 'deposit' }>, json: boolean): string[] {
-  const tail = json ? ['--json'] : [];
-  switch (request.subcommand) {
-    case 'status':
-      return ['status', ...tail];
-    case 'list':
-      return ['grants', ...tail];
-    case 'revoke-all':
-      return ['revoke-all', ...tail];
-    case 'revoke':
-      return ['revoke', request.target, ...tail];
-    case 'issue': {
-      const limits = LIMIT_FLAGS.flatMap(([flag, field]) => (request.limits[field] === undefined ? [] : [`--${flag}`, request.limits[field]]));
-      return ['issue', request.link, ...limits, ...(request.confirmed ? ['--yes'] : []), ...tail];
-    }
-  }
 }

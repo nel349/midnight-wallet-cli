@@ -1,6 +1,8 @@
-// What a command needs before it submits a transaction the wallet pays for,
-// through mn serve: which network and endpoints, whether the wallet can pay,
-// and a server to balance and submit. `mn contract` and `mn grant` share it.
+// What a command needs before it submits a transaction the wallet pays for:
+// which network and endpoints, whether the wallet can pay,
+// and a wallet to balance and submit: a server for `mn contract`, whose
+// scripts reach it over the connector, and the connector in this process for
+// `mn grant`.
 //
 // Progress goes to the spinner the command passes (a silent one under --json).
 // The wallet repository and the server are loaded when first needed, so a
@@ -14,6 +16,7 @@ import { loadWalletConfig, resolveWalletPath } from './wallet-config.ts';
 import { formatNight } from '../ui/format.ts';
 import { OWN_COMMAND_DUST_WAIT_MS } from './dust-wait.ts';
 import type { Spinner } from '../ui/spinner.ts';
+import type { FeeWallet } from '@kuiralabs/midnight-account-chain/owner';
 
 /** The network a command acts on, with its endpoints resolved. */
 export interface PayingTarget {
@@ -109,4 +112,50 @@ export async function openPayingServe({ network, endpoints }: PayingTarget, wall
   });
   progress.stop('mn serve ready (port ' + handle.port + ')');
   return { port: handle.port, stop: () => handle.stop() };
+}
+
+/** A fee wallet in this process, and how to stop it. */
+export interface PayingWallet {
+  feeWallet: FeeWallet;
+  /** The shielded NIGHT the synced wallet holds, in the smallest unit. */
+  shieldedNight: () => Promise<bigint>;
+  stop: () => Promise<void>;
+}
+
+/** The connection name the command's own calls are made under, for the connector's pending transactions. */
+const OWN_CONNECTION = 'mn-own-command';
+
+/**
+ * The command's wallet as the account package's fee wallet, in this process:
+ * the same DApp connector mn serve runs, its handlers called directly, so no
+ * port is taken and no server that is running already is reused. Stopping it
+ * reverts what it balanced but never submitted.
+ */
+export async function openPayingWallet({ network, endpoints }: PayingTarget, wallet: string | undefined, progress: Spinner): Promise<PayingWallet> {
+  const { openConnector } = await import('./test/serve-manager.ts');
+  const { feeWalletOver } = await import('@kuiralabs/midnight-account-chain/connector');
+  const opened = await openConnector({ network, endpoints, wallet, onMessage: (msg) => progress.update(msg), dustWaitMs: OWN_COMMAND_DUST_WAIT_MS });
+  let requestId = 0;
+  const call = (method: 'getShieldedAddresses' | 'getShieldedBalances' | 'balanceUnsealedTransaction' | 'submitTransaction', params: Record<string, unknown>): Promise<unknown> => {
+    const handler = opened.connector.handlers[method];
+    if (handler === undefined) throw new Error(`The wallet's connector has no ${method}`);
+    return handler(params, { notify: () => {}, connectionId: OWN_CONNECTION, requestId: ++requestId, metadata: {} });
+  };
+  const stop = async (): Promise<void> => {
+    await opened.connector.revertPendingTxs(OWN_CONNECTION).catch(() => { /* best-effort: the connector is stopping */ });
+    await opened.stop();
+  };
+  try {
+    const feeWallet = await feeWalletOver({
+      getShieldedAddresses: async () => (await call('getShieldedAddresses', {})) as { shieldedCoinPublicKey: string; shieldedEncryptionPublicKey: string },
+      balanceUnsealedTransaction: async (tx) => (await call('balanceUnsealedTransaction', { tx })) as { tx: string },
+      submitTransaction: (tx) => call('submitTransaction', { tx }),
+    });
+    const shieldedNight = async (): Promise<bigint> => BigInt(((await call('getShieldedBalances', {})) as Record<string, bigint | undefined>)[NATIVE_TOKEN_TYPE] ?? 0n);
+    progress.stop('Wallet ready');
+    return { feeWallet, shieldedNight, stop };
+  } catch (err) {
+    await stop();
+    throw err;
+  }
 }

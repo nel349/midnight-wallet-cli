@@ -289,7 +289,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       'set <key> <value>   Write a config value',
       'unset <key>         Reset a config value to its default',
       '',
-      'Keys: network, wallet, proof-server, node, indexer-ws, account-build,',
+      'Keys: network, wallet, proof-server, node, indexer-ws,',
       '      blockfrost-project-id',
       '',
       'Endpoint keys (proof-server, node, indexer-ws) are scoped to a',
@@ -487,18 +487,17 @@ const COMMAND_SPECS: CommandSpec[] = [
       'issue <link>                  Show the grant an agent\'s request link would get; issue it with --yes',
       'revoke <grant id | slot>      Revoke one grant',
       'revoke-all                    Revoke every grant',
-      '--account-build <dir>         A local account build to drive instead of the installed account',
-      '                              package (or: midnight config set account-build <dir>)',
       '--dev-owner-key               deploy: accept a random development owner key, which the',
       '                              wallet\'s mnemonic can\'t recover',
       '--yes                         issue: issue the grant (without it the grant is only shown)',
       '--cap <n>                     issue: the most the grant may ever pay, in the token\'s smallest unit',
-      '                              (this and the three below default to the account build\'s limits)',
+      '                              (this and the three below default to mn\'s limits: 500000, 300000,',
+      '                              2000000 and a day)',
       '--per-call <n>                issue: the most one payment may be',
       '--max-coin <n>                issue: the largest coin the agent may take to pay from',
       '--expires-in <seconds>        issue: how long the grant lasts',
       '--wallet <name>               The wallet that owns the account and pays the fees',
-      '--network <name>              Network (default: undeployed, the only one the account build reaches)',
+      '--network <name>              Network (default: undeployed, the only one the account package reaches)',
       '--node <url>                  Node RPC endpoint',
       '--indexer-ws <url>            Indexer WebSocket endpoint',
       '--proof-server <url>          Proof server endpoint',
@@ -911,14 +910,13 @@ agent's own key. An agent asks with a grant request link; the owner issues
 or refuses, and can revoke at any time.
 
 mn runs the account owner's code from the account package it installs
-(@kuiralabs/midnight-account-chain), with this wallet paying the fees
-through mn serve. The package's proving artefacts are fetched from GitHub
+(@kuiralabs/midnight-account-chain), in its own process: status, list and
+an issue not yet confirmed read the account without the wallet; the rest
+are paid by this wallet, with no mn serve and no port. The package's proving artefacts are fetched from GitHub
 the first time a command needs them, into ~/.midnight/account-artifacts,
 each checked against the package's manifest: the verifier keys (under
 0.1 MB) when a command first reads the account, and each circuit's proving
 key (up to a few hundred MB) when one first proves with it, said as it goes.
-To drive a local build instead:
-  midnight config set account-build <dir>
 It needs Node.js 22.18 or newer and reaches only an undeployed (local)
 ledger-9 network.
 
@@ -952,7 +950,7 @@ ledger-9 network.
     → { confirmed: false, request: { account, clientId, slot, grantee, payee, perCallCap, cap, maxCoinValue, expires } }
     Shows the grant the link would get and issues nothing. The link names
     who spends (clientId, grantee) and who they can pay (payee); the limits
-    are the owner's, and any not given take the account build's defaults.
+    are the owner's, and any not given take mn's defaults.
     A link is untrusted input: read all of it before adding --yes.
   midnight grant issue '<link>' ... --yes [--json]
     → { confirmed: true, grantId, request, fallbackLink }

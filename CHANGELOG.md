@@ -2,6 +2,20 @@
 
 All notable changes to midnight-wallet-cli will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **`mn grant` calls the account package in its own process.** It no longer writes a script, runs it as a child process, or starts an `mn serve` for its own commands: the wallet pays through its DApp connector in this process, the same code `mn serve` runs, with no server in front of it. So a running `mn serve` on port 9932 for another wallet (an agent's fee wallet, say) no longer stops `mn grant`, and `mn grant` never puts an approve-all server on that port. The account package's failures come through whole: a refusal by the account's own checks names the check, and a refusal by the node names its code.
+- **`mn grant status`, `mn grant list`, and `mn grant issue` without `--yes` read the account without the wallet**: no sync, no Dust, no server.
+- **Accounts made by earlier releases open unchanged**: their records in `~/.midnight/accounts/<network>/<wallet>/`, owner key included, and their private state are read where and as they were written.
+- **A cancelled grant command stops at its next step.** An MCP call cancelled mid-command stops once the step it is in has landed, not while it proves: the command records each step before submitting it, so stopping there is as safe as an interruption, and running the command again finishes what it left. Read the state (`midnight_grant_status`) before running it again.
+- **`list` no longer suggests `revoke-exhausted`**, a command of the account build's own command line that mn never had.
+
+### Removed
+
+- **`--account-build <dir>` and the `account-build` config key.** mn runs the account package it installs; a local build would load a second copy of the libraries beside mn's own. An `account-build` key left in `~/.midnight/config.json` is ignored.
+
 ## [0.6.0-rc.10] - 2026-10-17
 
 ### Changed

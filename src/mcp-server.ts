@@ -116,7 +116,6 @@ function transferArgs(params: Record<string, unknown>): ParsedArgs {
 const GRANT_COMMON_PROPERTIES = {
   wallet: { type: 'string', description: 'The wallet that owns the account and pays the fees' },
   network: { type: 'string', enum: ['undeployed'], description: 'Only undeployed (a local ledger-9 stack)' },
-  'account-build': { type: 'string', description: 'A local account build\'s directory, to drive instead of the installed account package (default: the account-build config key)' },
 };
 
 /** A grant tool's params as `grant <subcommand> [positional]`, the named param moved to the positional. */
@@ -130,7 +129,7 @@ function grantArgs(subcommand: string, params: Record<string, unknown>, position
   return args;
 }
 
-/** A grant request can run: its arguments, the account build, the network, the account and the wallet are all in order. */
+/** A grant request can run: its arguments, the network, the account and the wallet are all in order. */
 async function checkGrant(args: ParsedArgs, params: Record<string, unknown>): Promise<void> {
   const { prepareGrant } = await import('./lib/grant/prepare.ts');
   await prepareGrant(args);
@@ -803,7 +802,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_grant_request',
-    description: 'What issuing from an agent\'s grant request link would grant: who spends, who they can pay, and the limits (the account build\'s defaults for any not given). Issues nothing. Show the user this before midnight_grant_issue.',
+    description: 'What issuing from an agent\'s grant request link would grant: who spends, who they can pay, and the limits (mn\'s defaults for any not given). Issues nothing. Show the user this before midnight_grant_issue.',
     annotations: { readOnlyHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -865,7 +864,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_grant_issue',
-    description: 'Issue a grant from an agent\'s request link (returns pending token, whose description gives the grant\'s terms as the account build read them). Lets that agent spend from the account within the limits.',
+    description: 'Issue a grant from an agent\'s request link (returns pending token, whose description gives the grant\'s terms as the account package read them). Lets that agent spend from the account within the limits.',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
@@ -882,7 +881,7 @@ const TOOLS: ToolDef[] = [
     async handler(params, call) {
       return captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link', { yes: true }), call);
     },
-    // The link is read by the account build before a token is issued: a link
+    // The link is read by the account package before a token is issued: a link
     // that isn't one is refused here, and the user confirms the grant's terms
     // as the build reports them, not a link they can't read.
     async check(params, call) {
@@ -890,7 +889,7 @@ const TOOLS: ToolDef[] = [
       const shown = await captureCommand(await importHandler('grant'), grantArgs('issue', params, 'link'), call);
       const { describeGrantTerms } = await import('./lib/grant/request.ts');
       return `Issue a grant on ${shown.wallet}'s account on ${shown.network}, letting an agent spend from it within these terms `
-        + `(amounts in the token's smallest unit; limits not given took the account build's defaults): ${describeGrantTerms(shown.request)}`;
+        + `(amounts in the token's smallest unit; limits not given took mn's defaults): ${describeGrantTerms(shown.request)}`;
     },
   },
   {

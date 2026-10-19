@@ -1,24 +1,27 @@
-// Everything `mn grant` settles before a wallet is looked at or a server
-// started: what is asked, which account build, which network, where the
-// account's records are and whether there is an account yet. The CLI runs it
-// first; the MCP server runs it before it issues a confirmation token.
+// Everything `mn grant` settles before a wallet is looked at: what is asked,
+// which network, where the account's records are and whether there is an
+// account yet. The CLI runs it first; the MCP server runs it before it issues a
+// confirmation token.
 
 import { type ParsedArgs, getFlag } from '../argv.ts';
-import { loadCliConfig } from '../cli-config.ts';
 import { UsageError } from '../errors.ts';
 import { type PayingTarget, resolvePayingTarget } from '../paying-wallet.ts';
-import { assertNodeRunsAccountBuild, checkAccountBuild, resolveAccountBuild } from './account-build.ts';
+import { assertAccountNetwork, assertNodeRunsAccount } from './account.ts';
 import { accountRecordsDir, accountWalletName, ensureAccountRecordsDir } from './account-records.ts';
-import { type AccountBridge, type AccountOnRecord, accountOnRecord, bridgeEnvironment } from './bridge.ts';
 import { type GrantRequest, resolveGrantRequest } from './request.ts';
+
+/** The account a wallet's records name. */
+export interface AccountOnRecord {
+  address: string;
+}
 
 export interface PreparedGrant {
   request: GrantRequest;
   target: PayingTarget;
   /** The name the account is kept under: the wallet's. */
   walletName: string;
-  /** The bridge to the account build, without a paying server yet. */
-  bridge: AccountBridge;
+  /** The account's records directory, which exists. */
+  recordsDir: string;
   /** The account on record; null only for a deploy of a new one. */
   account: AccountOnRecord | null;
 }
@@ -39,26 +42,28 @@ export class NoAccountError extends Error {
   }
 }
 
+/** The account the records in `recordsDir` name, if any. Reads the records alone: no chain, no wallet. */
+export async function accountOnRecord(recordsDir: string): Promise<AccountOnRecord | null> {
+  const { directoryOwnerStore } = await import('@kuiralabs/midnight-account-chain/owner');
+  const record = directoryOwnerStore(recordsDir).readOwner();
+  return record === undefined ? null : { address: record.contractAddress };
+}
+
 export async function prepareGrant(args: ParsedArgs): Promise<PreparedGrant> {
   const request = resolveGrantRequest(args);
-
-  const build = resolveAccountBuild(getFlag(args, 'account-build'), loadCliConfig()['account-build']);
-  checkAccountBuild(build);
-  assertNodeRunsAccountBuild();
-
+  assertNodeRunsAccount();
   const target = resolvePayingTarget(args, 'grant', request.subcommand);
+  // Refuses a network the account can't reach before anything is created.
+  assertAccountNetwork(target.networkConfig);
   const walletName = accountWalletName(getFlag(args, 'wallet'));
   const recordsDir = accountRecordsDir(target.network, walletName);
-  // Refuses a network the build can't reach before anything is created.
-  bridgeEnvironment(target.networkConfig, recordsDir, build);
   ensureAccountRecordsDir(recordsDir);
 
-  const bridge: AccountBridge = { build, recordsDir, networkConfig: target.networkConfig };
-  const account = await accountOnRecord(bridge);
+  const account = await accountOnRecord(recordsDir);
   if (request.subcommand === 'deploy') {
     if (account === null && !request.devOwnerKey) throw new UsageError(NO_DEV_OWNER_KEY);
   } else if (account === null) {
     throw new NoAccountError(walletName, target.network);
   }
-  return { request, target, walletName, bridge, account };
+  return { request, target, walletName, recordsDir, account };
 }

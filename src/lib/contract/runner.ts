@@ -620,7 +620,7 @@ export interface ScriptRun {
 // How long a cancelled script has to exit on SIGTERM before it is killed outright.
 const CANCEL_GRACE_MS = 5_000;
 // What a cancelled run fails with; classifyError reads it as CANCELLED.
-const CANCELLED_MESSAGE = 'Operation cancelled';
+export const CANCELLED_MESSAGE = 'Operation cancelled';
 
 /** Random bytes in a generated script's name, beside the time. */
 const SCRIPT_NAME_RANDOM_BYTES = 4;

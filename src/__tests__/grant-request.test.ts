@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseArgs } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
-import { describeGrantTerms, ownerArguments, paysAFee, resolveGrantRequest } from '../lib/grant/request.ts';
+import { describeGrantTerms, paysAFee, resolveGrantRequest } from '../lib/grant/request.ts';
 
 const request = (...argv: string[]) => resolveGrantRequest(parseArgs(['grant', ...argv]));
 const LINK = 'midnight-example:grant-request?r=AAECAw';
@@ -62,23 +62,6 @@ describe('resolveGrantRequest', () => {
   });
 });
 
-describe('ownerArguments', () => {
-  const owner = (argv: string[], json = false) => {
-    const parsed = request(...argv);
-    if (parsed.subcommand === 'deploy' || parsed.subcommand === 'deposit') throw new Error(`${parsed.subcommand} is not an owner command`);
-    return ownerArguments(parsed, json);
-  };
-
-  it('puts a request as the account build\'s command line takes it', () => {
-    expect(owner(['status'])).toEqual(['status']);
-    expect(owner(['list'], true)).toEqual(['grants', '--json']);
-    expect(owner(['revoke', '3'], true)).toEqual(['revoke', '3', '--json']);
-    expect(owner(['revoke-all'])).toEqual(['revoke-all']);
-    expect(owner(['issue', LINK])).toEqual(['issue', LINK]);
-    expect(owner(['issue', LINK, '--expires-in', '60', '--cap', '9', '--yes'], true)).toEqual(['issue', LINK, '--cap', '9', '--expires-in', '60', '--yes', '--json']);
-  });
-});
-
 describe('paysAFee', () => {
   it('is true of what submits transactions, false of what only reads', () => {
     expect(paysAFee(request('deploy', '--dev-owner-key'))).toBe(true);
@@ -93,7 +76,7 @@ describe('paysAFee', () => {
 });
 
 describe('describeGrantTerms', () => {
-  it('says every field the account build reports, under the build\'s name for it', () => {
+  it('says every field the account package reports, under the package\'s name for it', () => {
     expect(describeGrantTerms({ clientId: 'rdns:example.agent', slot: 1, payee: 'coin key ab12', cap: '250000', expires: '2026-10-13T01:07:14.000Z' }))
       .toBe('clientId rdns:example.agent, slot 1, payee coin key ab12, cap 250000, expires 2026-10-13T01:07:14.000Z');
   });
@@ -104,7 +87,7 @@ describe('describeGrantTerms', () => {
 
   it('refuses to describe nothing: a user can\'t confirm terms that aren\'t there', () => {
     for (const nothing of [undefined, null, {}, [], 'cap 5']) {
-      expect(() => describeGrantTerms(nothing)).toThrow('The account build reported no terms for this grant request.');
+      expect(() => describeGrantTerms(nothing)).toThrow('The account package reported no terms for this grant request.');
     }
   });
 });

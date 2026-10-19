@@ -204,12 +204,18 @@ export async function startServeOrReuse(options: ServeManagerOptions): Promise<S
   return startServe(options);
 }
 
+/** A wallet's DApp connector in this process, approving everything, and how to stop it. */
+export interface OpenedConnector {
+  connector: ReturnType<typeof createDAppConnector>;
+  stop(): Promise<void>;
+}
+
 /**
- * Start mn serve in-process with --approve-all mode.
- * Returns a handle with stop() for teardown.
+ * The wallet's DApp connector in this process, in --approve-all mode, with no
+ * server in front of it: the wallet synced, its Dust ready. mn serve puts a
+ * server in front of it; a command of mn's own calls its handlers directly.
  */
-export async function startServe(options: ServeManagerOptions): Promise<ServeHandle> {
-  const port = options.port ?? DEFAULT_SERVE_PORT;
+export async function openConnector(options: ServeManagerOptions): Promise<OpenedConnector> {
   const onMessage = options.onMessage ?? (() => {});
 
   // Load wallet
@@ -273,6 +279,26 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
     },
   });
 
+  return {
+    connector,
+    async stop() {
+      connector.dispose();
+      restoreRpc();
+      unsuppress();
+      try { await stopFacade(bundle); } catch { /* best-effort */ }
+    },
+  };
+}
+
+/**
+ * Start mn serve in-process with --approve-all mode.
+ * Returns a handle with stop() for teardown.
+ */
+export async function startServe(options: ServeManagerOptions): Promise<ServeHandle> {
+  const port = options.port ?? DEFAULT_SERVE_PORT;
+  const onMessage = options.onMessage ?? (() => {});
+  const { connector, stop } = await openConnector(options);
+
   // Start WebSocket server
   const server = createRpcServer({
     port,
@@ -299,11 +325,8 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
   try {
     await server.ready;
   } catch (err) {
-    connector.dispose();
     await server.close();
-    await stopFacade(bundle);
-    unsuppress();
-    restoreRpc();
+    await stop();
     throw new Error(`Could not start mn serve on port ${port}: ${(err as Error).message}`);
   }
 
@@ -314,10 +337,7 @@ export async function startServe(options: ServeManagerOptions): Promise<ServeHan
     port,
     async stop() {
       server.close();
-      connector.dispose();
-      restoreRpc();
-      unsuppress();
-      try { await stopFacade(bundle); } catch { /* best-effort */ }
+      await stop();
     },
   };
 }

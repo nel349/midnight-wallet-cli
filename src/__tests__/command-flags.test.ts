@@ -63,8 +63,8 @@ describe('COMMAND_FLAGS matches the code', () => {
     'resolveNetwork(': ['network', 'node', 'indexer-ws', 'proof-server'],
     'resolveNetworkName(': ['network'],
     'resolvePayingTarget(': ['network', 'node', 'indexer-ws', 'proof-server'],
-    // Reads the request's flags, the account build, and the network and endpoints.
-    'prepareGrant(': ['account-build', 'cap', 'dev-owner-key', 'expires-in', 'max-coin', 'per-call', 'yes', 'network', 'node', 'indexer-ws', 'proof-server', 'wallet'],
+    // Reads the request's flags, and the network and endpoints.
+    'prepareGrant(': ['cap', 'dev-owner-key', 'expires-in', 'max-coin', 'per-call', 'yes', 'network', 'node', 'indexer-ws', 'proof-server', 'wallet'],
     'resolveSeedSource(': ['seed', 'wallet'],
     'resolveSeed(': ['seed', 'wallet'],
     'isVerbose(': ['verbose'],

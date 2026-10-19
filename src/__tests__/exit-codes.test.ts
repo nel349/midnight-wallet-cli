@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { classifyError, humanizeNetworkError, ERROR_CODES, EXIT_GENERAL_ERROR, EXIT_NETWORK_ERROR, EXIT_INVALID_ARGS } from '../lib/exit-codes.ts';
-import { NodeTooOldForAccountBuildError } from '../lib/grant/account-build.ts';
-import { UnreachableByAccountBuildError } from '../lib/grant/bridge.ts';
+import { NodeTooOldForAccountError, UnreachableByAccountError } from '../lib/grant/account.ts';
 import { NoAccountError } from '../lib/grant/prepare.ts';
 
 describe('humanizeNetworkError', () => {
@@ -79,12 +78,12 @@ describe('classifyError: mn grant', () => {
     expect(classifyError(new NoAccountError('alice', 'undeployed'))).toEqual({ exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.NO_ACCOUNT });
   });
 
-  it('counts a network the account build can\'t reach as the caller\'s to fix', () => {
-    expect(classifyError(new UnreachableByAccountBuildError('PreProd'))).toEqual({ exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.INVALID_ARGS });
+  it('counts a network the account package can\'t reach as the caller\'s to fix', () => {
+    expect(classifyError(new UnreachableByAccountError('PreProd'))).toEqual({ exitCode: EXIT_INVALID_ARGS, errorCode: ERROR_CODES.INVALID_ARGS });
   });
 
-  it('says a Node.js too old for the account build is an unsupported Node.js', () => {
-    expect(classifyError(new NodeTooOldForAccountBuildError('22.10.0'))).toEqual({ exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNSUPPORTED_NODE });
+  it('says a Node.js too old for the account package is an unsupported Node.js', () => {
+    expect(classifyError(new NodeTooOldForAccountError('22.10.0'))).toEqual({ exitCode: EXIT_GENERAL_ERROR, errorCode: ERROR_CODES.UNSUPPORTED_NODE });
   });
 });
 
