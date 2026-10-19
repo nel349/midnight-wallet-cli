@@ -144,14 +144,19 @@ export function issuePreview(request: GrantRequest, requested: RequestedLimits, 
 }
 
 export async function issue(session: Session, request: GrantRequest, requested: RequestedLimits, now: Date): Promise<OwnerCommandOutput> {
-  const { terms, asked, askedLines } = issueTerms(request, requested, now);
-  const response = await issueReadGrant(session, request, terms, new Uint8Array(randomBytes(32)));
-  const fallbackLink = sealedResponseLink(response);
+  const { terms, asked } = issueTerms(request, requested, now);
+  const issued = await issueReadGrant(session, request, terms, new Uint8Array(randomBytes(32)));
+  const fallbackLink = sealedResponseLink(issued);
+  // A grant an interrupted run had issued keeps that run's terms: say those, not the ones asked for now.
+  const granted = issued.resumed
+    ? { ...asked, perCallCap: issued.scope.perCallCap.toString(), cap: issued.scope.cap.toString(), maxCoinValue: issued.scope.object.maxCoinValue.toString(), expires: new Date(Number(issued.scope.expiresAt) * 1000).toISOString() }
+    : asked;
+  const grantedLines = Object.entries(granted).map(([name, value]) => `  ${name}: ${value}`);
   return {
-    result: { confirmed: true, grantId: hexOf(response.grantId), request: asked, fallbackLink },
+    result: { confirmed: true, grantId: hexOf(issued.grantId), request: granted, fallbackLink, ...(issued.resumed ? { resumed: true } : {}) },
     lines: [
-      `issued ${hexOf(response.grantId)}:`,
-      ...askedLines,
+      issued.resumed ? `issued ${hexOf(issued.grantId)} in an earlier run that was interrupted, with these terms:` : `issued ${hexOf(issued.grantId)}:`,
+      ...grantedLines,
       "the response is in the grant mailbox; if the agent cannot read the chain, give it this link (midnight-mandate's receive_grant takes it):",
       fallbackLink,
     ],
