@@ -29,7 +29,9 @@ import {
   isAccountMigrating,
   isSealedAccount,
   openAccountKey,
+  ownDeviceCode,
   sealedDeviceKeys,
+  sealedDeviceReadSecret,
   sealedOwnerStore,
   sealedPrivateStatePassword,
 } from './sealed-account.ts';
@@ -111,6 +113,10 @@ export interface GrantAccount {
   keys: DirectoryDeviceKeys | SealedDeviceKeys;
   location: PrivateStateLocation;
   protection: AccountProtection;
+  /** The owner device's read key, for the owner-device mailbox: a sealed account's only. */
+  deviceReadSecret?: () => Uint8Array;
+  /** This machine's device code: a sealed account's only. */
+  ownCode?: () => string;
 }
 
 /** Where an account's passphrase comes from, and where a warning about a plain-text account goes. */
@@ -140,6 +146,12 @@ export async function openGrantAccount(networkConfig: NetworkConfig, recordsDir:
     keys: sealedDeviceKeys(recordsDir, key),
     location: { database, store: PRIVATE_STATE_STORE, password: () => sealedPrivateStatePassword(recordsDir, key) },
     protection: 'sealed',
+    deviceReadSecret: () => sealedDeviceReadSecret(recordsDir, key),
+    ownCode: () => {
+      const device = sealedDeviceKeys(recordsDir, key).read();
+      if (device === undefined) throw new Error('The account\'s records hold no owner key.');
+      return ownDeviceCode(recordsDir, key, device);
+    },
   });
   if (isSealedAccount(recordsDir)) return sealed(openAccountKey(recordsDir, await unlockPassphrase(home, options.source)));
 

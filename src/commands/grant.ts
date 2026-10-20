@@ -1,4 +1,4 @@
-import { deviceCodeOf, parseDeviceCode } from '../lib/grant/device-code.ts';
+import { parseDeviceCode } from '../lib/grant/device-code.ts';
 import { existsSync } from 'node:fs';
 // grant command — the wallet owner's account, and the grants that let an agent spend from it
 // Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all> [options]
@@ -95,12 +95,12 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
   const spinner = spinnerFor(SPINNER_LABEL[request.subcommand]);
   // This machine's device, made where no account is yet: it opens no account first.
   if (request.subcommand === 'device' && request.action === 'new') {
-    const { createPendingDevice } = await import('../lib/grant/sealed-account.ts');
+    const { createPendingDevice, openAccountKey, ownDeviceCode } = await import('../lib/grant/sealed-account.ts');
     const { unlockPassphrase, passphraseForNewSecret, isPassphraseSet } = await import('../lib/passphrase.ts');
-    const { deviceCodeOf } = await import('../lib/grant/device-code.ts');
     const home = homedir();
     const passphrase = isPassphraseSet(home) ? await unlockPassphrase(home) : await passphraseForNewSecret(home);
-    const code = deviceCodeOf(createPendingDevice(recordsDir, passphrase));
+    const device = createPendingDevice(recordsDir, passphrase);
+    const code = ownDeviceCode(recordsDir, openAccountKey(recordsDir, passphrase), device);
     spinner.stop('Device ready');
     if (jsonMode) {
       writeJsonResult({ subcommand: 'device', action: 'new', network: target.network, wallet: walletName, ownerKey: 'sealed', code });
@@ -150,7 +150,8 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
     const { connectOver, openSessionOver } = await import('@kuiralabs/midnight-account-chain/owner');
     if (account === null) throw new Error('An owner command was prepared without an account');
     const { feeWallet } = await payingWallet();
-    return openSessionOver(await connectOver(owned.context, account.address, feeWallet, owned.location, async () => {}), owned.store, ownerDeviceOf(owned));
+    // A sealed account's device reads the owner-device mailbox: it catches up on another device's rotation, and is listed for later ones.
+    return openSessionOver(await connectOver(owned.context, account.address, feeWallet, owned.location, async () => {}), owned.store, ownerDeviceOf(owned), { deviceReadSecret: owned.deviceReadSecret?.() });
   };
   const report = (output: OwnerCommandOutput): void => {
     spinner.stop('Done');
@@ -212,7 +213,8 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
         const { readOwnerView } = await import('@kuiralabs/midnight-account-chain/owner');
         const device = ownerDeviceOf(owned);
         const view = await readOwnerView(owned.context.network, owned.store, device);
-        report(request.subcommand === 'status' ? statusOf(view, device.arm, deviceCodeOf(device)) : grantsOf(view, owned.context.clock()));
+        const code = owned.ownCode?.() ?? 'none until the account is protected (midnight wallet protect)';
+        report(request.subcommand === 'status' ? statusOf(view, device.arm, code) : grantsOf(view, owned.context.clock()));
         return;
       }
       case 'issue': {
@@ -236,7 +238,8 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
         const { unlockPassphrase } = await import('../lib/passphrase.ts');
         const passphrase = await unlockPassphrase(homedir());
         const devices = sealedDeviceList(recordsDir, openAccountKey(recordsDir, passphrase));
-        const own = deviceCodeOf(ownerDeviceOf(owned));
+        if (owned.ownCode === undefined) throw new Error('A sealed account names its own device code');
+        const own = owned.ownCode();
         const known = devices.read().length > 0 ? devices.read() : [own];
         if (request.action === 'list') {
           spinner.stop('Done');
@@ -251,7 +254,7 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
           if (named.arm !== 'v1') throw new UsageError('The account adds JubJub devices only (a v1 device code, as midnight grant device new makes).');
           // The backup is checked before the device is added, so the add never lands with nowhere to write it.
           if (existsSync(request.backup)) throw new UsageError(`${request.backup} already exists; a backup is never written over a file.`);
-          await addOwnerDevice(await ownerSession(), named.pk);
+          await addOwnerDevice(await ownerSession(), named.pk, named.readKey);
           devices.write([...known, request.code]);
           const written = await exportAccount(recordsDir, target.network, passphrase, request.backup, { forDevice: named });
           spinner.stop('Device added');
@@ -265,7 +268,7 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
         }
         const { removeOwnerDevice } = await import('@kuiralabs/midnight-account-chain/owner');
         if (request.code === own) throw new UsageError('A device does not remove itself: remove this one from another device on the account.');
-        const { removed } = await removeOwnerDevice(await ownerSession(), named.arm, named.pk);
+        const { removed } = await removeOwnerDevice(await ownerSession(), named.arm, named.pk, named.readKey);
         devices.write(known.filter((code) => code !== request.code));
         spinner.stop(removed ? 'Device removed' : 'Already removed');
         if (jsonMode) writeJsonResult({ ...common, action: 'remove', code: request.code, removed });

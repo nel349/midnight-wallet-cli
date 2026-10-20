@@ -1,31 +1,34 @@
-// A device's code: its arm and public key in one line a person can carry
-// between machines, `mn-device:<arm>:<x>:<y>`, each coordinate 32 bytes of
-// hex. It is public: it names the device, it does not let anyone act as it.
+// A device's code: its arm, public key and read key in one line a person can
+// carry between machines, `mn-device:<arm>:<x>:<y>:<read key>`, each 32 bytes
+// of hex. The read key is where the account's secret is sealed to the device
+// after a rotation. It is public: it names the device, it does not let anyone
+// act as it or read for it.
 
 import type { Arm } from '@kuiralabs/midnight-account';
 import type { OwnerDevice } from '@kuiralabs/midnight-account-chain/owner';
 import { UsageError } from '../errors.ts';
 
 const PREFIX = 'mn-device';
-const DEVICE_CODE = /^mn-device:(v1|k1):([0-9a-f]{64}):([0-9a-f]{64})$/;
+const DEVICE_CODE = /^mn-device:(v1|k1):([0-9a-f]{64}):([0-9a-f]{64}):([0-9a-f]{64})$/;
 
-/** A device named by its arm and public key. */
+/** A device named by its arm and public key, with its read key. */
 export interface DeviceIdentity {
   arm: Arm;
   pk: { x: bigint; y: bigint };
+  readKey: Uint8Array;
 }
 
 const hex32 = (value: bigint): string => value.toString(16).padStart(64, '0');
 
-export function deviceCodeOf(device: Pick<OwnerDevice, 'arm' | 'pk'>): string {
-  return `${PREFIX}:${device.arm}:${hex32(device.pk.x)}:${hex32(device.pk.y)}`;
+export function deviceCodeOf(device: Pick<OwnerDevice, 'arm' | 'pk'>, readKey: Uint8Array): string {
+  return `${PREFIX}:${device.arm}:${hex32(device.pk.x)}:${hex32(device.pk.y)}:${Buffer.from(readKey).toString('hex')}`;
 }
 
 export function parseDeviceCode(code: string): DeviceIdentity {
   const match = DEVICE_CODE.exec(code.trim());
-  if (match === null) throw new UsageError(`Not a device code: "${code}". A device code reads mn-device:<v1|k1>:<x>:<y>, as \`midnight grant device new\` or \`device list\` prints it.`);
-  const [, arm, x, y] = match as unknown as [string, Arm, string, string];
-  return { arm, pk: { x: BigInt(`0x${x}`), y: BigInt(`0x${y}`) } };
+  if (match === null) throw new UsageError(`Not a device code: "${code}". A device code reads mn-device:<v1|k1>:<x>:<y>:<read key>, as \`midnight grant device new\` or \`device list\` prints it.`);
+  const [, arm, x, y, readKey] = match as unknown as [string, Arm, string, string, string];
+  return { arm, pk: { x: BigInt(`0x${x}`), y: BigInt(`0x${y}`) }, readKey: new Uint8Array(Buffer.from(readKey, 'hex')) };
 }
 
 /** True when `a` and `b` name the same device. */

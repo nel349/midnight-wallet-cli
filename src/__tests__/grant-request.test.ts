@@ -17,7 +17,7 @@ describe('resolveGrantRequest', () => {
     expect(() => request('export')).toThrow(/Missing the backup file/);
     expect(paysAFee(request('export', 'f'))).toBe(false);
     expect(paysAFee(request('import', 'f'))).toBe(false);
-    const code = `mn-device:v1:${'0a'.repeat(32)}:${'0b'.repeat(32)}`;
+    const code = `mn-device:v1:${'0a'.repeat(32)}:${'0b'.repeat(32)}:${'0c'.repeat(32)}`;
     expect(request('device', 'new')).toEqual({ subcommand: 'device', action: 'new' });
     expect(request('device', 'list')).toEqual({ subcommand: 'device', action: 'list' });
     expect(request('device', 'add', code, '--backup', 'b.json')).toEqual({ subcommand: 'device', action: 'add', code, backup: 'b.json' });

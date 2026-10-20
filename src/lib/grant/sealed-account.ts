@@ -20,7 +20,7 @@
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Arm } from '@kuiralabs/midnight-account';
+import { type Arm, x25519KeyPair, x25519PublicOf } from '@kuiralabs/midnight-account';
 import {
   type LocalOwnerDevice,
   type OwnerRecord,
@@ -43,6 +43,8 @@ const MIGRATING_KEY_FILE = 'account-key.migrating.json';
 const OWNER_FILE = 'owner.sealed.json';
 const ROSTER_FILE = 'roster.sealed.json';
 const DEVICE_FILE = 'owner-device.sealed.json';
+// The owner device's read key, where another device seals the account's secret to it after a rotation.
+const DEVICE_READ_FILE = 'owner-device-read.sealed.json';
 const PRIVATE_STATE_FILE = 'private-state.sealed.json';
 // The devices on the account this machine knows of, by their codes.
 const DEVICES_FILE = 'devices.sealed.json';
@@ -143,7 +145,7 @@ export function sealedOwnerStore(dir: string, key: Uint8Array, { clock = (): Dat
     setAsideOwner: () => {
       const keptAt = path.join(dir, `${ASIDE_PREFIX}${clock().getTime()}`);
       fs.mkdirSync(keptAt, { mode: 0o700 });
-      for (const file of [OWNER_FILE, DEVICE_FILE]) {
+      for (const file of [OWNER_FILE, DEVICE_FILE, DEVICE_READ_FILE]) {
         const from = path.join(dir, file);
         if (!fs.existsSync(from)) continue;
         fs.renameSync(from, path.join(keptAt, file));
@@ -263,7 +265,31 @@ export function createPendingDevice(dir: string, passphrase: string): LocalOwner
   }
   const key = createAccountKey(dir, passphrase);
   const device = sealedDeviceKeys(dir, key).keep(freshOwnerDevice('v1'));
-  sealedDeviceList(dir, key).write([deviceCodeOf(device)]);
+  sealedDeviceList(dir, key).write([deviceCodeOf(device, x25519PublicOf(sealedDeviceReadSecret(dir, key)))]);
   return device;
+}
+
+/** The owner device's read key (an X25519 secret): made with the device, or on first use for one made before, sealed under `key`. */
+export function sealedDeviceReadSecret(dir: string, key: Uint8Array): Uint8Array {
+  const file = path.join(dir, DEVICE_READ_FILE);
+  const kept = readJsonIfPresent<{ readSecret: KeyedSecret }>(file);
+  if (kept !== undefined) return new Uint8Array(openWithKey(key, kept.readSecret, 'owner-device-read'));
+  try {
+    writeJsonDurably(file, { readSecret: sealWithKey(key, x25519KeyPair().secret, 'owner-device-read') }, { exclusive: true });
+  } catch (error) {
+    // Another run made it first: that one is the device's.
+    if (!(error instanceof FileExistsError)) throw error;
+  }
+  return sealedDeviceReadSecret(dir, key);
+}
+
+/** This machine's device code: its owner device and read key. */
+export function ownDeviceCode(dir: string, key: Uint8Array, device: Pick<LocalOwnerDevice, 'arm' | 'pk'>): string {
+  return deviceCodeOf(device, x25519PublicOf(sealedDeviceReadSecret(dir, key)));
+}
+
+/** Keeps `readSecret` as the owner device's read key, sealed under `key`: for a device restored from a backup. Never over one kept. */
+export function keepDeviceReadSecret(dir: string, key: Uint8Array, readSecret: Uint8Array): void {
+  writeJsonDurably(path.join(dir, DEVICE_READ_FILE), { readSecret: sealWithKey(key, readSecret, 'owner-device-read') }, { exclusive: true });
 }
 
