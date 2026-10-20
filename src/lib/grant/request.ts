@@ -2,11 +2,16 @@
 // anything starts: the CLI checks it before the wallet is looked at, the MCP
 // server before it issues a confirmation token.
 
+import { parseDeviceCode } from './device-code.ts';
 import { type ParsedArgs, getFlag, hasFlag } from '../argv.ts';
 import { UsageError } from '../errors.ts';
 import { nightToMicro, parseAmount } from '../transfer.ts';
 
-export const GRANT_SUBCOMMANDS = ['deploy', 'deposit', 'status', 'list', 'issue', 'revoke', 'revoke-all', 'export', 'import'] as const;
+export const GRANT_SUBCOMMANDS = ['deploy', 'deposit', 'status', 'list', 'issue', 'revoke', 'revoke-all', 'export', 'import', 'device'] as const;
+
+/** What `grant device` does: make this machine's device, add one, remove one, or list them. */
+export const DEVICE_ACTIONS = ['new', 'add', 'remove', 'list'] as const;
+export type DeviceAction = typeof DEVICE_ACTIONS[number];
 export type GrantSubcommand = typeof GRANT_SUBCOMMANDS[number];
 
 export type GrantRequest =
@@ -20,7 +25,12 @@ export type GrantRequest =
   | { subcommand: 'revoke-all' }
   /** The backup file to write, or to read. */
   | { subcommand: 'export'; file: string }
-  | { subcommand: 'import'; file: string };
+  | { subcommand: 'import'; file: string }
+  /** `code`: the device to add or remove; `backup`: where an add writes the new device's backup. */
+  | { subcommand: 'device'; action: 'new' }
+  | { subcommand: 'device'; action: 'list' }
+  | { subcommand: 'device'; action: 'add'; code: string; backup: string }
+  | { subcommand: 'device'; action: 'remove'; code: string };
 
 /** Limits an issue may set, each a whole number as text; mn's defaults stand for those not given. */
 export interface GrantLimits {
@@ -46,7 +56,8 @@ export const GRANT_USAGE =
   `  revoke       Revoke one grant, by its id or slot\n` +
   `  revoke-all   Revoke every grant\n` +
   `  export       Write the account to an encrypted backup file\n` +
-  `  import       Bring an account's backup in, for a wallet with none\n\n` +
+  `  import       Bring an account's backup in, for a wallet with none\n` +
+  `  device       This machine's device, and the account's others: new, add, remove, list\n\n` +
   `Run "midnight help grant" for more info.`;
 
 export function isGrantSubcommand(value: string | undefined): value is GrantSubcommand {
@@ -75,6 +86,7 @@ export function resolveGrantRequest(args: ParsedArgs): GrantRequest {
   if (!isGrantSubcommand(subcommand)) throw new UsageError(GRANT_USAGE);
 
   onlyFor(args, subcommand, [...LIMIT_FLAGS.map(([flag]) => flag), 'yes'], ['issue']);
+  onlyFor(args, subcommand, ['backup'], ['device']);
 
   switch (subcommand) {
     case 'deploy':
@@ -109,6 +121,22 @@ export function resolveGrantRequest(args: ParsedArgs): GrantRequest {
       }
       return { subcommand, link, limits, confirmed: hasFlag(args, 'yes') };
     }
+    case 'device': {
+      const [action, code] = positionalsFor(args, subcommand, 2, 'an action (new, add, remove, list) and, to add or remove, a device code');
+      const usage = 'Usage: midnight grant device new | add <device code> --backup <file> | remove <device code> | list';
+      if (!(DEVICE_ACTIONS as readonly string[]).includes(action ?? '')) throw new UsageError(`Missing or unknown device action "${action ?? ''}".\n${usage}`);
+      const backup = getFlag(args, 'backup');
+      if (action !== 'add' && backup !== undefined) throw new UsageError('--backup only applies to: midnight grant device add');
+      if (action === 'new' || action === 'list') {
+        if (code !== undefined) throw new UsageError(`midnight grant device ${action} takes no device code.\n${usage}`);
+        return action === 'new' ? { subcommand, action: 'new' } : { subcommand, action: 'list' };
+      }
+      if (code === undefined) throw new UsageError(`Missing the device code.\n${usage}`);
+      parseDeviceCode(code);
+      if (action === 'remove') return { subcommand, action, code };
+      if (backup === undefined) throw new UsageError(`Adding a device writes its backup, which it needs to act as an owner: --backup <file>.\n${usage}`);
+      return { subcommand, action: 'add', code, backup };
+    }
     case 'export':
     case 'import': {
       const [file] = positionalsFor(args, subcommand, 1, 'one backup file');
@@ -139,6 +167,8 @@ export function paysAFee(request: GrantRequest): boolean {
     case 'export':
     case 'import':
       return false;
+    case 'device':
+      return request.action === 'add' || request.action === 'remove';
   }
 }
 

@@ -17,6 +17,18 @@ describe('resolveGrantRequest', () => {
     expect(() => request('export')).toThrow(/Missing the backup file/);
     expect(paysAFee(request('export', 'f'))).toBe(false);
     expect(paysAFee(request('import', 'f'))).toBe(false);
+    const code = `mn-device:v1:${'0a'.repeat(32)}:${'0b'.repeat(32)}`;
+    expect(request('device', 'new')).toEqual({ subcommand: 'device', action: 'new' });
+    expect(request('device', 'list')).toEqual({ subcommand: 'device', action: 'list' });
+    expect(request('device', 'add', code, '--backup', 'b.json')).toEqual({ subcommand: 'device', action: 'add', code, backup: 'b.json' });
+    expect(request('device', 'remove', code)).toEqual({ subcommand: 'device', action: 'remove', code });
+    expect(() => request('device', 'add', code)).toThrow(/--backup <file>/);
+    expect(() => request('device', 'add', 'not-a-code', '--backup', 'b.json')).toThrow(/Not a device code/);
+    expect(() => request('device')).toThrow(/device action/);
+    expect(() => request('device', 'remove', code, '--backup', 'b.json')).toThrow(/--backup only applies/);
+    expect(paysAFee(request('device', 'add', code, '--backup', 'b.json'))).toBe(true);
+    expect(paysAFee(request('device', 'remove', code))).toBe(true);
+    expect(paysAFee(request('device', 'new'))).toBe(false);
     expect(request('status')).toEqual({ subcommand: 'status' });
     expect(request('list')).toEqual({ subcommand: 'list' });
     expect(request('revoke-all')).toEqual({ subcommand: 'revoke-all' });
@@ -39,8 +51,8 @@ describe('resolveGrantRequest', () => {
   });
 
   it.each([
-    [[], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all|export|import>'],
-    [['grants'], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all|export|import>'],
+    [[], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all|export|import|device>'],
+    [['grants'], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all|export|import|device>'],
     [['status', 'extra'], 'midnight grant status takes no argument; unexpected: extra'],
     [['deploy', 'now'], 'midnight grant deploy takes no argument; unexpected: now'],
     [['issue'], 'Missing the grant request link.'],

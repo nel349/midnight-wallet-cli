@@ -41,7 +41,8 @@ const CONTRACT = 3;
 
 const secondsOf = (date: Date): bigint => BigInt(Math.floor(date.getTime() / 1000));
 
-export function statusOf(view: OwnerView, arm: string): OwnerCommandOutput {
+/** The account as its owner reads it; `code` names this machine's device. */
+export function statusOf(view: OwnerView, arm: string, code: string): OwnerCommandOutput {
   const { ledger } = view;
   const unspent = view.coins.filter((coin) => !coin.isSpent);
   const held = new Map<string, bigint>();
@@ -49,7 +50,7 @@ export function statusOf(view: OwnerView, arm: string): OwnerCommandOutput {
   const useCounter = view.useCounter ?? 0n;
   const result = {
     account: view.address,
-    device: { arm, useCounter: useCounter.toString() },
+    device: { arm, code, useCounter: useCounter.toString() },
     devices: ledger.device_count.toString(),
     authNonce: ledger.auth_nonce.toString(),
     encKey: hexOf(ledger.enc_key),
@@ -61,6 +62,7 @@ export function statusOf(view: OwnerView, arm: string): OwnerCommandOutput {
     lines: [
       `account ${view.address}`,
       `device ${arm}, use counter ${useCounter}; ${ledger.device_count} device(s); auth_nonce ${ledger.auth_nonce}`,
+      `this machine's device: ${code}`,
       `enc_key ${result.encKey}`,
       ...[...held].map(([color, value]) => `holds ${value} of color ${color} in ${unspent.filter((coin) => hexOf(coin.color) === color).length} coin(s)`),
       `${ledger.grants.size()} grant record(s)`,

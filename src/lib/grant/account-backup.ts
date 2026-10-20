@@ -17,10 +17,13 @@ import { UsageError } from '../errors.ts';
 import { FileExistsError, writeJsonDurably } from '../durable-file.ts';
 import { type SealedSecret, openSecret, sealSecret } from '../keystore.ts';
 import { privateStateLocationOf } from './account.ts';
+import { type DeviceIdentity, deviceCodeOf } from './device-code.ts';
 import {
   createAccountKey,
   isAccountMigrating,
+  isPendingDevice,
   isSealedAccount,
+  sealedDeviceList,
   keepPrivateStatePassword,
   openAccountKey,
   sealedDeviceKeys,
@@ -44,7 +47,10 @@ interface AccountBackupFile {
 interface AccountBundle {
   record: OwnerRecord;
   roster: Roster;
-  device: { arm: Arm; secret: string };
+  /** The owner key; absent from a backup made for another device, which brings its own. */
+  device?: { arm: Arm; secret: string };
+  /** The devices on the account the exporting machine knew of, by their codes. */
+  devices: string[];
   privateStatePassword: string;
   /** The private state's files, by their path under its database directory, as base64. */
   privateState: Record<string, string>;
@@ -57,14 +63,26 @@ const filesUnder = (dir: string, relative = ''): string[] =>
     return entry.isDirectory() ? filesUnder(dir, at) : [at];
   });
 
+// The devices on the account this machine knows of: its list, or, for an
+// account that kept none, its own device.
+const knownDevices = (dir: string, key: Uint8Array, own: { arm: Arm; pk: { x: bigint; y: bigint } }): string[] => {
+  const listed = sealedDeviceList(dir, key).read();
+  return listed.length > 0 ? listed : [deviceCodeOf(own)];
+};
+
 // A plain-text or half-sealed account must be protected before it is backed up.
 const sealedAccountIn = (dir: string, passphrase: string) => {
   if (!isSealedAccount(dir)) throw new UsageError(`The account in ${dir} is not protected. Encrypt it first: midnight wallet protect`);
   return openAccountKey(dir, passphrase);
 };
 
-/** Writes the account in `dir` on `network` to `file`, sealed under `passphrase`. Never over a file that exists. */
-export async function exportAccount(dir: string, network: string, passphrase: string, file: string): Promise<{ contractAddress: string; file: string }> {
+/**
+ * Writes the account in `dir` on `network` to `file`, sealed under
+ * `passphrase`. Never over a file that exists. With `forDevice`, the backup
+ * is for that device, just added to the account: it carries everything but
+ * this machine's owner key.
+ */
+export async function exportAccount(dir: string, network: string, passphrase: string, file: string, { forDevice }: { forDevice?: DeviceIdentity } = {}): Promise<{ contractAddress: string; file: string }> {
   const key = sealedAccountIn(dir, passphrase);
   const record = sealedOwnerStore(dir, key).readOwner();
   const device = sealedDeviceKeys(dir, key).read();
@@ -73,7 +91,8 @@ export async function exportAccount(dir: string, network: string, passphrase: st
   const bundle: AccountBundle = {
     record,
     roster: sealedOwnerStore(dir, key).readRoster(),
-    device: { arm: device.arm, secret: device.secretText() },
+    ...(forDevice === undefined ? { device: { arm: device.arm, secret: device.secretText() } } : {}),
+    devices: [...new Set([...knownDevices(dir, key, device), ...(forDevice === undefined ? [] : [deviceCodeOf(forDevice)])])],
     privateStatePassword: sealedPrivateStatePassword(dir, key),
     privateState: fs.existsSync(database) ? Object.fromEntries(filesUnder(database).map((f) => [f, fs.readFileSync(path.join(database, f)).toString('base64')])) : {},
   };
@@ -102,12 +121,25 @@ export async function importAccount(dir: string, network: string, passphrase: st
   // Opened before anything is written, so a wrong passphrase leaves nothing behind.
   const bundle = JSON.parse(openSecret(backup.sealed, passphrase, 'account-backup').toString('utf8')) as AccountBundle;
   const database = privateStateLocationOf(dir, () => '').database;
-  const hasAccount = isSealedAccount(dir) || isAccountMigrating(dir) || fs.existsSync(path.join(dir, 'owner.json')) || fs.existsSync(database);
-  if (hasAccount) throw new UsageError(`The wallet already has an account in ${dir}; a backup is never imported over one.`);
 
-  const key = createAccountKey(dir, passphrase);
+  let key: Buffer;
+  if (bundle.device === undefined) {
+    // Made for another device: this machine's pending device must be the one it names.
+    if (!isPendingDevice(dir)) throw new UsageError(`${file} was made for another device to join the account. Make this machine's device first, with: midnight grant device new`);
+    key = openAccountKey(dir, passphrase);
+    const pending = sealedDeviceKeys(dir, key).read();
+    if (pending === undefined || !bundle.devices.includes(deviceCodeOf(pending))) {
+      throw new UsageError(`${file} was made for another device, not this machine's (${pending === undefined ? 'none' : deviceCodeOf(pending)}).`);
+    }
+    if (fs.existsSync(database)) throw new UsageError(`The wallet already holds a private state in ${dir}; a backup is never imported over one.`);
+  } else {
+    const hasAccount = isSealedAccount(dir) || isAccountMigrating(dir) || fs.existsSync(path.join(dir, 'owner.json')) || fs.existsSync(database);
+    if (hasAccount) throw new UsageError(`The wallet already has an account in ${dir}; a backup is never imported over one.`);
+    key = createAccountKey(dir, passphrase);
+    sealedDeviceKeys(dir, key).keep(ownerDeviceFromSecret(bundle.device.arm, bundle.device.secret));
+  }
   const store = sealedOwnerStore(dir, key);
-  sealedDeviceKeys(dir, key).keep(ownerDeviceFromSecret(bundle.device.arm, bundle.device.secret));
+  sealedDeviceList(dir, key).write(bundle.devices);
   keepPrivateStatePassword(dir, key, bundle.privateStatePassword);
   for (const [relative, base64] of Object.entries(bundle.privateState)) {
     const target = path.join(database, relative);

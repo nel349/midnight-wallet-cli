@@ -62,7 +62,11 @@ export async function prepareGrant(args: ParsedArgs): Promise<PreparedGrant> {
   if (request.subcommand === 'import' && account !== null) {
     throw new UsageError(`Wallet "${walletName}" already has an account on ${target.network} (${account.address}); a backup is never imported over one.`);
   }
-  if (request.subcommand !== 'deploy' && request.subcommand !== 'import' && account === null) {
+  const makesItsOwn = request.subcommand === 'device' && request.action === 'new';
+  if (makesItsOwn && account !== null) {
+    throw new UsageError(`Wallet "${walletName}" already has an account on ${target.network} (${account.address}): a new device is made for a wallet with none.`);
+  }
+  if (request.subcommand !== 'deploy' && request.subcommand !== 'import' && !makesItsOwn && account === null) {
     throw new NoAccountError(walletName, target.network);
   }
   return { request, target, walletName, recordsDir, account };

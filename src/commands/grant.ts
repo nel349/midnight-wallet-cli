@@ -1,3 +1,5 @@
+import { deviceCodeOf, parseDeviceCode } from '../lib/grant/device-code.ts';
+import { existsSync } from 'node:fs';
 // grant command — the wallet owner's account, and the grants that let an agent spend from it
 // Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all> [options]
 //
@@ -33,6 +35,7 @@ const SPINNER_LABEL: Record<GrantRequest['subcommand'], string> = {
   'revoke-all': 'Revoking every grant...',
   export: 'Writing the backup...',
   import: 'Importing the backup...',
+  device: 'Working on the account\'s devices...',
 };
 
 function isShortOfDust(err: Error): boolean {
@@ -90,6 +93,25 @@ interface OwnedRun {
 /** Runs the command on the account, with the wallet that pays (if it pays) already open. */
 async function runOwned(request: GrantRequest, { target, walletName, recordsDir, account, jsonMode, paying, funds, spinnerFor, throwIfCancelled }: OwnedRun): Promise<void> {
   const spinner = spinnerFor(SPINNER_LABEL[request.subcommand]);
+  // This machine's device, made where no account is yet: it opens no account first.
+  if (request.subcommand === 'device' && request.action === 'new') {
+    const { createPendingDevice } = await import('../lib/grant/sealed-account.ts');
+    const { unlockPassphrase, passphraseForNewSecret, isPassphraseSet } = await import('../lib/passphrase.ts');
+    const { deviceCodeOf } = await import('../lib/grant/device-code.ts');
+    const home = homedir();
+    const passphrase = isPassphraseSet(home) ? await unlockPassphrase(home) : await passphraseForNewSecret(home);
+    const code = deviceCodeOf(createPendingDevice(recordsDir, passphrase));
+    spinner.stop('Device ready');
+    if (jsonMode) {
+      writeJsonResult({ subcommand: 'device', action: 'new', network: target.network, wallet: walletName, ownerKey: 'sealed', code });
+    } else {
+      process.stderr.write('\n' + dim('  On a machine already an owner of the account, run:') + '\n');
+      process.stderr.write(dim(`  midnight grant device add ${code} --backup <file>`) + '\n');
+      process.stderr.write(dim('  then bring that file here: midnight grant import <file>') + '\n\n');
+      process.stdout.write(code + '\n');
+    }
+    return;
+  }
   // An import brings an account in where there is none: it opens no account first.
   if (request.subcommand === 'import') {
     const { importAccount } = await import('../lib/grant/account-backup.ts');
@@ -190,7 +212,7 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
         const { readOwnerView } = await import('@kuiralabs/midnight-account-chain/owner');
         const device = ownerDeviceOf(owned);
         const view = await readOwnerView(owned.context.network, owned.store, device);
-        report(request.subcommand === 'status' ? statusOf(view, device.arm) : grantsOf(view, owned.context.clock()));
+        report(request.subcommand === 'status' ? statusOf(view, device.arm, deviceCodeOf(device)) : grantsOf(view, owned.context.clock()));
         return;
       }
       case 'issue': {
@@ -208,6 +230,48 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
       case 'revoke-all':
         report(await revokeAll(await ownerSession()));
         return;
+      case 'device': {
+        if (owned.protection !== 'sealed') throw new UsageError('The account is not protected: its devices are managed once it is. Encrypt it first: midnight wallet protect');
+        const { openAccountKey, sealedDeviceList } = await import('../lib/grant/sealed-account.ts');
+        const { unlockPassphrase } = await import('../lib/passphrase.ts');
+        const passphrase = await unlockPassphrase(homedir());
+        const devices = sealedDeviceList(recordsDir, openAccountKey(recordsDir, passphrase));
+        const own = deviceCodeOf(ownerDeviceOf(owned));
+        const known = devices.read().length > 0 ? devices.read() : [own];
+        if (request.action === 'list') {
+          spinner.stop('Done');
+          if (jsonMode) writeJsonResult({ ...common, action: 'list', devices: known.map((code) => ({ code, thisMachine: code === own })) });
+          else process.stdout.write(known.map((code) => `${code}${code === own ? '  (this machine)' : ''}`).join('\n') + '\n\n');
+          return;
+        }
+        const named = parseDeviceCode(request.code);
+        if (request.action === 'add') {
+          const { addOwnerDevice } = await import('@kuiralabs/midnight-account-chain/owner');
+          const { exportAccount } = await import('../lib/grant/account-backup.ts');
+          if (named.arm !== 'v1') throw new UsageError('The account adds JubJub devices only (a v1 device code, as midnight grant device new makes).');
+          // The backup is checked before the device is added, so the add never lands with nowhere to write it.
+          if (existsSync(request.backup)) throw new UsageError(`${request.backup} already exists; a backup is never written over a file.`);
+          await addOwnerDevice(await ownerSession(), named.pk);
+          devices.write([...known, request.code]);
+          const written = await exportAccount(recordsDir, target.network, passphrase, request.backup, { forDevice: named });
+          spinner.stop('Device added');
+          if (jsonMode) {
+            writeJsonResult({ ...common, action: 'add', code: request.code, backup: written.file });
+          } else {
+            process.stderr.write('\n' + keyValue('Added', request.code) + '\n' + keyValue('Backup', written.file) + '\n');
+            process.stderr.write(dim('  On the new device: midnight grant import <that file>. It opens with mn\'s passphrase.') + '\n\n');
+          }
+          return;
+        }
+        const { removeOwnerDevice } = await import('@kuiralabs/midnight-account-chain/owner');
+        if (request.code === own) throw new UsageError('A device does not remove itself: remove this one from another device on the account.');
+        const { removed } = await removeOwnerDevice(await ownerSession(), named.arm, named.pk);
+        devices.write(known.filter((code) => code !== request.code));
+        spinner.stop(removed ? 'Device removed' : 'Already removed');
+        if (jsonMode) writeJsonResult({ ...common, action: 'remove', code: request.code, removed });
+        else process.stderr.write('\n' + keyValue(removed ? 'Removed' : 'Already removed', request.code) + '\n' + dim('  The account\'s encryption key was rotated after, away from the removed device.') + '\n\n');
+        return;
+      }
       case 'export': {
         const { exportAccount } = await import('../lib/grant/account-backup.ts');
         const { unlockPassphrase } = await import('../lib/passphrase.ts');

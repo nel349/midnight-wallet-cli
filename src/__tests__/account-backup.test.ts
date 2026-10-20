@@ -17,6 +17,9 @@ import { PASSPHRASE_ENV, establishPassphrase } from '../lib/passphrase.ts';
 import { getNetworkConfig } from '../lib/network.ts';
 import { openGrantAccount, privateStateLocationOf } from '../lib/grant/account.ts';
 import { exportAccount, importAccount } from '../lib/grant/account-backup.ts';
+import { createPendingDevice, sealedDeviceList } from '../lib/grant/sealed-account.ts';
+import { deviceCodeOf } from '../lib/grant/device-code.ts';
+import { openAccountKey } from '../lib/grant/sealed-account.ts';
 import { createAccountKey, sealedDeviceKeys, sealedOwnerStore, sealedPrivateStatePassword } from '../lib/grant/sealed-account.ts';
 
 const PASSPHRASE = 'correct horse battery staple';
@@ -102,3 +105,45 @@ describe("an account's backup", () => {
     expect(fs.existsSync(toDir)).toBe(false);
   });
 });
+
+describe("a backup made for another device", () => {
+  it('leaves out this machine\'s owner key, and gives the device it was made for the records', async () => {
+    establishPassphrase(there, PASSPHRASE);
+    fs.mkdirSync(toDir, { recursive: true });
+    const pending = createPendingDevice(toDir, PASSPHRASE);
+    expect(pending.arm).toBe('v1');
+    await exportAccount(fromDir, 'undeployed', PASSPHRASE, backup, { forDevice: { arm: pending.arm, pk: pending.pk } });
+    await importAccount(toDir, 'undeployed', PASSPHRASE, backup);
+    const { account, privateState } = await privateStateIn(there, toDir);
+    const original = await openGrantAccount(NETWORK, fromDir, () => {}, { home: here, source: source() });
+    expect(account.store.readOwner()).toEqual(RECORD);
+    expect(account.keys.read()?.pk).toEqual(pending.pk);
+    expect(account.keys.read()?.pk).not.toEqual(original.keys.read()?.pk);
+    expect(await privateState.get(PRIVATE_STATE_ID)).toEqual(PRIVATE_STATE);
+    const devices = sealedDeviceList(toDir, openAccountKey(toDir, PASSPHRASE)).read();
+    expect(devices).toContain(deviceCodeOf(pending));
+    expect(devices).toContain(deviceCodeOf(original.keys.read()!));
+  });
+
+  it('is refused on a machine without the device it was made for', async () => {
+    establishPassphrase(there, PASSPHRASE);
+    fs.mkdirSync(toDir, { recursive: true });
+    createPendingDevice(toDir, PASSPHRASE);
+    const other = path.join(root, 'other');
+    const otherDir = accountsOf(other);
+    establishPassphrase(other, PASSPHRASE);
+    fs.mkdirSync(otherDir, { recursive: true });
+    const stranger = createPendingDevice(otherDir, PASSPHRASE);
+    await exportAccount(fromDir, 'undeployed', PASSPHRASE, backup, { forDevice: { arm: stranger.arm, pk: stranger.pk } });
+    await expect(importAccount(toDir, 'undeployed', PASSPHRASE, backup)).rejects.toThrow(/made for another device/);
+    const empty = accountsOf(path.join(root, 'empty'));
+    await expect(importAccount(empty, 'undeployed', PASSPHRASE, backup)).rejects.toThrow(/device new/);
+  });
+
+  it('keeps the pending device when made again: one key per machine', () => {
+    establishPassphrase(there, PASSPHRASE);
+    fs.mkdirSync(toDir, { recursive: true });
+    expect(createPendingDevice(toDir, PASSPHRASE).pk).toEqual(createPendingDevice(toDir, PASSPHRASE).pk);
+  });
+});
+

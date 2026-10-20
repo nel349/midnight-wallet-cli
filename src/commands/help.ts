@@ -483,7 +483,7 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'grant',
     description: 'This wallet\'s account, and the grants that let an agent spend from it (experimental)',
-    usage: 'midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all|export|import> [options]',
+    usage: 'midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all|export|import|device> [options]',
     flags: [
       'deploy                        Deploy this wallet\'s account and activate its owner key',
       'deposit <amount>              Move <amount> NIGHT of this wallet\'s shielded NIGHT into its account',
@@ -495,6 +495,10 @@ const COMMAND_SPECS: CommandSpec[] = [
       'export <file>                 Write the account to an encrypted backup (owner key, records,',
       '                              grants, private state), opened only with mn\'s passphrase',
       'import <file>                 Bring an account\'s backup in for a wallet with no account',
+      'device new                    Make this machine\'s device for an account another owns',
+      'device add <code> --backup <file>  Add that device to the account, and write its backup',
+      'device remove <code>          Remove a device (a lost one), rotating the account\'s key after',
+      'device list                   The account\'s devices this machine knows of',
       '--yes                         issue: issue the grant (without it the grant is only shown)',
       '--cap <n>                     issue: the most the grant may ever pay, in the token\'s smallest unit',
       '                              (this and the three below default to mn\'s limits: 500000, 300000,',
@@ -981,6 +985,30 @@ ledger-9 network.
     Brings a backup in for a wallet with no account on that network, opened
     with the passphrase it was made with. The machine then acts as the same
     owner device: use the account from one machine at a time.
+
+  midnight grant device new [--json]
+    → { code, network, wallet, ownerKey }
+    On a second machine, for a wallet with no account there: makes this
+    machine's own owner device (a JubJub key, kept encrypted), and prints
+    its code (mn-device:v1:<x>:<y>), which is public. Run again, the same.
+
+  midnight grant device add <code> --backup <file> [--json]
+    → { action, code, backup, ... }
+    On a machine that owns the account: adds the device with that code,
+    then writes <file>, a backup for it: everything but this machine's
+    owner key. On the new machine, midnight grant import <file> makes it an
+    owner on its own.
+
+  midnight grant device remove <code> [--json]
+    → { action, code, removed, ... }
+    Removes the device with that code (a lost machine's), from another
+    device on the account. The account's encryption key is rotated after,
+    away from it, and re-sealed to every live grant. Never this machine's
+    device, never the last. A device already removed only owes the
+    rotation, which is done.
+
+  midnight grant device list [--json]
+    → { devices: [{ code, thisMachine }] }
 
 Amounts are whole numbers of the token's smallest unit, as text in JSON.
 

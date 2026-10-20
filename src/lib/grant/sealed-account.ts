@@ -26,10 +26,12 @@ import {
   type OwnerRecord,
   type OwnerStore,
   type Roster,
+  freshOwnerDevice,
   ownerDeviceFromSecret,
 } from '@kuiralabs/midnight-account-chain/owner';
 import { validatePassword } from '@midnight-ntwrk/midnight-js-utils';
 import { FILE_MODE } from '../constants.ts';
+import { deviceCodeOf } from './device-code.ts';
 import { UsageError } from '../errors.ts';
 import { FileExistsError, readJsonIfPresent, writeJsonDurably } from '../durable-file.ts';
 import { type KeyedSecret, freshDataKey, openSecret, openWithKey, sealSecret, sealWithKey } from '../keystore.ts';
@@ -42,6 +44,8 @@ const OWNER_FILE = 'owner.sealed.json';
 const ROSTER_FILE = 'roster.sealed.json';
 const DEVICE_FILE = 'owner-device.sealed.json';
 const PRIVATE_STATE_FILE = 'private-state.sealed.json';
+// The devices on the account this machine knows of, by their codes.
+const DEVICES_FILE = 'devices.sealed.json';
 const ASIDE_PREFIX = 'set-aside-';
 
 const EMPTY_ROSTER: Roster = { entries: [] };
@@ -220,3 +224,46 @@ export function sealedPrivateStatePassword(dir: string, key: Uint8Array): string
     throw error;
   }
 }
+
+/** The devices on the account this machine knows of, by their codes, sealed under `key`. */
+export interface SealedDeviceList {
+  read(): string[];
+  write(codes: readonly string[]): void;
+}
+
+export function sealedDeviceList(dir: string, key: Uint8Array): SealedDeviceList {
+  const file = path.join(dir, DEVICES_FILE);
+  return {
+    read: () => {
+      const kept = readJsonIfPresent<{ devices: KeyedSecret }>(file);
+      return kept === undefined ? [] : parsed<string[]>(openWithKey(key, kept.devices, 'owner-devices'));
+    },
+    write: (codes) => writeJsonDurably(file, { devices: sealWithKey(key, json([...new Set(codes)]), 'owner-devices') }),
+  };
+}
+
+/** True when `dir` holds a device made for an account it has no records of yet: one `device new` made, awaiting a backup. */
+export function isPendingDevice(dir: string): boolean {
+  return isSealedAccount(dir) && fs.existsSync(path.join(dir, DEVICE_FILE)) && !fs.existsSync(path.join(dir, OWNER_FILE));
+}
+
+/**
+ * A device of this machine's own for an account another device already
+ * owns: a JubJub key (the arm the contract adds devices on), made here and
+ * sealed under `passphrase`, before the account's records come in a backup.
+ * Made once: asked again, the same device. Refused where an account is.
+ */
+export function createPendingDevice(dir: string, passphrase: string): LocalOwnerDevice {
+  if (isPendingDevice(dir)) {
+    const kept = sealedDeviceKeys(dir, openAccountKey(dir, passphrase)).read();
+    if (kept !== undefined) return kept;
+  }
+  if (isSealedAccount(dir) || isAccountMigrating(dir) || fs.existsSync(path.join(dir, 'owner.json'))) {
+    throw new UsageError(`The wallet already has an account in ${dir}: a new device is made for a wallet with none.`);
+  }
+  const key = createAccountKey(dir, passphrase);
+  const device = sealedDeviceKeys(dir, key).keep(freshOwnerDevice('v1'));
+  sealedDeviceList(dir, key).write([deviceCodeOf(device)]);
+  return device;
+}
+
