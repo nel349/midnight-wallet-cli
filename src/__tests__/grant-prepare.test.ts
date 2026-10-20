@@ -1,4 +1,4 @@
-// What `mn grant` settles before a wallet is looked at. The home directory is a
+// What `mn grant` settles before a wallet is opened. The home directory is a
 // temporary one, and the account on record is written as an earlier mn left
 // it: nothing here reaches a chain.
 
@@ -25,6 +25,11 @@ const accounts = () => path.join(home, '.midnight', 'accounts');
 const recordsOf = (wallet: string) => path.join(accounts(), 'undeployed', wallet);
 const prepare = (...argv: string[]) => prepareGrant(parseArgs(['grant', ...argv, ...ENDPOINTS]));
 const asAlice = (...argv: string[]) => prepare(...argv, '--wallet', 'alice');
+// A wallet file, as far as preparing needs one: that it is there.
+const aliceWallet = () => {
+  fs.mkdirSync(path.join(home, '.midnight', 'wallets'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.midnight', 'wallets', 'alice.json'), '{}');
+};
 
 beforeEach(() => {
   home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mn-grant-home-')));
@@ -48,6 +53,7 @@ describe('prepareGrant', () => {
   });
 
   it('prepares the deploy of a new account: records under the wallet\'s name, readable by their owner only', async () => {
+    aliceWallet();
     const prepared = await asAlice('deploy');
     expect(prepared.account).toBeNull();
     expect(prepared.walletName).toBe('alice');
@@ -56,7 +62,15 @@ describe('prepareGrant', () => {
     expect(fs.statSync(recordsOf('alice')).mode & 0o777).toBe(0o700);
   });
 
+  it('refuses to start an account for a wallet that is not there, creating nothing', async () => {
+    for (const command of [['deploy'], ['import', 'alice.backup.json'], ['device', 'new']]) {
+      await expect(asAlice(...command)).rejects.toThrow(/Wallet file not found/);
+    }
+    expect(fs.existsSync(accounts())).toBe(false);
+  });
+
   it('prepares the import of a backup for a wallet with no account', async () => {
+    aliceWallet();
     const prepared = await asAlice('import', 'alice.backup.json');
     expect(prepared.account).toBeNull();
     expect(prepared.request).toEqual({ subcommand: 'import', file: 'alice.backup.json' });
@@ -75,6 +89,7 @@ describe('prepareGrant', () => {
       await expect(refused).rejects.toThrow(NoAccountError);
       await expect(refused).rejects.toThrow('Wallet "alice" has no account on undeployed yet.\nDeploy one: midnight grant deploy');
     }
+    expect(fs.existsSync(accounts())).toBe(false);
   });
 
   it('takes records that hold only a device kept for a deploy that never wrote an account as no account', async () => {

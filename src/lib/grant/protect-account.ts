@@ -110,6 +110,8 @@ export async function protectAllAccounts(home: string, passphrase: string, coinK
   for (const network of dirsIn(root)) {
     for (const wallet of dirsIn(path.join(root, network))) {
       const dir = accountRecordsDir(network, wallet, home);
+      // An empty folder holds no account: an earlier mn made one for a command that then failed.
+      if (fs.readdirSync(dir).length === 0) continue;
       try {
         const outcome = isSealedAccount(dir)
           ? await protectAccount(dir, passphrase, '')

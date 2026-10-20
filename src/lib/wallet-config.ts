@@ -320,6 +320,16 @@ export function migrateOldWallet(): void {
   saveCliConfig(config);
 }
 
+/** Throws, with how to make one, when there is no wallet file at `resolvedPath`. */
+export function assertWalletFileExists(resolvedPath: string): void {
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(
+      `Wallet file not found: ${resolvedPath}\n` +
+      `Generate a wallet first: midnight wallet generate <name> --network <name>`
+    );
+  }
+}
+
 /**
  * Load wallet config from a file.
  * Throws with an actionable message if file is missing or invalid.
@@ -330,12 +340,7 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
     ? path.resolve(walletPath)
     : getDefaultWalletPath();
 
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error(
-      `Wallet file not found: ${resolvedPath}\n` +
-      `Generate a wallet first: midnight wallet generate <name> --network <name>`
-    );
-  }
+  assertWalletFileExists(resolvedPath);
 
   let content: string;
   try {

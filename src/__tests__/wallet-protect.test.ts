@@ -85,4 +85,11 @@ describe('wallet protect', () => {
     expect(fs.readFileSync(path.join(accounts, 'gone', 'owner.json'), 'utf8')).toContain('4f'.repeat(32));
     expect(fs.existsSync(path.join(accounts, 'alice', 'owner.json'))).toBe(false);
   });
+
+  it('passes over an empty account folder, which an earlier mn left for a command that failed', async () => {
+    plainWallet('alice');
+    fs.mkdirSync(path.join(home, '.midnight', 'accounts', 'undeployed', 'never'), { recursive: true });
+    const result = await protect();
+    expect(result.accounts).toEqual([]);
+  });
 });

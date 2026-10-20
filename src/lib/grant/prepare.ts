@@ -1,11 +1,12 @@
-// Everything `mn grant` settles before a wallet is looked at: what is asked,
-// which network, where the account's records are and whether there is an
-// account yet. The CLI runs it first; the MCP server runs it before it issues a
+// Everything `mn grant` settles before a wallet is opened: what is asked,
+// which network, where the account's records are, whether there is an
+// account yet, and for a command that starts one, that its wallet exists. The CLI runs it first; the MCP server runs it before it issues a
 // confirmation token.
 
 import { type ParsedArgs, getFlag } from '../argv.ts';
 import { UsageError } from '../errors.ts';
 import { type PayingTarget, resolvePayingTarget } from '../paying-wallet.ts';
+import { assertWalletFileExists, resolveWalletPath } from '../wallet-config.ts';
 import { assertAccountNetwork, assertNodeRunsAccount } from './account.ts';
 import { accountRecordsDir, accountWalletName, ensureAccountRecordsDir } from './account-records.ts';
 import { type GrantRequest, resolveGrantRequest } from './request.ts';
@@ -56,8 +57,6 @@ export async function prepareGrant(args: ParsedArgs): Promise<PreparedGrant> {
   assertAccountNetwork(target.networkConfig);
   const walletName = accountWalletName(getFlag(args, 'wallet'));
   const recordsDir = accountRecordsDir(target.network, walletName);
-  ensureAccountRecordsDir(recordsDir);
-
   const account = await accountOnRecord(recordsDir);
   if (request.subcommand === 'import' && account !== null) {
     throw new UsageError(`Wallet "${walletName}" already has an account on ${target.network} (${account.address}); a backup is never imported over one.`);
@@ -68,6 +67,12 @@ export async function prepareGrant(args: ParsedArgs): Promise<PreparedGrant> {
   }
   if (request.subcommand !== 'deploy' && request.subcommand !== 'import' && !makesItsOwn && account === null) {
     throw new NoAccountError(walletName, target.network);
+  }
+  // Only a command that writes an account's first records makes their folder,
+  // and only for a wallet there is: a command refused leaves nothing behind.
+  if (account === null) {
+    assertWalletFileExists(resolveWalletPath(getFlag(args, 'wallet')));
+    ensureAccountRecordsDir(recordsDir);
   }
   return { request, target, walletName, recordsDir, account };
 }

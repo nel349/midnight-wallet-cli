@@ -24,6 +24,8 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ### Fixed
 
+- **A refused `mn grant` command leaves no account folder behind.** The folder under `~/.midnight/accounts/<network>/<wallet>/` was made before the command checked its wallet or its account; now only `deploy`, `import` and `device new` make it, once the wallet's file is found. `wallet protect` passes over an empty one an earlier release left, rather than naming it as an account whose wallet is gone.
+
 - **A transaction the node refuses says why.** When a submit through `mn serve`'s DApp connector (and `mn grant`, which pays through the same code) failed, it reported only `Transaction submission error`: the wallet SDK's error keeps the node's answer where mn did not look. It now carries the node's own words, such as `1010: Invalid Transaction: Custom error: 139`, so an app can tell the node refused it, and why.
 
 ### Removed
