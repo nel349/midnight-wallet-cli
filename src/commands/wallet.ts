@@ -424,14 +424,25 @@ async function walletProtect(args: ParsedArgs): Promise<void> {
   const report = protectAllWallets(home, passphrase);
   const sealed = report.filter((w) => w.sealedNow).map((w) => w.name);
   const alreadySealed = report.filter((w) => !w.sealedNow).map((w) => w.name);
+  // Each account's private state is scoped to its wallet's shielded coin key, which the wallet gives.
+  const { protectAllAccounts } = await import('../lib/grant/protect-account.ts');
+  const { shieldedCoinPublicKeyHexFromSeed } = await import('../lib/shielded-direct-cache.ts');
+  const accounts = await protectAllAccounts(home, passphrase, async (wallet) =>
+    shieldedCoinPublicKeyHexFromSeed(Buffer.from((await unlockWallet(resolveWalletPath(wallet))).seed, 'hex')));
   if (hasFlag(args, 'json')) {
-    writeJsonResult({ sealed, alreadySealed });
+    writeJsonResult({ sealed, alreadySealed, accounts });
     return;
   }
   process.stderr.write('\n');
   for (const name of sealed) process.stderr.write(green(`  ✓ ${name}: encrypted`) + '\n');
   for (const name of alreadySealed) process.stderr.write(dim(`  ${name}: already encrypted`) + '\n');
   if (report.length === 0) process.stderr.write(dim('  No wallets yet: each new wallet is encrypted under this passphrase.') + '\n');
+  for (const account of accounts) {
+    const where = `account of ${account.wallet} on ${account.network}`;
+    if ('error' in account) process.stderr.write(yellow(`  ✗ ${where}: not encrypted: ${account.error}`) + '\n');
+    else if (account.outcome === 'sealed-now') process.stderr.write(green(`  ✓ ${where}: owner key, records and private state encrypted`) + '\n');
+    else process.stderr.write(dim(`  ${where}: already encrypted`) + '\n');
+  }
   process.stderr.write('\n' + dim('  Keep the passphrase safe: without it, mn cannot open these wallets.') + '\n\n');
 }
 

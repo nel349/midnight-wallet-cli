@@ -22,7 +22,17 @@ import {
 } from '@kuiralabs/midnight-account-chain/owner';
 import { MIDNIGHT_DIR } from '../constants.ts';
 import { type PassphraseSource, passphraseForNewSecret, unlockPassphrase } from '../passphrase.ts';
-import { type SealedDeviceKeys, createAccountKey, isSealedAccount, openAccountKey, sealedDeviceKeys, sealedOwnerStore, sealedPrivateStatePassword } from './sealed-account.ts';
+import {
+  AccountMigrationInterruptedError,
+  type SealedDeviceKeys,
+  createAccountKey,
+  isAccountMigrating,
+  isSealedAccount,
+  openAccountKey,
+  sealedDeviceKeys,
+  sealedOwnerStore,
+  sealedPrivateStatePassword,
+} from './sealed-account.ts';
 import { UsageError } from '../errors.ts';
 import type { NetworkConfig } from '../network.ts';
 
@@ -45,7 +55,12 @@ const PRIVATE_STATE_STORE = 'midnight-bench-account';
 // It stays only so a plain-text account an earlier mn made is read until
 // `midnight wallet protect` re-encrypts its private state under a password of
 // its own; a sealed account never uses it.
-const LEGACY_STORE_PASSWORD = 'Answer to the Ultimate Question of Life, the Universe, and Everything!';
+export const LEGACY_STORE_PASSWORD = 'Answer to the Ultimate Question of Life, the Universe, and Everything!';
+
+/** Where an account's private state is kept in its records directory, under `password`. */
+export function privateStateLocationOf(recordsDir: string, password: () => string): PrivateStateLocation {
+  return { database: join(recordsDir, PRIVATE_STATE_DATABASE), store: PRIVATE_STATE_STORE, password };
+}
 
 /** A network the account package can't reach yet. */
 export class UnreachableByAccountError extends UsageError {
@@ -128,6 +143,8 @@ export async function openGrantAccount(networkConfig: NetworkConfig, recordsDir:
   });
   if (isSealedAccount(recordsDir)) return sealed(openAccountKey(recordsDir, await unlockPassphrase(home, options.source)));
 
+  // Caught half way through being sealed: its private state may be under its new password already.
+  if (isAccountMigrating(recordsDir)) throw new AccountMigrationInterruptedError(recordsDir);
   const plainStore = directoryOwnerStore(recordsDir);
   const plainKeys = directoryDeviceKeys(recordsDir);
   if (plainStore.readOwner() !== undefined || plainKeys.read() !== undefined) {

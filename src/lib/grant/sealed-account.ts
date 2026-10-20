@@ -30,10 +30,14 @@ import {
 } from '@kuiralabs/midnight-account-chain/owner';
 import { validatePassword } from '@midnight-ntwrk/midnight-js-utils';
 import { FILE_MODE } from '../constants.ts';
+import { UsageError } from '../errors.ts';
 import { FileExistsError, readJsonIfPresent, writeJsonDurably } from '../durable-file.ts';
 import { type KeyedSecret, freshDataKey, openSecret, openWithKey, sealSecret, sealWithKey } from '../keystore.ts';
 
 const ACCOUNT_KEY_FILE = 'account-key.json';
+// The data key while a plain-text account is being sealed: the account is
+// sealed only once this is renamed to ACCOUNT_KEY_FILE.
+const MIGRATING_KEY_FILE = 'account-key.migrating.json';
 const OWNER_FILE = 'owner.sealed.json';
 const ROSTER_FILE = 'roster.sealed.json';
 const DEVICE_FILE = 'owner-device.sealed.json';
@@ -63,6 +67,49 @@ export function createAccountKey(dir: string, passphrase: string): Buffer {
     throw error;
   }
   return key;
+}
+
+/** A plain-text account is being sealed, and the run doing it stopped part way. */
+export class AccountMigrationInterruptedError extends UsageError {
+  constructor(dir: string) {
+    super(`Protecting the account in ${dir} was interrupted part way. Finish it with: midnight wallet protect`);
+    this.name = 'AccountMigrationInterruptedError';
+    Object.setPrototypeOf(this, AccountMigrationInterruptedError.prototype);
+  }
+}
+
+/** True while a plain-text account in `dir` is part way through being sealed. */
+export function isAccountMigrating(dir: string): boolean {
+  return fs.existsSync(path.join(dir, MIGRATING_KEY_FILE));
+}
+
+/** The data key a plain-text account is being sealed under: the one an interrupted run made, or a new one. */
+export function migratingAccountKey(dir: string, passphrase: string): Buffer {
+  const file = path.join(dir, MIGRATING_KEY_FILE);
+  const kept = readJsonIfPresent<{ sealed: unknown }>(file);
+  if (kept !== undefined) return openSecret(kept.sealed, passphrase, 'account-key');
+  const key = freshDataKey();
+  writeJsonDurably(file, { sealed: sealSecret(key, passphrase, 'account-key') }, { exclusive: true });
+  return key;
+}
+
+/** Makes the migrating data key the account's: from here the account is sealed. */
+export function completeAccountKey(dir: string): void {
+  fs.renameSync(path.join(dir, MIGRATING_KEY_FILE), path.join(dir, ACCOUNT_KEY_FILE));
+  const dirFd = fs.openSync(dir, 'r');
+  try {
+    fs.fsyncSync(dirFd);
+  } finally {
+    fs.closeSync(dirFd);
+  }
+}
+
+/** Seals a plain-text file of the account's whole, as `<name>.sealed.json` beside it, and removes the plain one. */
+export function sealPlainFile(dir: string, file: string, key: Uint8Array): string {
+  const sealedFile = file.replace(/\.json$/, '.sealed.json');
+  writeJsonDurably(path.join(dir, sealedFile), { record: sealWithKey(key, fs.readFileSync(path.join(dir, file)), 'owner-record') });
+  fs.rmSync(path.join(dir, file));
+  return sealedFile;
 }
 
 /** The account's data key, opened with `passphrase`. */

@@ -9,7 +9,8 @@ import { basename, join } from 'node:path';
 import { DIR_MODE, MIDNIGHT_DIR } from '../constants.ts';
 import { getActiveWalletName } from '../wallet-config.ts';
 
-const ACCOUNTS_DIR_NAME = 'accounts';
+/** The directory under ~/.midnight that holds each network's accounts. */
+export const ACCOUNTS_DIR_NAME = 'accounts';
 
 /**
  * The name an account is kept under for a wallet: the wallet's name, or for a

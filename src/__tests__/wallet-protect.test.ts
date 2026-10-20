@@ -69,4 +69,20 @@ describe('wallet protect', () => {
     await expect(protect()).rejects.toThrow(/Wrong passphrase/);
     expect(loadWalletConfig(bob).isSealed).toBe(false);
   });
+
+  it("seals each wallet's plain-text account too, and names one whose wallet is gone", async () => {
+    plainWallet('alice');
+    const accounts = path.join(home, '.midnight', 'accounts', 'undeployed');
+    for (const name of ['alice', 'gone']) {
+      fs.mkdirSync(path.join(accounts, name), { recursive: true });
+      fs.writeFileSync(path.join(accounts, name, 'owner.json'), JSON.stringify({ contractAddress: '5e'.repeat(32), bootSalt: '3a'.repeat(32), encryptionSecret: '2b'.repeat(32), deviceArm: 'k1', deviceSk: '4f'.repeat(32) }));
+    }
+    const result = await protect();
+    expect(result.accounts).toEqual([
+      { network: 'undeployed', wallet: 'alice', outcome: 'sealed-now' },
+      { network: 'undeployed', wallet: 'gone', error: expect.stringContaining('not found') },
+    ]);
+    expect(fs.readFileSync(path.join(accounts, 'gone', 'owner.json'), 'utf8')).toContain('4f'.repeat(32));
+    expect(fs.existsSync(path.join(accounts, 'alice', 'owner.json'))).toBe(false);
+  });
 });
