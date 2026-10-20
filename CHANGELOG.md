@@ -4,7 +4,17 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Every secret mn keeps is encrypted under one passphrase.** Each wallet's seed and mnemonic, and each account's owner key, records (its encryption secrets), roster of grants and private state, are sealed at rest: scrypt to a key, then AES-256-GCM, each secret bound to what it is for. A wallet's addresses stay readable, so `wallet list`, `wallet info` and anything that only reads addresses ask for nothing. A command that needs a secret asks for the passphrase once at a terminal, or reads `MN_PASSPHRASE` (scripts, CI, the MCP server); without one it is refused (`PASSPHRASE_REQUIRED`), and a wrong one changes nothing (`WRONG_PASSPHRASE`). The first new wallet sets it, at least 12 characters.
+- **`midnight wallet protect`** sets the passphrase and encrypts every wallet and account an earlier mn wrote in plain text, in one step, without loss: an account's private state is moved off the public password every account used before onto a password of its own. An interrupted run is finished by running it again. Until then plain-text wallets and accounts keep working, with a warning.
+- **`midnight grant export <file>` and `import <file>`**: an account's encrypted backup, everything another machine needs to act as the same owner, opened only with the passphrase.
+- **`midnight grant device new | add | remove | list`**: a second owner device on another machine. `device new` makes that machine's key; `device add <code> --backup <file>`, on a machine that owns the account, adds it and writes its backup; `import` there makes it an owner on its own. `device remove <code>` removes a lost device from another, rotating the account's key away from it. Each device learns the other's rotations and grants through the account's own inbox, so either can keep the account, and its grants, when the other is lost.
+
 ### Changed
+
+- **A new account's owner key is its own, encrypted.** It is made on this machine as a valid secp256k1 key, independent of the wallet's seed (MIP-0013), and kept encrypted with the account's records; results say `ownerKey: "sealed"`, or `"plain-text"` for an account an earlier mn made, until `wallet protect`.
+- **`wallet seed`** asks for the passphrase.
 
 - **`mn grant` calls the account package in its own process.** It no longer writes a script, runs it as a child process, or starts an `mn serve` for its own commands: the wallet pays through its DApp connector in this process, the same code `mn serve` runs, with no server in front of it. So a running `mn serve` on port 9932 for another wallet (an agent's fee wallet, say) no longer stops `mn grant`, and `mn grant` never puts an approve-all server on that port. The account package's failures come through whole: a refusal by the account's own checks names the check, and a refusal by the node names its code.
 - **`mn grant status`, `mn grant list`, and `mn grant issue` without `--yes` read the account without the wallet**: no sync, no Dust, no server.
@@ -17,6 +27,8 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 - **A transaction the node refuses says why.** When a submit through `mn serve`'s DApp connector (and `mn grant`, which pays through the same code) failed, it reported only `Transaction submission error`: the wallet SDK's error keeps the node's answer where mn did not look. It now carries the node's own words, such as `1010: Invalid Transaction: Custom error: 139`, so an app can tell the node refused it, and why.
 
 ### Removed
+
+- **`--dev-owner-key`** on `grant deploy`, and `dev-owner-key` on `midnight_grant_deploy`: there is no development owner key any more.
 
 - **`--account-build <dir>` and the `account-build` config key.** mn runs the account package it installs; a local build would load a second copy of the libraries beside mn's own. An `account-build` key left in `~/.midnight/config.json` is ignored.
 

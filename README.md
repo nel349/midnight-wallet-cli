@@ -265,6 +265,8 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 > **Tip:** If you haven't installed globally, use `"command": "npx"` with `"args": ["-y", "midnight-wallet-cli@latest", "--mcp"]` instead (`midnight-wallet-cli@next` for this ledger-9 prerelease).
 
+> **Passphrase:** mn keeps every secret (wallet seeds, account owner keys) encrypted under one passphrase, which the MCP server cannot ask for. Give it the passphrase in its environment, `"env": { "MN_PASSPHRASE": "<your passphrase>" }`, to let it sign; without it, tools that need a secret are refused and change nothing. The passphrase then sits in that config file, so keep the file readable by you alone. Set the passphrase first in a terminal with `midnight wallet protect`.
+
 ### Available MCP Tools
 
 Once connected, your AI agent gets access to 38 tools:
