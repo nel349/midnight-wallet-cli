@@ -9,8 +9,34 @@
 
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 
-/** What a sealed secret is for: a wallet's seed and mnemonic, an account's owner key, or the keystore's check of the one passphrase. */
-export type SecretPurpose = 'wallet' | 'owner-key' | 'keystore-check';
+/**
+ * What a sealed secret is for. Under the passphrase: a wallet's seed and
+ * mnemonic, an account's data key, or the keystore's check of the one
+ * passphrase. Under an account's data key: its records, its roster of
+ * grants, its owner key, and its private state's password.
+ */
+export type SecretPurpose =
+  | 'wallet'
+  | 'owner-key'
+  | 'keystore-check'
+  | 'account-key'
+  | 'owner-record'
+  | 'owner-roster'
+  | 'owner-device'
+  | 'private-state-password';
+
+/**
+ * A secret sealed under a data key rather than the passphrase: AES-256-GCM
+ * with no key derivation, so an account's records can be read and written as
+ * often as the account package asks, the passphrase's cost paid once, for
+ * the data key.
+ */
+export interface KeyedSecret {
+  v: 1;
+  iv: string;
+  tag: string;
+  ciphertext: string;
+}
 
 /** A secret as mn writes it: the cipher text and everything needed to open it but the passphrase. */
 export interface SealedSecret {
@@ -150,3 +176,38 @@ export function openSecret(sealed: unknown, passphrase: string, purpose: SecretP
     key.fill(0);
   }
 }
+
+/** A fresh 32-byte data key, from the system's secure random source. */
+export function freshDataKey(): Buffer {
+  return randomBytes(KEY_BYTES);
+}
+
+/** Seals `secret` under the data key `key`, for `purpose`. */
+export function sealWithKey(key: Uint8Array, secret: Uint8Array, purpose: SecretPurpose): KeyedSecret {
+  if (key.length !== KEY_BYTES) throw new MalformedSecretError(`a data key is ${KEY_BYTES} bytes`);
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(CIPHER, key, iv, { authTagLength: TAG_BYTES });
+  cipher.setAAD(associatedData(purpose));
+  const ciphertext = Buffer.concat([cipher.update(secret), cipher.final()]);
+  return { v: VERSION, iv: iv.toString('hex'), tag: cipher.getAuthTag().toString('hex'), ciphertext: ciphertext.toString('hex') };
+}
+
+/** Opens a secret sealed under the data key `key`; refuses another key, another purpose, or a changed byte. */
+export function openWithKey(key: Uint8Array, sealed: unknown, purpose: SecretPurpose): Buffer {
+  if (typeof sealed !== 'object' || sealed === null) throw new MalformedSecretError('it is not an object');
+  const fields = sealed as Record<string, unknown>;
+  if (fields.v !== VERSION) throw new MalformedSecretError(`version ${String(fields.v)} is not ${VERSION}`);
+  const iv = hexField(fields.iv, 'IV', IV_BYTES);
+  const tag = hexField(fields.tag, 'tag', TAG_BYTES);
+  const ciphertext = typeof fields.ciphertext === 'string' && fields.ciphertext.length === 0 ? Buffer.alloc(0) : hexField(fields.ciphertext, 'cipher text');
+  if (key.length !== KEY_BYTES) throw new MalformedSecretError(`a data key is ${KEY_BYTES} bytes`);
+  const decipher = createDecipheriv(CIPHER, key, iv, { authTagLength: TAG_BYTES });
+  decipher.setAAD(associatedData(purpose));
+  decipher.setAuthTag(tag);
+  try {
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  } catch {
+    throw new WrongPassphraseError('The data key is wrong, or the sealed secret has been changed.');
+  }
+}
+

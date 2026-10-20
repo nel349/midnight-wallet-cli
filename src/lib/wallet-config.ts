@@ -6,6 +6,7 @@ import { isValidNetworkName, type NetworkName } from './network.ts';
 import { loadCliConfig, saveCliConfig } from './cli-config.ts';
 import { deriveAllAddresses, deriveAllShieldedAddresses } from './derive-address.ts';
 import { isSealedSecret, openSecret, sealSecret } from './keystore.ts';
+import { FileExistsError, writeJsonDurably } from './durable-file.ts';
 import { type PassphraseSource, unlockPassphrase } from './passphrase.ts';
 
 /** What anyone may read of a wallet: its addresses, and whether its secrets are sealed. No secret. */
@@ -475,20 +476,14 @@ function resolveShieldedAddresses(
   return { ...derived, ...validStored } as Record<NetworkName, string>;
 }
 
-/** Writes `value` to `file` whole or not at all: a temporary file, then a rename over it. */
+/** Writes `value` to `file` whole or not at all, durably; with 'wx', never over a file that exists. */
 function writeFileAtomically(file: string, value: unknown, flag: 'w' | 'wx' = 'w'): void {
-  const dir = path.dirname(file);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-  if (flag === 'wx' && fs.existsSync(file)) throw new Error(`Wallet file already exists: ${file}`);
-  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
-  const fd = fs.openSync(temporary, 'wx', FILE_MODE);
   try {
-    fs.writeSync(fd, JSON.stringify(value, null, 2) + '\n');
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
+    writeJsonDurably(file, value, { exclusive: flag === 'wx' });
+  } catch (error) {
+    if (error instanceof FileExistsError) throw new Error(`Wallet file already exists: ${file}`);
+    throw error;
   }
-  fs.renameSync(temporary, file);
 }
 
 const sealedSecretsOf = (secrets: WalletSecrets, passphrase: string) =>

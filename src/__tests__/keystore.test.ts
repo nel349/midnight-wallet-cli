@@ -5,7 +5,7 @@
 // machine than mn's own parameters do.
 
 import { describe, expect, it } from 'vitest';
-import { MalformedSecretError, WrongPassphraseError, openSecret, sealSecret } from '../lib/keystore.ts';
+import { MalformedSecretError, WrongPassphraseError, freshDataKey, openSecret, openWithKey, sealSecret, sealWithKey } from '../lib/keystore.ts';
 
 const SEED = Buffer.from('aabbccdd00112233aabbccdd00112233aabbccdd00112233aabbccdd00112233', 'hex');
 const PASSPHRASE = 'correct horse battery staple';
@@ -72,3 +72,37 @@ describe('a sealed secret', () => {
     expect(() => sealSecret(SEED, '', 'wallet')).toThrow(WrongPassphraseError);
   });
 });
+
+describe('a secret sealed under a data key', () => {
+  const RECORD = Buffer.from(JSON.stringify({ encryptionSecret: '12'.repeat(32) }), 'utf8');
+
+  it('opens with that key and purpose, quickly: no key derivation per secret', () => {
+    const key = freshDataKey();
+    const started = Date.now();
+    for (let i = 0; i < 50; i += 1) expect(openWithKey(key, sealWithKey(key, RECORD, 'owner-record'), 'owner-record')).toEqual(RECORD);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('holds nothing in the clear', () => {
+    expect(JSON.stringify(sealWithKey(freshDataKey(), RECORD, 'owner-record'))).not.toContain('12'.repeat(32));
+  });
+
+  it('is refused under another key, another purpose, or with a changed byte', () => {
+    const key = freshDataKey();
+    const sealed = sealWithKey(key, RECORD, 'owner-record');
+    expect(() => openWithKey(freshDataKey(), sealed, 'owner-record')).toThrow(WrongPassphraseError);
+    expect(() => openWithKey(key, sealed, 'owner-roster')).toThrow(WrongPassphraseError);
+    expect(() => openWithKey(key, { ...sealed, ciphertext: (sealed.ciphertext[0] === '0' ? '1' : '0') + sealed.ciphertext.slice(1) }, 'owner-record')).toThrow(WrongPassphraseError);
+  });
+
+  it('is refused as malformed when it is not one', () => {
+    expect(() => openWithKey(freshDataKey(), { v: 1, iv: 'zz', tag: '', ciphertext: '' }, 'owner-record')).toThrow(MalformedSecretError);
+  });
+
+  it('keeps its data key itself sealed under the passphrase, as a secret of its own purpose', () => {
+    const key = freshDataKey();
+    expect(key.length).toBe(32);
+    expect(openSecret(sealSecret(key, PASSPHRASE, 'account-key'), PASSPHRASE, 'account-key')).toEqual(key);
+  });
+});
+
