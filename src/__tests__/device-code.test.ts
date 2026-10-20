@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { freshOwnerDevice } from '@kuiralabs/midnight-account-chain/owner';
 import { UsageError } from '../lib/errors.ts';
-import { deviceCodeOf, parseDeviceCode } from '../lib/grant/device-code.ts';
+import { deviceCodeOf, deviceKeyOf, parseDeviceCode } from '../lib/grant/device-code.ts';
 
 describe('a device code', () => {
   it('reads back as the same device, on either arm', () => {
@@ -16,6 +16,14 @@ describe('a device code', () => {
       const code = deviceCodeOf(device, readKey);
       expect(code).toMatch(new RegExp(`^mn-device:${arm}:[0-9a-f]{64}:[0-9a-f]{64}:[0-9a-f]{64}$`));
       expect(parseDeviceCode(code)).toEqual({ arm, pk: device.pk, readKey });
+    }
+  });
+
+  it("names the key the account enrolled: an mn k1 device's in envelope 0, as mn's own k1 devices sign", () => {
+    for (const arm of ['v1', 'k1'] as const) {
+      const device = freshOwnerDevice(arm);
+      const key = deviceKeyOf(parseDeviceCode(deviceCodeOf(device, new Uint8Array(32))));
+      expect(key).toEqual(device.arm === 'k1' ? { arm, pk: device.pk, envelope: device.envelope } : { arm, pk: device.pk });
     }
   });
 

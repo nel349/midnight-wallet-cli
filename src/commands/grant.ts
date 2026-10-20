@@ -1,4 +1,4 @@
-import { parseDeviceCode } from '../lib/grant/device-code.ts';
+import { deviceKeyOf, parseDeviceCode } from '../lib/grant/device-code.ts';
 import { existsSync } from 'node:fs';
 // grant command — the wallet owner's account, and the grants that let an agent spend from it
 // Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all> [options]
@@ -268,7 +268,7 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
         }
         const { removeOwnerDevice } = await import('@kuiralabs/midnight-account-chain/owner');
         if (request.code === own) throw new UsageError('A device does not remove itself: remove this one from another device on the account.');
-        const { removed } = await removeOwnerDevice(await ownerSession(), named.arm, named.pk, named.readKey);
+        const { removed } = await removeOwnerDevice(await ownerSession(), deviceKeyOf(named), named.readKey);
         devices.write(known.filter((code) => code !== request.code));
         spinner.stop(removed ? 'Device removed' : 'Already removed');
         if (jsonMode) writeJsonResult({ ...common, action: 'remove', code: request.code, removed });

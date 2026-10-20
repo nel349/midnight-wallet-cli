@@ -4,7 +4,7 @@
 // after a rotation. It is public: it names the device, it does not let anyone
 // act as it or read for it.
 
-import type { Arm } from '@kuiralabs/midnight-account';
+import type { Arm, DeviceKey } from '@kuiralabs/midnight-account';
 import type { OwnerDevice } from '@kuiralabs/midnight-account-chain/owner';
 import { UsageError } from '../errors.ts';
 
@@ -29,6 +29,15 @@ export function parseDeviceCode(code: string): DeviceIdentity {
   if (match === null) throw new UsageError(`Not a device code: "${code}". A device code reads mn-device:<v1|k1>:<x>:<y>:<read key>, as \`midnight grant device new\` or \`device list\` prints it.`);
   const [, arm, x, y, readKey] = match as unknown as [string, Arm, string, string, string];
   return { arm, pk: { x: BigInt(`0x${x}`), y: BigInt(`0x${y}`) }, readKey: new Uint8Array(Buffer.from(readKey, 'hex')) };
+}
+
+/**
+ * The key the account enrolled for the device. mn holds its devices' keys
+ * itself, and a k1 key held that way signs in envelope 0, so a code names no
+ * envelope.
+ */
+export function deviceKeyOf(device: DeviceIdentity): DeviceKey {
+  return device.arm === 'k1' ? { arm: 'k1', pk: device.pk, envelope: 0 } : { arm: 'v1', pk: device.pk };
 }
 
 /** True when `a` and `b` name the same device. */
