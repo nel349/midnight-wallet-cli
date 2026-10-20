@@ -11,6 +11,8 @@ All notable changes to midnight-wallet-cli will be documented in this file.
 - **`midnight grant export <file>` and `import <file>`**: an account's encrypted backup, everything another machine needs to act as the same owner, opened only with the passphrase.
 - **`midnight grant device new | add | remove | list`**: a second owner device on another machine. `device new` makes that machine's key; `device add <code> --backup <file>`, on a machine that owns the account, adds it and writes its backup; `import` there makes it an owner on its own. `device remove <code>` removes a lost device from another, rotating the account's key away from it. Each device learns the other's rotations and grants through the account's own inbox, so either can keep the account, and its grants, when the other is lost.
 
+- **`grant issue` shows a request's caller pin.** An agent's request may name the one contract that must call the account to spend under the grant. The terms to confirm, at the terminal and in the MCP confirmation, say `caller: via any caller`, or the contract's full address and what the pin means: the agent spends only when that contract calls the account, and that call is public on chain. The issued grant keeps the pin.
+
 ### Changed
 
 - **A new account's owner key is its own, encrypted.** It is made on this machine as a valid secp256k1 key, independent of the wallet's seed (MIP-0013), and kept encrypted with the account's records; results say `ownerKey: "sealed"`, or `"plain-text"` for an account an earlier mn made, until `wallet protect`.

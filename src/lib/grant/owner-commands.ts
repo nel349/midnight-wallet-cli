@@ -123,6 +123,15 @@ function limitsOf(requested: RequestedLimits) {
   };
 }
 
+/**
+ * The caller pin as the grants draft has it confirmed (section 9): the full
+ * contract address and what pinning it means, or that any caller may spend.
+ */
+function callerTerm(caller: Uint8Array | undefined): string {
+  if (caller === undefined) return 'via any caller';
+  return `via contract ${hexOf(caller)} only: the agent spends only when that contract calls the account, and that call is public on chain`;
+}
+
 /** What an issue would grant, before anything is signed: the terms a person confirms. */
 export function issueTerms(request: GrantRequest, requested: RequestedLimits, now: Date) {
   const terms = termsFor(request, limitsOf(requested), now);
@@ -132,6 +141,7 @@ export function issueTerms(request: GrantRequest, requested: RequestedLimits, no
     slot: request.slot,
     grantee: request.granteeKey.arm,
     payee: request.payToKind === ANY_COIN_KEY ? 'any shielded coin key' : `${request.payToKind === CONTRACT ? 'contract' : 'coin key'} ${hexOf(request.payTo)}`,
+    caller: callerTerm(request.caller),
     perCallCap: terms.perCallCap.toString(),
     cap: terms.cap.toString(),
     maxCoinValue: terms.object.maxCoinValue.toString(),
