@@ -26,8 +26,8 @@ interface CommandSpec {
 const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'wallet',
-    description: 'Manage named wallets (generate, list, use, info, remove, seed)',
-    usage: 'midnight wallet <generate|list|use|info|remove|seed> [args]',
+    description: 'Manage named wallets (generate, list, use, info, remove, seed, protect)',
+    usage: 'midnight wallet <generate|list|use|info|remove|seed|protect> [args]',
     flags: [
       'generate <name>     Create a new named wallet and set it as active',
       'list                Show all wallets with active marker',
@@ -35,6 +35,10 @@ const COMMAND_SPECS: CommandSpec[] = [
       'info [name]         Show wallet details (active wallet if no name)',
       'remove <name>       Delete a wallet (refuses active or last wallet)',
       'seed [name]         Reveal the seed + mnemonic (prompts for confirmation)',
+      'protect             Set mn\'s passphrase and encrypt every plain-text wallet',
+      '                    under it (new wallets are always encrypted). The',
+      '                    passphrase is asked at a terminal, or read from',
+      '                    MN_PASSPHRASE; every secret mn keeps uses this one',
       '',
       'generate flags:',
       '--network <name>    Network: preprod, preview, undeployed',
@@ -56,6 +60,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       'midnight wallet info alice',
       'midnight wallet remove bob',
       'midnight wallet seed alice --entropy',
+      'midnight wallet protect',
     ],
     jsonFields: {
       name: 'Wallet name',

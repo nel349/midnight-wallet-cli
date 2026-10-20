@@ -15,6 +15,7 @@ import {
   loadWalletConfig,
   unlockWallet,
   writeSealedWallet,
+  protectAllWallets,
   setActiveWallet,
   listWallets,
   removeWallet,
@@ -46,10 +47,12 @@ export default async function walletCommand(args: ParsedArgs): Promise<void> {
       return walletRemove(args);
     case 'seed':
       return walletSeed(args);
+    case 'protect':
+      return walletProtect(args);
     default:
       throw new UsageError(
         `Unknown wallet subcommand: "${subcommand ?? '(none)'}"\n` +
-        `Available: generate, list, use, info, remove, seed\n` +
+        `Available: generate, list, use, info, remove, seed, protect\n` +
         `Run "midnight help wallet" for usage.`
       );
   }
@@ -412,6 +415,24 @@ async function walletSeed(args: ParsedArgs): Promise<void> {
     process.stderr.write(dim('  same mnemonic. Use the value your target project accepts.') + '\n');
   }
   process.stderr.write('\n');
+}
+
+/** Sets mn's passphrase where none is set, and seals every plain-text wallet under it. */
+async function walletProtect(args: ParsedArgs): Promise<void> {
+  const home = homedir();
+  const passphrase = await passphraseForNewSecret(home);
+  const report = protectAllWallets(home, passphrase);
+  const sealed = report.filter((w) => w.sealedNow).map((w) => w.name);
+  const alreadySealed = report.filter((w) => !w.sealedNow).map((w) => w.name);
+  if (hasFlag(args, 'json')) {
+    writeJsonResult({ sealed, alreadySealed });
+    return;
+  }
+  process.stderr.write('\n');
+  for (const name of sealed) process.stderr.write(green(`  ✓ ${name}: encrypted`) + '\n');
+  for (const name of alreadySealed) process.stderr.write(dim(`  ${name}: already encrypted`) + '\n');
+  if (report.length === 0) process.stderr.write(dim('  No wallets yet: each new wallet is encrypted under this passphrase.') + '\n');
+  process.stderr.write('\n' + dim('  Keep the passphrase safe: without it, mn cannot open these wallets.') + '\n\n');
 }
 
 function confirm(prompt: string): Promise<boolean> {

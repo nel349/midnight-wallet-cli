@@ -121,10 +121,15 @@ export const MIN_PASSPHRASE_LENGTH = 12;
 // The passphrase this process has unlocked, by home: one prompt per run.
 const unlocked = new Map<string, string>();
 
-/** mn's passphrase, read and checked against the one set; asked for once per run. */
+/**
+ * mn's passphrase, read and checked against the one set; asked for once per
+ * run. One already checked is taken again only when the environment names no
+ * other: a changed MN_PASSPHRASE is checked afresh.
+ */
 export async function unlockPassphrase(home: string, source: PassphraseSource = {}): Promise<string> {
   const known = unlocked.get(home);
-  if (known !== undefined) return known;
+  const fromEnv = (source.env ?? process.env)[PASSPHRASE_ENV];
+  if (known !== undefined && (fromEnv === undefined || fromEnv === '' || fromEnv === known)) return known;
   if (!isPassphraseSet(home)) throw new UsageError('mn has no passphrase yet. Set one with: midnight wallet protect');
   const passphrase = await readPassphrase(source);
   checkPassphrase(home, passphrase);

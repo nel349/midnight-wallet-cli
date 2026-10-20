@@ -525,6 +525,24 @@ export function sealWalletInPlace(walletPath: string, passphrase: string): boole
   return true;
 }
 
+/** What `midnight wallet protect` did to one wallet: sealed it now, or found it sealed already. */
+export interface ProtectedWallet {
+  name: string;
+  file: string;
+  sealedNow: boolean;
+}
+
+/** Seals every wallet under `home` that is still in plain text, under `passphrase`, in name order. */
+export function protectAllWallets(home: string, passphrase: string): ProtectedWallet[] {
+  const walletsDir = path.join(home, MIDNIGHT_DIR, WALLETS_DIR_NAME);
+  const files = fs.existsSync(walletsDir) ? fs.readdirSync(walletsDir).filter((f) => f.endsWith('.json')).sort() : [];
+  // A wallet from before named wallets, if it was never moved into wallets/.
+  const legacy = path.join(home, MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME);
+  const entries = files.map((f) => ({ name: f.replace(/\.json$/, ''), file: path.join(walletsDir, f) }));
+  if (fs.existsSync(legacy)) entries.push({ name: DEFAULT_WALLET_FILENAME.replace(/\.json$/, ''), file: legacy });
+  return entries.map(({ name, file }) => ({ name, file, sealedNow: sealWalletInPlace(file, passphrase) }));
+}
+
 /** How a wallet is unlocked: whose home holds mn's passphrase check, where the passphrase comes from, and where a warning goes. */
 export interface UnlockOptions {
   home?: string;

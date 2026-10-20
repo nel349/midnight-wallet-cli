@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WrongPassphraseError } from '../lib/keystore.ts';
 import { PASSPHRASE_ENV, establishPassphrase } from '../lib/passphrase.ts';
-import { loadWalletConfig, sealWalletInPlace, unlockWallet, writeSealedWallet } from '../lib/wallet-config.ts';
+import { loadWalletConfig, protectAllWallets, sealWalletInPlace, unlockWallet, writeSealedWallet } from '../lib/wallet-config.ts';
 import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
 import { FILE_MODE } from '../lib/constants.ts';
 
@@ -106,3 +106,32 @@ describe('a wallet an earlier mn wrote in plain text', () => {
     expect(fs.readFileSync(file, 'utf8')).toBe(before);
   });
 });
+
+describe('protecting every wallet', () => {
+  const writePlainAt = (name: string, seed: string): string => {
+    const at = path.join(home, '.midnight', 'wallets', `${name}.json`);
+    fs.mkdirSync(path.dirname(at), { recursive: true });
+    fs.writeFileSync(at, JSON.stringify({ seed, ...PUBLIC }, null, 2), { mode: FILE_MODE });
+    return at;
+  };
+  const OTHER_SEED = '11'.repeat(32);
+
+  it('seals each plain-text wallet, leaves a sealed one, and says which was which', async () => {
+    const bob = writePlainAt('bob', OTHER_SEED);
+    const carol = writePlainAt('carol', SEED);
+    writeSealedWallet(file, PUBLIC, { seed: SEED }, PASSPHRASE);
+    const report = protectAllWallets(home, PASSPHRASE);
+    expect(report).toEqual([
+      { name: 'alice', file, sealedNow: false },
+      { name: 'bob', file: bob, sealedNow: true },
+      { name: 'carol', file: carol, sealedNow: true },
+    ]);
+    expect(fs.readFileSync(bob, 'utf8')).not.toContain(OTHER_SEED);
+    expect((await unlockWallet(bob, withPassphrase(PASSPHRASE))).seed).toBe(OTHER_SEED);
+  });
+
+  it('protects nothing, and says so, where there is no wallet', () => {
+    expect(protectAllWallets(home, PASSPHRASE)).toEqual([]);
+  });
+});
+

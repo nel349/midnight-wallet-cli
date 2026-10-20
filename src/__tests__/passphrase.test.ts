@@ -89,6 +89,12 @@ describe('the one passphrase', () => {
     await expect(unlockPassphrase(home, { env: { [PASSPHRASE_ENV]: 'another one' }, isTTY: false })).rejects.toThrow(WrongPassphraseError);
   });
 
+  it('checks a changed MN_PASSPHRASE afresh, never taking the one checked before', async () => {
+    establishPassphrase(home, PASSPHRASE);
+    await unlockPassphrase(home, { env: { [PASSPHRASE_ENV]: PASSPHRASE }, isTTY: false });
+    await expect(unlockPassphrase(home, { env: { [PASSPHRASE_ENV]: 'another one' }, isTTY: false })).rejects.toThrow(WrongPassphraseError);
+  });
+
   it('is not set a second time over the first', () => {
     establishPassphrase(home, PASSPHRASE);
     expect(() => establishPassphrase(home, 'another one')).toThrow(/already set/);
