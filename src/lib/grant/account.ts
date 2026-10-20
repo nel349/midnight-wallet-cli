@@ -21,6 +21,8 @@ import {
   directoryOwnerStore,
 } from '@kuiralabs/midnight-account-chain/owner';
 import { MIDNIGHT_DIR } from '../constants.ts';
+import { type PassphraseSource, passphraseForNewSecret, unlockPassphrase } from '../passphrase.ts';
+import { type SealedDeviceKeys, createAccountKey, isSealedAccount, openAccountKey, sealedDeviceKeys, sealedOwnerStore, sealedPrivateStatePassword } from './sealed-account.ts';
 import { UsageError } from '../errors.ts';
 import type { NetworkConfig } from '../network.ts';
 
@@ -39,8 +41,10 @@ const PRIVATE_STATE_DATABASE = 'midnight-level-db';
 const PRIVATE_STATE_STORE = 'midnight-bench-account';
 // The password the account package encrypted every account's private state
 // with until it took one from its caller: testkit-js's own, public in its
-// source. It stays so those stores are read back; it protects nothing a
-// reader of this machine's files couldn't read.
+// source. It protects nothing a reader of this machine's files couldn't read.
+// It stays only so a plain-text account an earlier mn made is read until
+// `midnight wallet protect` re-encrypts its private state under a password of
+// its own; a sealed account never uses it.
 const LEGACY_STORE_PASSWORD = 'Answer to the Ultimate Question of Life, the Universe, and Everything!';
 
 /** A network the account package can't reach yet. */
@@ -82,25 +86,57 @@ export function assertNodeRunsAccount(version: string = process.versions.node): 
 /** The node's http(s) form: mn keeps it as the WebSocket URL its wallet connects to. */
 const httpOf = (url: string): string => url.replace(/^ws/, 'http');
 
+/** How an account's records are kept: sealed under mn's passphrase, or in plain text as an earlier mn wrote them. */
+export type AccountProtection = 'sealed' | 'plain-text';
+
 /** Everything the account package needs to act on one wallet's account. */
 export interface GrantAccount {
   context: AccountContext;
   store: OwnerStore;
-  keys: DirectoryDeviceKeys;
+  keys: DirectoryDeviceKeys | SealedDeviceKeys;
   location: PrivateStateLocation;
+  protection: AccountProtection;
 }
 
-/** The account in `recordsDir` on `networkConfig`'s network, its progress said through `say`. */
-export function grantAccount(networkConfig: NetworkConfig, recordsDir: string, say: (line: string) => void): GrantAccount {
+/** Where an account's passphrase comes from, and where a warning about a plain-text account goes. */
+export interface OpenAccountOptions {
+  home?: string;
+  source?: PassphraseSource;
+  warn?: (line: string) => void;
+}
+
+/**
+ * The account in `recordsDir` on `networkConfig`'s network, its progress said
+ * through `say`: a sealed account opened with mn's passphrase; an account an
+ * earlier mn wrote in plain text, as it was, with a warning; or, with nothing
+ * on record (a first deploy), a new account sealed from the start.
+ */
+export async function openGrantAccount(networkConfig: NetworkConfig, recordsDir: string, say: (line: string) => void, options: OpenAccountOptions = {}): Promise<GrantAccount> {
   assertAccountNetwork(networkConfig);
+  const home = options.home ?? homedir();
   const progress = (event: ProgressEvent): void => say(describeProgress(event).trim());
   const network = networkOf({ networkId: ACCOUNT_NETWORK_ID, node: httpOf(networkConfig.node), indexer: networkConfig.indexer, proofServer: networkConfig.proofServer });
-  return {
-    context: accountContext({ network, artefacts: artefactCache(accountArtifactsDir(), { progress }), progress }),
-    store: directoryOwnerStore(recordsDir),
-    keys: directoryDeviceKeys(recordsDir),
-    location: { database: join(recordsDir, PRIVATE_STATE_DATABASE), store: PRIVATE_STATE_STORE, password: () => LEGACY_STORE_PASSWORD },
-  };
+  const context = accountContext({ network, artefacts: artefactCache(accountArtifactsDir(home), { progress }), progress });
+  const database = join(recordsDir, PRIVATE_STATE_DATABASE);
+
+  const sealed = (key: Buffer): GrantAccount => ({
+    context,
+    store: sealedOwnerStore(recordsDir, key),
+    keys: sealedDeviceKeys(recordsDir, key),
+    location: { database, store: PRIVATE_STATE_STORE, password: () => sealedPrivateStatePassword(recordsDir, key) },
+    protection: 'sealed',
+  });
+  if (isSealedAccount(recordsDir)) return sealed(openAccountKey(recordsDir, await unlockPassphrase(home, options.source)));
+
+  const plainStore = directoryOwnerStore(recordsDir);
+  const plainKeys = directoryDeviceKeys(recordsDir);
+  if (plainStore.readOwner() !== undefined || plainKeys.read() !== undefined) {
+    (options.warn ?? ((line: string) => process.stderr.write(line + '\n')))(
+      `Warning: the account in ${recordsDir} is not protected: its owner key and records are in plain text. Encrypt them with: midnight wallet protect`,
+    );
+    return { context, store: plainStore, keys: plainKeys, location: { database, store: PRIVATE_STATE_STORE, password: () => LEGACY_STORE_PASSWORD }, protection: 'plain-text' };
+  }
+  return sealed(createAccountKey(recordsDir, await passphraseForNewSecret(home, options.source)));
 }
 
 /** The account's owner device, which its records hold. */

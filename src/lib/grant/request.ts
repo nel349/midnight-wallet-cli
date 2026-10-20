@@ -10,7 +10,7 @@ export const GRANT_SUBCOMMANDS = ['deploy', 'deposit', 'status', 'list', 'issue'
 export type GrantSubcommand = typeof GRANT_SUBCOMMANDS[number];
 
 export type GrantRequest =
-  | { subcommand: 'deploy'; devOwnerKey: boolean }
+  | { subcommand: 'deploy' }
   /** `amount` as given, in NIGHT; `value` the same in the smallest unit, as decimal text. */
   | { subcommand: 'deposit'; amount: string; value: string }
   | { subcommand: 'status' }
@@ -69,13 +69,12 @@ export function resolveGrantRequest(args: ParsedArgs): GrantRequest {
   const subcommand = args.subcommand;
   if (!isGrantSubcommand(subcommand)) throw new UsageError(GRANT_USAGE);
 
-  onlyFor(args, subcommand, ['dev-owner-key'], ['deploy']);
   onlyFor(args, subcommand, [...LIMIT_FLAGS.map(([flag]) => flag), 'yes'], ['issue']);
 
   switch (subcommand) {
     case 'deploy':
       positionalsFor(args, subcommand, 0, 'no argument');
-      return { subcommand, devOwnerKey: hasFlag(args, 'dev-owner-key') };
+      return { subcommand };
     case 'deposit': {
       const [amount] = positionalsFor(args, subcommand, 1, 'one amount of NIGHT');
       if (amount === undefined) throw new UsageError('Missing the amount of NIGHT to deposit.\nUsage: midnight grant deposit <amount>');

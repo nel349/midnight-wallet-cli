@@ -4,11 +4,11 @@
 // confirmation token.
 
 import { type ParsedArgs, getFlag } from '../argv.ts';
-import { UsageError } from '../errors.ts';
 import { type PayingTarget, resolvePayingTarget } from '../paying-wallet.ts';
 import { assertAccountNetwork, assertNodeRunsAccount } from './account.ts';
 import { accountRecordsDir, accountWalletName, ensureAccountRecordsDir } from './account-records.ts';
 import { type GrantRequest, resolveGrantRequest } from './request.ts';
+import { contractAddressOnRecord } from './sealed-account.ts';
 
 /** The account a wallet's records name. */
 export interface AccountOnRecord {
@@ -26,17 +26,12 @@ export interface PreparedGrant {
   account: AccountOnRecord | null;
 }
 
-export const NO_DEV_OWNER_KEY =
-  'A new account needs --dev-owner-key for now: its owner key will be a random development key, kept in the '
-  + 'account\'s records, which the wallet\'s mnemonic can\'t recover. (A key derived from the mnemonic comes once '
-  + 'wallets agree on how to derive it.)';
-
 /** The wallet has no account to run an owner command on. */
 export class NoAccountError extends Error {
   readonly code = 'NO_ACCOUNT';
 
   constructor(walletName: string, network: string) {
-    super(`Wallet "${walletName}" has no account on ${network} yet.\nDeploy one: midnight grant deploy --dev-owner-key`);
+    super(`Wallet "${walletName}" has no account on ${network} yet.\nDeploy one: midnight grant deploy`);
     this.name = 'NoAccountError';
     Object.setPrototypeOf(this, NoAccountError.prototype);
   }
@@ -44,6 +39,9 @@ export class NoAccountError extends Error {
 
 /** The account the records in `recordsDir` name, if any. Reads the records alone: no chain, no wallet. */
 export async function accountOnRecord(recordsDir: string): Promise<AccountOnRecord | null> {
+  // A sealed account keeps its address in clear beside its sealed records.
+  const sealedAddress = contractAddressOnRecord(recordsDir);
+  if (sealedAddress !== undefined) return { address: sealedAddress };
   const { directoryOwnerStore } = await import('@kuiralabs/midnight-account-chain/owner');
   const record = directoryOwnerStore(recordsDir).readOwner();
   return record === undefined ? null : { address: record.contractAddress };
@@ -60,9 +58,7 @@ export async function prepareGrant(args: ParsedArgs): Promise<PreparedGrant> {
   ensureAccountRecordsDir(recordsDir);
 
   const account = await accountOnRecord(recordsDir);
-  if (request.subcommand === 'deploy') {
-    if (account === null && !request.devOwnerKey) throw new UsageError(NO_DEV_OWNER_KEY);
-  } else if (account === null) {
+  if (request.subcommand !== 'deploy' && account === null) {
     throw new NoAccountError(walletName, target.network);
   }
   return { request, target, walletName, recordsDir, account };

@@ -9,7 +9,8 @@ import * as path from 'node:path';
 import { parseArgs } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { UnreachableByAccountError } from '../lib/grant/account.ts';
-import { NO_DEV_OWNER_KEY, NoAccountError, prepareGrant } from '../lib/grant/prepare.ts';
+import { NoAccountError, prepareGrant } from '../lib/grant/prepare.ts';
+import { createAccountKey, sealedOwnerStore } from '../lib/grant/sealed-account.ts';
 
 const ENDPOINTS = ['--node', 'ws://localhost:29944', '--indexer-ws', 'ws://localhost:28088/api/v4/graphql/ws', '--proof-server', 'http://localhost:26300'];
 
@@ -47,7 +48,7 @@ describe('prepareGrant', () => {
   });
 
   it('prepares the deploy of a new account: records under the wallet\'s name, readable by their owner only', async () => {
-    const prepared = await asAlice('deploy', '--dev-owner-key');
+    const prepared = await asAlice('deploy');
     expect(prepared.account).toBeNull();
     expect(prepared.walletName).toBe('alice');
     expect(prepared.target.network).toBe('undeployed');
@@ -55,16 +56,18 @@ describe('prepareGrant', () => {
     expect(fs.statSync(recordsOf('alice')).mode & 0o777).toBe(0o700);
   });
 
-  it('refuses to deploy a new account without --dev-owner-key, saying what the key is', async () => {
-    await expect(asAlice('deploy')).rejects.toThrow(NO_DEV_OWNER_KEY);
-    await expect(asAlice('deploy')).rejects.toThrow(UsageError);
+  it('finds a sealed account on record by its address, which needs no passphrase', async () => {
+    fs.mkdirSync(recordsOf('alice'), { recursive: true });
+    sealedOwnerStore(recordsOf('alice'), createAccountKey(recordsOf('alice'), 'correct horse battery staple')).writeOwner({ contractAddress: ACCOUNT, bootSalt: '3a'.repeat(32), encryptionSecret: '2b'.repeat(32) });
+    const prepared = await asAlice('status');
+    expect(prepared.account).toEqual({ address: ACCOUNT });
   });
 
   it('refuses an owner command when the wallet has no account, saying how to deploy one', async () => {
     for (const command of [['status'], ['list'], ['revoke', '0'], ['revoke-all']]) {
       const refused = asAlice(...command);
       await expect(refused).rejects.toThrow(NoAccountError);
-      await expect(refused).rejects.toThrow('Wallet "alice" has no account on undeployed yet.\nDeploy one: midnight grant deploy --dev-owner-key');
+      await expect(refused).rejects.toThrow('Wallet "alice" has no account on undeployed yet.\nDeploy one: midnight grant deploy');
     }
   });
 
@@ -86,7 +89,7 @@ describe('prepareGrant', () => {
       expect(prepared.request).toMatchObject({ subcommand: 'revoke' });
     });
 
-    it('lets a deploy run again without --dev-owner-key: the account keeps the key it has', async () => {
+    it('lets a deploy run again: the account keeps the key it has', async () => {
       const prepared = await asAlice('deploy');
       expect(prepared.account).toEqual({ address: ACCOUNT });
     });

@@ -11,8 +11,7 @@ const GRANT_ID = 'b1a9094fd044707d484a0193c1aa35a8e15bcf513a33b98a624a24739069fb
 
 describe('resolveGrantRequest', () => {
   it('reads each subcommand', () => {
-    expect(request('deploy', '--dev-owner-key')).toEqual({ subcommand: 'deploy', devOwnerKey: true });
-    expect(request('deploy')).toEqual({ subcommand: 'deploy', devOwnerKey: false });
+    expect(request('deploy')).toEqual({ subcommand: 'deploy' });
     expect(request('status')).toEqual({ subcommand: 'status' });
     expect(request('list')).toEqual({ subcommand: 'list' });
     expect(request('revoke-all')).toEqual({ subcommand: 'revoke-all' });
@@ -55,7 +54,6 @@ describe('resolveGrantRequest', () => {
     [['revoke', 'the-first-one'], 'A grant is named by its id (64 hex characters) or its slot (a number); got "the-first-one"'],
     [['status', '--yes'], '--yes only applies to: midnight grant issue'],
     [['revoke', '3', '--cap', '5'], '--cap only applies to: midnight grant issue'],
-    [['status', '--dev-owner-key'], '--dev-owner-key only applies to: midnight grant deploy'],
   ])('refuses %j as a usage mistake', (argv, message) => {
     expect(() => request(...argv)).toThrow(UsageError);
     expect(() => request(...argv)).toThrow(message);
@@ -64,7 +62,7 @@ describe('resolveGrantRequest', () => {
 
 describe('paysAFee', () => {
   it('is true of what submits transactions, false of what only reads', () => {
-    expect(paysAFee(request('deploy', '--dev-owner-key'))).toBe(true);
+    expect(paysAFee(request('deploy'))).toBe(true);
     expect(paysAFee(request('deposit', '1'))).toBe(true);
     expect(paysAFee(request('revoke', '0'))).toBe(true);
     expect(paysAFee(request('revoke-all'))).toBe(true);

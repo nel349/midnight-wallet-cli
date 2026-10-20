@@ -822,12 +822,11 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'midnight_grant_deploy',
-    description: 'Deploy the wallet\'s account and activate its owner key (returns pending token). Takes about 48 DUST from the wallet (17 at once for the largest of five transactions) and a few minutes. The owner key is a random development key the mnemonic can\'t recover: dev-owner-key must be true.',
+    description: 'Deploy the wallet\'s account and activate its owner key (returns pending token). Takes about 48 DUST from the wallet (17 at once for the largest of five transactions) and a few minutes. Its owner key is made on this machine and kept encrypted under mn\'s passphrase (MN_PASSPHRASE).',
     annotations: { destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
-        'dev-owner-key': { type: 'boolean', description: 'Accept a development owner key' },
         ...GRANT_COMMON_PROPERTIES,
       },
     },
@@ -1019,7 +1018,7 @@ function describePendingOp(tool: string, params: Record<string, unknown>): strin
       return `Call circuit ${params.circuit} on contract ${params.address} as ${wallet} on ${network}${argsHint}`;
     }
     case 'midnight_grant_deploy':
-      return `Deploy an account for ${wallet} on ${network}, on a development owner key the wallet's mnemonic can't recover`;
+      return `Deploy an account for ${wallet} on ${network}; its owner key is made on this machine and kept encrypted under mn's passphrase`;
     case 'midnight_grant_revoke':
       return `Revoke grant ${params.grant} on ${wallet}'s account on ${network}`;
     case 'midnight_grant_revoke_all':

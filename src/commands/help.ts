@@ -492,8 +492,6 @@ const COMMAND_SPECS: CommandSpec[] = [
       'issue <link>                  Show the grant an agent\'s request link would get; issue it with --yes',
       'revoke <grant id | slot>      Revoke one grant',
       'revoke-all                    Revoke every grant',
-      '--dev-owner-key               deploy: accept a random development owner key, which the',
-      '                              wallet\'s mnemonic can\'t recover',
       '--yes                         issue: issue the grant (without it the grant is only shown)',
       '--cap <n>                     issue: the most the grant may ever pay, in the token\'s smallest unit',
       '                              (this and the three below default to mn\'s limits: 500000, 300000,',
@@ -509,7 +507,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '--json                        Output structured JSON',
     ],
     examples: [
-      'midnight grant deploy --dev-owner-key',
+      'midnight grant deploy',
       'midnight grant deposit 2',
       'midnight grant status',
       'midnight grant issue \'<grant request link>\'',
@@ -521,7 +519,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       subcommand: 'The grant subcommand that ran',
       network: 'Network name',
       wallet: 'The wallet the account belongs to',
-      ownerKey: '"development": a random owner key the mnemonic can\'t recover',
+      ownerKey: '"sealed": the owner key and records are encrypted under mn\'s passphrase; "plain-text": an account an earlier mn made, until wallet protect',
       address: 'The account\'s contract address (deploy, deposit)',
       resumed: 'An account already on record was completed, not a new one deployed (deploy)',
       activated: 'The owner key was activated by this run (deploy)',
@@ -925,7 +923,7 @@ key (up to a few hundred MB) when one first proves with it, said as it goes.
 It needs Node.js 22.18 or newer and reaches only an undeployed (local)
 ledger-9 network.
 
-  midnight grant deploy --dev-owner-key [--json]
+  midnight grant deploy [--json]
     → { address, resumed, activated, network, wallet, ownerKey }
     Deploys the account and activates its owner key. Safe to run again:
     it finishes a deploy that stopped part way. Takes about 48 DUST from
@@ -933,9 +931,10 @@ ledger-9 network.
     (measured on a local ledger-9 chain). It waits by itself when a fee is
     a few minutes of Dust away; further than that it stops with
     DUST_REQUIRED and the time, and the same command later carries on.
-    The owner key is a random development key for now, kept in the
-    account's records (~/.midnight/accounts/<network>/<wallet>/), which the
-    wallet's mnemonic can't recover.
+    Its owner key is made on this machine, independent of the wallet's
+    seed as MIP-0013 requires, and kept with the account's records
+    (~/.midnight/accounts/<network>/<wallet>/) encrypted under mn's
+    passphrase.
 
   midnight grant deposit <amount> [--json]
     → { address, amount, value, txHash, blockHeight, network, wallet, ownerKey }

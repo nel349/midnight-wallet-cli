@@ -10,7 +10,7 @@
 import { type ParsedArgs, hasFlag, getFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { ERROR_CODES, classifyError } from '../lib/exit-codes.ts';
-import { type GrantAccount, grantAccount, ownerDeviceOf } from '../lib/grant/account.ts';
+import { type GrantAccount, openGrantAccount, ownerDeviceOf } from '../lib/grant/account.ts';
 import { deployShortOfDustNote } from '../lib/grant/deploy-cost.ts';
 import { type OwnerCommandOutput, grantRequestOf, grantsOf, issue, issuePreview, revoke, revokeAll, statusOf } from '../lib/grant/owner-commands.ts';
 import { prepareGrant } from '../lib/grant/prepare.ts';
@@ -22,10 +22,6 @@ import { header, keyValue, formatNight } from '../ui/format.ts';
 import { type Spinner, silentSpinner, start as startSpinner } from '../ui/spinner.ts';
 import { CANCELLED_MESSAGE } from '../lib/contract/runner.ts';
 
-/** Said with every result: until wallets agree on how to derive an owner key, the account's key is a random one. */
-const DEVELOPMENT_KEY_NOTE =
-  'This account is on a development owner key, kept in its records: the wallet\'s mnemonic can\'t recover it.';
-
 const SPINNER_LABEL: Record<GrantRequest['subcommand'], string> = {
   deploy: 'Deploying the account...',
   deposit: 'Depositing into the account...',
@@ -35,9 +31,6 @@ const SPINNER_LABEL: Record<GrantRequest['subcommand'], string> = {
   revoke: 'Revoking the grant...',
   'revoke-all': 'Revoking every grant...',
 };
-
-/** The size of a new development owner key: 32 random bytes, as hex. */
-const DEVELOPMENT_OWNER_KEY_BYTES = 32;
 
 function isShortOfDust(err: Error): boolean {
   const { errorCode } = classifyError(err);
@@ -97,11 +90,12 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
   // A cancel takes effect at the next step the account package reports: each
   // step it records before submitting, so stopping there is as safe as an
   // interruption, and the next run finishes what this one left.
-  const owned: GrantAccount = grantAccount(target.networkConfig, recordsDir, (line) => {
+  const owned: GrantAccount = await openGrantAccount(target.networkConfig, recordsDir, (line) => {
     spinner.update(line);
     throwIfCancelled();
   });
-  const common = { subcommand: request.subcommand, network: target.network, wallet: walletName, ownerKey: 'development' };
+  // How the account's owner key and records are kept: sealed, or in plain text until `wallet protect`.
+  const common = { subcommand: request.subcommand, network: target.network, wallet: walletName, ownerKey: owned.protection };
 
   // The wallet that pays, which a paying command opened above.
   const payingWallet = async (): Promise<PayingWallet> => {
@@ -122,8 +116,7 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
       writeJsonResult({ ...common, ...output.result });
     } else {
       process.stderr.write('\n');
-      process.stdout.write(output.lines.join('\n') + '\n');
-      process.stderr.write('\n' + dim('  ' + DEVELOPMENT_KEY_NOTE) + '\n\n');
+      process.stdout.write(output.lines.join('\n') + '\n\n');
     }
   };
 
@@ -131,11 +124,11 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
     throwIfCancelled();
     switch (request.subcommand) {
       case 'deploy': {
-        const { deployOwnerAccount, ownerDeviceFromSecret } = await import('@kuiralabs/midnight-account-chain/owner');
-        const { randomBytes } = await import('node:crypto');
+        const { deployOwnerAccount, freshOwnerDevice } = await import('@kuiralabs/midnight-account-chain/owner');
         const { feeWallet } = await payingWallet();
-        // The device the records hold, or for a new account a development key, kept before the deploy is submitted.
-        const device = () => owned.keys.read() ?? owned.keys.keep(ownerDeviceFromSecret('k1', randomBytes(DEVELOPMENT_OWNER_KEY_BYTES).toString('hex')));
+        // The device the records hold, or for a new account a key made here, on the k1 arm and
+        // independent of any other (MIP-0013), kept sealed before the deploy is submitted.
+        const device = () => owned.keys.read() ?? owned.keys.keep(freshOwnerDevice('k1'));
         const outcome = await deployOwnerAccount(owned.context, feeWallet, owned.store, owned.location, device);
         spinner.stop(outcome.resumed ? 'Account ready' : 'Account deployed');
         if (jsonMode) {
@@ -144,7 +137,7 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
           process.stderr.write('\n' + keyValue('Account', outcome.address) + '\n');
           if (outcome.resumed) process.stderr.write(dim('  An account already on record was completed; no new one was deployed.') + '\n');
           if (outcome.setAside) process.stderr.write(dim(`  The record of an earlier deploy that never reached the chain was kept at ${outcome.setAside}`) + '\n');
-          process.stderr.write('\n' + yellow('  ' + DEVELOPMENT_KEY_NOTE) + '\n');
+          if (owned.protection === 'sealed') process.stderr.write('\n' + dim('  Its owner key was made on this machine and is kept encrypted under mn\'s passphrase.') + '\n');
           process.stderr.write(dim('  Next: midnight grant status') + '\n\n');
           process.stdout.write(outcome.address + '\n');
         }
