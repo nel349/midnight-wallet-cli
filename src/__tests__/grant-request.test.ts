@@ -12,6 +12,11 @@ const GRANT_ID = 'b1a9094fd044707d484a0193c1aa35a8e15bcf513a33b98a624a24739069fb
 describe('resolveGrantRequest', () => {
   it('reads each subcommand', () => {
     expect(request('deploy')).toEqual({ subcommand: 'deploy' });
+    expect(request('export', 'alice.backup.json')).toEqual({ subcommand: 'export', file: 'alice.backup.json' });
+    expect(request('import', 'alice.backup.json')).toEqual({ subcommand: 'import', file: 'alice.backup.json' });
+    expect(() => request('export')).toThrow(/Missing the backup file/);
+    expect(paysAFee(request('export', 'f'))).toBe(false);
+    expect(paysAFee(request('import', 'f'))).toBe(false);
     expect(request('status')).toEqual({ subcommand: 'status' });
     expect(request('list')).toEqual({ subcommand: 'list' });
     expect(request('revoke-all')).toEqual({ subcommand: 'revoke-all' });
@@ -34,8 +39,8 @@ describe('resolveGrantRequest', () => {
   });
 
   it.each([
-    [[], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all>'],
-    [['grants'], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all>'],
+    [[], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all|export|import>'],
+    [['grants'], 'Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all|export|import>'],
     [['status', 'extra'], 'midnight grant status takes no argument; unexpected: extra'],
     [['deploy', 'now'], 'midnight grant deploy takes no argument; unexpected: now'],
     [['issue'], 'Missing the grant request link.'],

@@ -6,7 +6,7 @@ import { type ParsedArgs, getFlag, hasFlag } from '../argv.ts';
 import { UsageError } from '../errors.ts';
 import { nightToMicro, parseAmount } from '../transfer.ts';
 
-export const GRANT_SUBCOMMANDS = ['deploy', 'deposit', 'status', 'list', 'issue', 'revoke', 'revoke-all'] as const;
+export const GRANT_SUBCOMMANDS = ['deploy', 'deposit', 'status', 'list', 'issue', 'revoke', 'revoke-all', 'export', 'import'] as const;
 export type GrantSubcommand = typeof GRANT_SUBCOMMANDS[number];
 
 export type GrantRequest =
@@ -17,7 +17,10 @@ export type GrantRequest =
   | { subcommand: 'list' }
   | { subcommand: 'issue'; link: string; limits: GrantLimits; confirmed: boolean }
   | { subcommand: 'revoke'; target: string }
-  | { subcommand: 'revoke-all' };
+  | { subcommand: 'revoke-all' }
+  /** The backup file to write, or to read. */
+  | { subcommand: 'export'; file: string }
+  | { subcommand: 'import'; file: string };
 
 /** Limits an issue may set, each a whole number as text; mn's defaults stand for those not given. */
 export interface GrantLimits {
@@ -41,7 +44,9 @@ export const GRANT_USAGE =
   `  list         Every grant on the account\n` +
   `  issue        Show a grant request (an agent's link); issue it with --yes\n` +
   `  revoke       Revoke one grant, by its id or slot\n` +
-  `  revoke-all   Revoke every grant\n\n` +
+  `  revoke-all   Revoke every grant\n` +
+  `  export       Write the account to an encrypted backup file\n` +
+  `  import       Bring an account's backup in, for a wallet with none\n\n` +
   `Run "midnight help grant" for more info.`;
 
 export function isGrantSubcommand(value: string | undefined): value is GrantSubcommand {
@@ -104,6 +109,12 @@ export function resolveGrantRequest(args: ParsedArgs): GrantRequest {
       }
       return { subcommand, link, limits, confirmed: hasFlag(args, 'yes') };
     }
+    case 'export':
+    case 'import': {
+      const [file] = positionalsFor(args, subcommand, 1, 'one backup file');
+      if (file === undefined) throw new UsageError(`Missing the backup file.\nUsage: midnight grant ${subcommand} <file>`);
+      return { subcommand, file };
+    }
     case 'revoke': {
       const [target] = positionalsFor(args, subcommand, 1, 'one grant id or slot');
       if (target === undefined) throw new UsageError('Missing the grant to revoke.\nUsage: midnight grant revoke <grant id | slot>');
@@ -125,6 +136,8 @@ export function paysAFee(request: GrantRequest): boolean {
       return request.confirmed;
     case 'status':
     case 'list':
+    case 'export':
+    case 'import':
       return false;
   }
 }

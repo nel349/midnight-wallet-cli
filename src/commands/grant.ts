@@ -7,6 +7,7 @@
 // confirmed. The others are paid by this wallet, through its DApp connector in
 // this process: no server, no port.
 
+import { homedir } from 'node:os';
 import { type ParsedArgs, hasFlag, getFlag } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { ERROR_CODES, classifyError } from '../lib/exit-codes.ts';
@@ -30,6 +31,8 @@ const SPINNER_LABEL: Record<GrantRequest['subcommand'], string> = {
   issue: 'Reading the grant request...',
   revoke: 'Revoking the grant...',
   'revoke-all': 'Revoking every grant...',
+  export: 'Writing the backup...',
+  import: 'Importing the backup...',
 };
 
 function isShortOfDust(err: Error): boolean {
@@ -87,6 +90,23 @@ interface OwnedRun {
 /** Runs the command on the account, with the wallet that pays (if it pays) already open. */
 async function runOwned(request: GrantRequest, { target, walletName, recordsDir, account, jsonMode, paying, funds, spinnerFor, throwIfCancelled }: OwnedRun): Promise<void> {
   const spinner = spinnerFor(SPINNER_LABEL[request.subcommand]);
+  // An import brings an account in where there is none: it opens no account first.
+  if (request.subcommand === 'import') {
+    const { importAccount } = await import('../lib/grant/account-backup.ts');
+    const { unlockPassphrase, passphraseForNewSecret, isPassphraseSet } = await import('../lib/passphrase.ts');
+    const home = homedir();
+    try {
+      const passphrase = isPassphraseSet(home) ? await unlockPassphrase(home) : await passphraseForNewSecret(home);
+      const { contractAddress } = await importAccount(recordsDir, target.network, passphrase, request.file);
+      spinner.stop('Imported');
+      if (jsonMode) writeJsonResult({ subcommand: request.subcommand, network: target.network, wallet: walletName, ownerKey: 'sealed', address: contractAddress });
+      else process.stderr.write('\n' + keyValue('Account', contractAddress) + '\n' + dim('  Use it from one machine at a time: this machine now acts as the same owner device.') + '\n\n');
+    } catch (err) {
+      spinner.fail('import failed');
+      throw err;
+    }
+    return;
+  }
   // A cancel takes effect at the next step the account package reports: each
   // step it records before submitting, so stopping there is as safe as an
   // interruption, and the next run finishes what this one left.
@@ -188,6 +208,19 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
       case 'revoke-all':
         report(await revokeAll(await ownerSession()));
         return;
+      case 'export': {
+        const { exportAccount } = await import('../lib/grant/account-backup.ts');
+        const { unlockPassphrase } = await import('../lib/passphrase.ts');
+        const outcome = await exportAccount(recordsDir, target.network, await unlockPassphrase(homedir()), request.file);
+        spinner.stop('Written');
+        if (jsonMode) {
+          writeJsonResult({ ...common, address: outcome.contractAddress, file: outcome.file });
+        } else {
+          process.stderr.write('\n' + keyValue('Backup', outcome.file) + '\n');
+          process.stderr.write(dim('  It opens only with mn\'s passphrase. Keep it, and the passphrase, apart from this machine.') + '\n\n');
+        }
+        return;
+      }
     }
   } catch (err) {
     spinner.fail(`${request.subcommand} failed`);

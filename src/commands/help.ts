@@ -483,7 +483,7 @@ const COMMAND_SPECS: CommandSpec[] = [
   {
     name: 'grant',
     description: 'This wallet\'s account, and the grants that let an agent spend from it (experimental)',
-    usage: 'midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all> [options]',
+    usage: 'midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all|export|import> [options]',
     flags: [
       'deploy                        Deploy this wallet\'s account and activate its owner key',
       'deposit <amount>              Move <amount> NIGHT of this wallet\'s shielded NIGHT into its account',
@@ -492,6 +492,9 @@ const COMMAND_SPECS: CommandSpec[] = [
       'issue <link>                  Show the grant an agent\'s request link would get; issue it with --yes',
       'revoke <grant id | slot>      Revoke one grant',
       'revoke-all                    Revoke every grant',
+      'export <file>                 Write the account to an encrypted backup (owner key, records,',
+      '                              grants, private state), opened only with mn\'s passphrase',
+      'import <file>                 Bring an account\'s backup in for a wallet with no account',
       '--yes                         issue: issue the grant (without it the grant is only shown)',
       '--cap <n>                     issue: the most the grant may ever pay, in the token\'s smallest unit',
       '                              (this and the three below default to mn\'s limits: 500000, 300000,',
@@ -964,6 +967,20 @@ ledger-9 network.
     → { revoked }
   midnight grant revoke-all [--json]
     → { revokedAll: true, generation }
+
+  midnight grant export <file> [--json]
+    → { address, file, network, wallet, ownerKey }
+    Writes the account to <file>, never over a file that exists: its owner
+    key, records, grants and private state, sealed under mn's passphrase;
+    only the network and the address are in the clear. Keep the file, and
+    the passphrase, apart from this machine. An unprotected account is
+    refused: run wallet protect first.
+
+  midnight grant import <file> [--json]
+    → { address, network, wallet, ownerKey }
+    Brings a backup in for a wallet with no account on that network, opened
+    with the passphrase it was made with. The machine then acts as the same
+    owner device: use the account from one machine at a time.
 
 Amounts are whole numbers of the token's smallest unit, as text in JSON.
 

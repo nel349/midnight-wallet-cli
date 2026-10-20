@@ -23,7 +23,8 @@ export type SecretPurpose =
   | 'owner-record'
   | 'owner-roster'
   | 'owner-device'
-  | 'private-state-password';
+  | 'private-state-password'
+  | 'account-backup';
 
 /**
  * A secret sealed under a data key rather than the passphrase: AES-256-GCM

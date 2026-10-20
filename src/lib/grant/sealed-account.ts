@@ -200,6 +200,11 @@ const freshPrivateStatePassword = (): string => {
   }
 };
 
+/** Keeps `password` as the account's private-state password, sealed under `key`: for an imported account. Never over one kept. */
+export function keepPrivateStatePassword(dir: string, key: Uint8Array, password: string): void {
+  writeJsonDurably(path.join(dir, PRIVATE_STATE_FILE), { password: sealWithKey(key, Buffer.from(password, 'utf8'), 'private-state-password') }, { exclusive: true });
+}
+
 /** The account's private-state password: made on first use, sealed under `key`, the same every time after. */
 export function sealedPrivateStatePassword(dir: string, key: Uint8Array): string {
   const file = path.join(dir, PRIVATE_STATE_FILE);

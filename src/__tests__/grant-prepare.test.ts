@@ -56,6 +56,12 @@ describe('prepareGrant', () => {
     expect(fs.statSync(recordsOf('alice')).mode & 0o777).toBe(0o700);
   });
 
+  it('prepares the import of a backup for a wallet with no account', async () => {
+    const prepared = await asAlice('import', 'alice.backup.json');
+    expect(prepared.account).toBeNull();
+    expect(prepared.request).toEqual({ subcommand: 'import', file: 'alice.backup.json' });
+  });
+
   it('finds a sealed account on record by its address, which needs no passphrase', async () => {
     fs.mkdirSync(recordsOf('alice'), { recursive: true });
     sealedOwnerStore(recordsOf('alice'), createAccountKey(recordsOf('alice'), 'correct horse battery staple')).writeOwner({ contractAddress: ACCOUNT, bootSalt: '3a'.repeat(32), encryptionSecret: '2b'.repeat(32) });
@@ -81,6 +87,10 @@ describe('prepareGrant', () => {
     beforeEach(() => {
       fs.mkdirSync(recordsOf('alice'), { recursive: true });
       fs.writeFileSync(path.join(recordsOf('alice'), 'owner.json'), JSON.stringify(OWNER_RECORD));
+    });
+
+    it('refuses to import a backup over it', async () => {
+      await expect(asAlice('import', 'alice.backup.json')).rejects.toThrow(/already has an account/);
     });
 
     it('prepares an owner command on it', async () => {

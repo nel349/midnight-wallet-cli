@@ -4,6 +4,7 @@
 // confirmation token.
 
 import { type ParsedArgs, getFlag } from '../argv.ts';
+import { UsageError } from '../errors.ts';
 import { type PayingTarget, resolvePayingTarget } from '../paying-wallet.ts';
 import { assertAccountNetwork, assertNodeRunsAccount } from './account.ts';
 import { accountRecordsDir, accountWalletName, ensureAccountRecordsDir } from './account-records.ts';
@@ -58,7 +59,10 @@ export async function prepareGrant(args: ParsedArgs): Promise<PreparedGrant> {
   ensureAccountRecordsDir(recordsDir);
 
   const account = await accountOnRecord(recordsDir);
-  if (request.subcommand !== 'deploy' && account === null) {
+  if (request.subcommand === 'import' && account !== null) {
+    throw new UsageError(`Wallet "${walletName}" already has an account on ${target.network} (${account.address}); a backup is never imported over one.`);
+  }
+  if (request.subcommand !== 'deploy' && request.subcommand !== 'import' && account === null) {
     throw new NoAccountError(walletName, target.network);
   }
   return { request, target, walletName, recordsDir, account };
