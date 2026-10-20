@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { loadWalletConfig, saveWalletConfig, matchWalletAddress, type WalletConfig, type WalletInfo } from '../lib/wallet-config.ts';
+import { loadWalletConfig, matchWalletAddress, unlockWallet, writeSealedWallet, type WalletInfo } from '../lib/wallet-config.ts';
+import { PASSPHRASE_ENV, establishPassphrase } from '../lib/passphrase.ts';
+import { saveWalletConfig, type PlainWalletConfig as WalletConfig } from './helpers/plain-wallet.ts';
 import { DIR_MODE, FILE_MODE } from '../lib/constants.ts';
 import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
 
@@ -17,82 +19,60 @@ const VALID_CONFIG: WalletConfig = {
   createdAt: '2025-01-01T00:00:00.000Z',
 };
 
+const PASSPHRASE = 'correct horse battery staple';
+// Unlocking in the test's own home, a plain-text wallet's warning kept out of the output.
+const UNLOCK = { home: TEST_DIR, source: { env: { [PASSPHRASE_ENV]: PASSPHRASE }, isTTY: false }, warn: () => {} };
+
 beforeEach(() => {
   fs.mkdirSync(TEST_DIR, { recursive: true });
+  establishPassphrase(TEST_DIR, PASSPHRASE);
 });
 
 afterEach(() => {
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
-describe('saveWalletConfig', () => {
-  it('creates the file at the specified path', () => {
-    const filePath = path.join(TEST_DIR, 'wallet.json');
-    const result = saveWalletConfig(VALID_CONFIG, filePath);
-    expect(result).toBe(filePath);
-    expect(fs.existsSync(filePath)).toBe(true);
-  });
+describe('writeSealedWallet', () => {
+  const PUBLIC = { addresses: VALID_ADDRESSES, createdAt: VALID_CONFIG.createdAt };
 
-  it('writes valid JSON with all fields', () => {
+  it('creates the file at the specified path, holding the addresses and no seed', () => {
     const filePath = path.join(TEST_DIR, 'wallet.json');
-    saveWalletConfig(VALID_CONFIG, filePath);
+    expect(writeSealedWallet(filePath, PUBLIC, { seed: VALID_SEED }, PASSPHRASE)).toBe(filePath);
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    expect(parsed.seed).toBe(VALID_CONFIG.seed);
-    expect(parsed.addresses).toEqual(VALID_CONFIG.addresses);
+    expect(parsed.addresses).toEqual(VALID_ADDRESSES);
     expect(parsed.createdAt).toBe(VALID_CONFIG.createdAt);
+    expect(parsed.seed).toBeUndefined();
+    expect(parsed.mnemonic).toBeUndefined();
   });
 
-  it('creates parent directories if they do not exist', () => {
-    const filePath = path.join(TEST_DIR, 'nested', 'deep', 'wallet.json');
-    saveWalletConfig(VALID_CONFIG, filePath);
-    expect(fs.existsSync(filePath)).toBe(true);
+  it('creates missing parent directories owner-only, and the file owner-only', () => {
+    const filePath = path.join(TEST_DIR, 'secure', 'nested', 'wallet.json');
+    writeSealedWallet(filePath, PUBLIC, { seed: VALID_SEED }, PASSPHRASE);
+    expect(fs.statSync(path.join(TEST_DIR, 'secure')).mode & 0o777).toBe(DIR_MODE);
+    expect(fs.statSync(filePath).mode & 0o777).toBe(FILE_MODE);
   });
 
-  it('includes optional mnemonic when present', () => {
+  it('replaces an existing wallet completely when told to (--force)', async () => {
     const filePath = path.join(TEST_DIR, 'wallet.json');
-    const withMnemonic = { ...VALID_CONFIG, mnemonic: 'abandon abandon abandon' };
-    saveWalletConfig(withMnemonic, filePath);
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    expect(parsed.mnemonic).toBe('abandon abandon abandon');
-  });
-
-  it('sets restrictive file permissions (FILE_MODE)', () => {
-    const filePath = path.join(TEST_DIR, 'wallet.json');
-    saveWalletConfig(VALID_CONFIG, filePath);
-    const stat = fs.statSync(filePath);
-    // mode includes file type bits; mask to get permission bits only
-    const permissions = stat.mode & 0o777;
-    expect(permissions).toBe(FILE_MODE);
-  });
-
-  it('overwrites existing file completely', () => {
-    const filePath = path.join(TEST_DIR, 'wallet.json');
-    saveWalletConfig(VALID_CONFIG, filePath);
-
+    writeSealedWallet(filePath, PUBLIC, { seed: VALID_SEED, mnemonic: 'abandon abandon abandon' }, PASSPHRASE);
     const otherSeed = '1111111111111111111111111111111111111111111111111111111111111111';
     const otherAddresses = deriveAllAddresses(Buffer.from(otherSeed, 'hex'));
-    const updated: WalletConfig = {
-      seed: otherSeed,
-      addresses: otherAddresses,
-      createdAt: '2026-02-26T00:00:00.000Z',
-    };
-    saveWalletConfig(updated, filePath);
-
-    const loaded = loadWalletConfig(filePath);
-    expect(loaded.seed).toBe(updated.seed);
-    expect(loaded.addresses).toEqual(updated.addresses);
-    expect(loaded.createdAt).toBe(updated.createdAt);
-    // Ensure old data is gone
-    expect(loaded.seed).not.toBe(VALID_CONFIG.seed);
+    writeSealedWallet(filePath, { addresses: otherAddresses, createdAt: '2026-02-26T00:00:00.000Z' }, { seed: otherSeed }, PASSPHRASE, { overwrite: true });
+    const loaded = await unlockWallet(filePath, UNLOCK);
+    expect(loaded.seed).toBe(otherSeed);
+    expect(loaded.mnemonic).toBeUndefined();
+    expect(loaded.addresses).toEqual(otherAddresses);
+    expect(loaded.createdAt).toBe('2026-02-26T00:00:00.000Z');
   });
 });
 
 describe('loadWalletConfig', () => {
-  it('loads a previously saved config', () => {
+  it('loads a plain-text wallet an earlier mn wrote, without its secrets', () => {
     const filePath = path.join(TEST_DIR, 'wallet.json');
     saveWalletConfig(VALID_CONFIG, filePath);
     const loaded = loadWalletConfig(filePath);
-    expect(loaded.seed).toBe(VALID_CONFIG.seed);
+    expect(loaded).not.toHaveProperty('seed');
+    expect(loaded.isSealed).toBe(false);
     expect(loaded.addresses).toEqual(VALID_CONFIG.addresses);
     expect(loaded.createdAt).toBe(VALID_CONFIG.createdAt);
   });
@@ -170,24 +150,15 @@ describe('loadWalletConfig', () => {
     expect((loaded as any).address).toBeUndefined();
   });
 
-  it('accepts config without optional mnemonic', () => {
+  it('accepts config without optional mnemonic', async () => {
     const filePath = path.join(TEST_DIR, 'wallet.json');
     saveWalletConfig(VALID_CONFIG, filePath);
-    const loaded = loadWalletConfig(filePath);
-    expect(loaded.mnemonic).toBeUndefined();
-  });
-
-  it('sets restrictive permissions on custom parent directories', () => {
-    const filePath = path.join(TEST_DIR, 'secure', 'nested', 'wallet.json');
-    saveWalletConfig(VALID_CONFIG, filePath);
-    const dirStat = fs.statSync(path.join(TEST_DIR, 'secure'));
-    const permissions = dirStat.mode & 0o777;
-    expect(permissions).toBe(DIR_MODE);
+    expect((await unlockWallet(filePath, UNLOCK)).mnemonic).toBeUndefined();
   });
 });
 
 describe('round-trip', () => {
-  it('save then load preserves all fields including mnemonic', () => {
+  it('a plain-text wallet unlocks to all it holds, mnemonic included', async () => {
     const filePath = path.join(TEST_DIR, 'roundtrip.json');
     const seed = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
     const addresses = deriveAllAddresses(Buffer.from(seed, 'hex'));
@@ -200,19 +171,14 @@ describe('round-trip', () => {
       createdAt: '2026-02-26T12:00:00.000Z',
     };
     saveWalletConfig(original, filePath);
-    const loaded = loadWalletConfig(filePath);
-    expect(loaded).toEqual(original);
+    expect(await unlockWallet(filePath, UNLOCK)).toEqual({ ...original, isSealed: false });
   });
 
-  it('save then load preserves config without mnemonic', () => {
+  it('a sealed wallet unlocks to all it was written with', async () => {
     const filePath = path.join(TEST_DIR, 'roundtrip.json');
-    const expected: WalletConfig = {
-      ...VALID_CONFIG,
-      shieldedAddresses: deriveAllShieldedAddresses(Buffer.from(VALID_CONFIG.seed, 'hex')),
-    };
-    saveWalletConfig(VALID_CONFIG, filePath);
-    const loaded = loadWalletConfig(filePath);
-    expect(loaded).toEqual(expected);
+    const shieldedAddresses = deriveAllShieldedAddresses(Buffer.from(VALID_SEED, 'hex'));
+    writeSealedWallet(filePath, { addresses: VALID_ADDRESSES, shieldedAddresses, createdAt: VALID_CONFIG.createdAt }, { seed: VALID_SEED }, PASSPHRASE);
+    expect(await unlockWallet(filePath, UNLOCK)).toEqual({ ...VALID_CONFIG, shieldedAddresses, isSealed: true });
   });
 });
 

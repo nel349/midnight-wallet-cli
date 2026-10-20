@@ -8,7 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { resolveTransferRequest } from '../lib/transfer-request.ts';
 import { parseArgs } from '../lib/argv.ts';
-import { saveWalletConfig } from '../lib/wallet-config.ts';
+import { saveWalletConfig } from './helpers/plain-wallet.ts';
 import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-address.ts';
 import { MIDNIGHT_DIR, WALLETS_DIR_NAME } from '../lib/constants.ts';
 import { UsageError } from '../lib/errors.ts';
@@ -53,7 +53,8 @@ describe('resolveTransferRequest', () => {
     const r = request(RECIPIENT.preprod, '1.5', '--wallet', 'sender', '--network', 'preprod');
     expect(r).toMatchObject({ recipientAddress: RECIPIENT.preprod, amountNight: 1.5, shielded: false, networkName: 'preprod' });
     expect(r.walletPath).toBe(path.join(WALLETS, 'sender.json'));
-    expect(r.walletConfig.seed).toBe(SENDER_SEED.toString('hex'));
+    // The request is checked without the passphrase: it carries the wallet's addresses, never its seed.
+    expect(r.walletConfig).not.toHaveProperty('seed');
   });
 
   it('resolves a wallet name given as the recipient to that wallet\'s address on the network', () => {

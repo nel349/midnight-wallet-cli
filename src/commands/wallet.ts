@@ -12,15 +12,17 @@ import { deriveAllAddresses, deriveAllShieldedAddresses } from '../lib/derive-ad
 import { resolveNetworkName } from '../lib/resolve-network.ts';
 import { parseSeedHex } from '../lib/seed-resolver.ts';
 import {
-  saveWalletConfig,
   loadWalletConfig,
+  unlockWallet,
+  writeSealedWallet,
   setActiveWallet,
   listWallets,
   removeWallet,
   resolveWalletPath,
   getActiveWalletName,
-  type WalletConfig,
+  type WalletPublic,
 } from '../lib/wallet-config.ts';
+import { passphraseForNewSecret } from '../lib/passphrase.ts';
 import { WALLETS_DIR_NAME, MIDNIGHT_DIR, isValidWalletName } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
 import { bold, yellow, dim, green, teal } from '../ui/colors.ts';
@@ -106,18 +108,15 @@ async function walletGenerate(args: ParsedArgs): Promise<void> {
   const shieldedAddresses = deriveAllShieldedAddresses(seedBuffer);
   const activeAddress = addresses[networkName];
 
-  const config: WalletConfig = {
-    seed: seedBuffer.toString('hex'),
+  const config: WalletPublic = {
     addresses,
     shieldedAddresses,
     createdAt: new Date().toISOString(),
   };
+  const secrets = mnemonic ? { seed: seedBuffer.toString('hex'), mnemonic } : { seed: seedBuffer.toString('hex') };
 
-  if (mnemonic) {
-    config.mnemonic = mnemonic;
-  }
-
-  const savedPath = saveWalletConfig(config, targetPath);
+  // Checked above: an existing wallet is replaced only with --force.
+  const savedPath = writeSealedWallet(targetPath, config, secrets, await passphraseForNewSecret(homedir()), { overwrite: hasFlag(args, 'force') });
 
   // Set as active wallet
   setActiveWallet(name);
@@ -353,13 +352,8 @@ async function walletSeed(args: ParsedArgs): Promise<void> {
   const name = getFlag(args, 'wallet') ?? args.positionals[0] ?? getActiveWalletName();
   const walletPath = resolveWalletPath(name);
 
-  // Read raw JSON to get seed + mnemonic directly from file
-  const fs = await import('fs');
-  const raw = JSON.parse(fs.readFileSync(walletPath, 'utf-8'));
-
-  if (!raw.seed) {
-    throw new Error(`Wallet "${name}" has no seed in ${walletPath}`);
-  }
+  // The seed and mnemonic, opened with mn's passphrase.
+  const raw = await unlockWallet(walletPath);
 
   // `--entropy` adds the 32-byte BIP-39 entropy (derived from the mnemonic)
   // alongside the 64-byte PBKDF2 seed. They're DIFFERENT values that produce

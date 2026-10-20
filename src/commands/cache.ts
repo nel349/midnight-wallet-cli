@@ -7,7 +7,7 @@ import { clearWalletCache } from '../lib/wallet-cache.ts';
 import { clearDustDirectCache, dustPublicKeyHexFromSeed } from '../lib/dust-direct-cache.ts';
 import { clearShieldedDirectCache, shieldedCoinPublicKeyHexFromSeed } from '../lib/shielded-direct-cache.ts';
 import { clearNativeDustCheckpoint } from '../lib/dust-sync-native.ts';
-import { resolveWalletPath, loadWalletConfig } from '../lib/wallet-config.ts';
+import { resolveWalletPath, unlockWallet } from '../lib/wallet-config.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
 import { green } from '../ui/colors.ts';
 import { writeJsonResult } from '../lib/json-output.ts';
@@ -28,7 +28,7 @@ export default async function cacheCommand(args: ParsedArgs): Promise<void> {
   if (walletFlag) {
     // Clear cache for a specific wallet
     const walletPath = resolveWalletPath(walletFlag);
-    const config = loadWalletConfig(walletPath);
+    const config = await unlockWallet(walletPath);
     const networkName = resolveNetworkName({ args });
     const address = config.addresses[networkName];
     clearWalletCache(address, networkName);

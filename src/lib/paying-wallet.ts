@@ -12,7 +12,7 @@ import { type ParsedArgs, getFlag } from './argv.ts';
 import { NATIVE_TOKEN_TYPE } from './constants.ts';
 import { applyEndpointOverrides, endpointFlags, type EndpointOverrides, type NetworkConfig, type NetworkName } from './network.ts';
 import { resolveNetwork } from './resolve-network.ts';
-import { loadWalletConfig, resolveWalletPath } from './wallet-config.ts';
+import { resolveWalletPath, unlockWallet } from './wallet-config.ts';
 import { formatNight } from '../ui/format.ts';
 import { OWN_COMMAND_DUST_WAIT_MS } from './dust-wait.ts';
 import type { Spinner } from '../ui/spinner.ts';
@@ -52,7 +52,7 @@ export function resolvePayingTarget(args: ParsedArgs, command: string, subcomman
  * what it found, the Dust in Specks.
  */
 export async function assertWalletCanPay({ network, networkConfig }: PayingTarget, wallet: string | undefined, progress: Spinner): Promise<{ nightBalance: bigint; dustBalance: bigint }> {
-  const walletConfig = loadWalletConfig(resolveWalletPath(wallet));
+  const walletConfig = await unlockWallet(resolveWalletPath(wallet));
   const seedBuffer = Buffer.from(walletConfig.seed, 'hex');
   const address = walletConfig.addresses[network as NetworkName];
   const { defaultRepository } = await import('./wallet-data-repository.ts');

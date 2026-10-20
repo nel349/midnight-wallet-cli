@@ -4,7 +4,7 @@
 
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
-import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
+import { resolveWalletPath, unlockWallet } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { hasDustAvailable, isFacadeSynced, suppressSdkTransientErrors, waitForDustAvailable } from '../lib/facade.ts';
@@ -55,7 +55,7 @@ export default async function serveCommand(args: ParsedArgs, signal?: AbortSigna
 
   // ── Load wallet ──
 
-  const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
+  const config = await unlockWallet(resolveWalletPath(getFlag(args, 'wallet')));
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });

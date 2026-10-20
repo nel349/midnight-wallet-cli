@@ -5,7 +5,7 @@ import * as ledger from '@midnightntwrk/ledger-v9';
 import { MidnightBech32m } from '@midnightntwrk/wallet-sdk/address-format';
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { enableVerbose } from '../lib/verbose.ts';
-import { saveShieldedAddress } from '../lib/wallet-config.ts';
+import { saveShieldedAddress, unlockWallet } from '../lib/wallet-config.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides } from '../lib/network.ts';
 import { getNetworkId } from '../lib/network-id.ts';
@@ -29,10 +29,10 @@ export default async function transferCommand(args: ParsedArgs, signal?: AbortSi
 
 async function unshieldedTransfer(
   args: ParsedArgs,
-  { walletConfig: config, recipientAddress, amountNight }: TransferRequest,
+  { walletPath, walletConfig: config, recipientAddress, amountNight }: TransferRequest,
   signal?: AbortSignal,
 ): Promise<void> {
-  const seedBuffer = Buffer.from(config.seed, 'hex');
+  const seedBuffer = Buffer.from((await unlockWallet(walletPath)).seed, 'hex');
 
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
   const address = config.addresses[networkName];
@@ -123,7 +123,7 @@ async function shieldedTransfer(
   signal?: AbortSignal,
 ): Promise<void> {
   const amount = nightToMicro(amountNight);
-  const seedBuffer = Buffer.from(config.seed, 'hex');
+  const seedBuffer = Buffer.from((await unlockWallet(walletPath)).seed, 'hex');
 
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
   const networkId = getNetworkId(networkConfig.networkId);

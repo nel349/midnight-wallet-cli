@@ -8,7 +8,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { deriveAllAddresses } from '../lib/derive-address.ts';
 import { serveEndpointMismatch, serveWalletMismatch } from '../lib/test/serve-manager.ts';
-import { saveWalletConfig } from '../lib/wallet-config.ts';
+import { saveWalletConfig } from './helpers/plain-wallet.ts';
 
 const scratch = { node: 'ws://localhost:29944', indexerWS: 'ws://localhost:28088/api/v4/graphql/ws' };
 

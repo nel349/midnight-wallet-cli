@@ -5,14 +5,29 @@ import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME, WALLETS_DIR_NAME, DEFAULT_WALLET
 import { isValidNetworkName, type NetworkName } from './network.ts';
 import { loadCliConfig, saveCliConfig } from './cli-config.ts';
 import { deriveAllAddresses, deriveAllShieldedAddresses } from './derive-address.ts';
+import { isSealedSecret, openSecret, sealSecret } from './keystore.ts';
+import { type PassphraseSource, unlockPassphrase } from './passphrase.ts';
 
+/** What anyone may read of a wallet: its addresses, and whether its secrets are sealed. No secret. */
 export interface WalletConfig {
-  seed: string;
-  mnemonic?: string;
   addresses: Record<NetworkName, string>;
   shieldedAddresses?: Record<NetworkName, string>;
   createdAt: string;
+  /** False for a wallet an earlier mn wrote in plain text, until `midnight wallet protect`. */
+  isSealed: boolean;
 }
+
+/** A wallet's secrets: sealed under mn's passphrase in the file, never in the clear. */
+export interface WalletSecrets {
+  seed: string;
+  mnemonic?: string;
+}
+
+/** A wallet's public part, as a new wallet file holds it. */
+export type WalletPublic = Omit<WalletConfig, 'isSealed'>;
+
+/** A wallet opened for a command that needs its seed. */
+export type UnlockedWallet = WalletConfig & WalletSecrets;
 
 export interface WalletInfo {
   name: string;
@@ -335,6 +350,15 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
     throw new Error(`Invalid JSON in wallet file: ${resolvedPath}`);
   }
 
+  if (isSealedSecret(raw.sealed)) {
+    if (!raw.addresses || typeof raw.addresses !== 'object' || typeof raw.createdAt !== 'string') {
+      throw new Error(`Wallet file is missing required fields (addresses, createdAt): ${resolvedPath}`);
+    }
+    const sealedConfig: WalletConfig = { addresses: raw.addresses, createdAt: raw.createdAt, isSealed: true };
+    if (raw.shieldedAddresses && typeof raw.shieldedAddresses === 'object') sealedConfig.shieldedAddresses = raw.shieldedAddresses;
+    return sealedConfig;
+  }
+
   // Check required fields (seed + createdAt are always required)
   if (!raw.seed || !raw.createdAt) {
     // Check for old-format fields too
@@ -368,11 +392,10 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
     const addresses = deriveAllAddresses(seedBuffer);
 
     const config: WalletConfig = {
-      seed: raw.seed,
       addresses,
       createdAt: raw.createdAt,
+      isSealed: false,
     };
-    if (raw.mnemonic) config.mnemonic = raw.mnemonic;
     const shieldedAddresses = resolveShieldedAddresses(raw, seedBuffer);
     if (shieldedAddresses) config.shieldedAddresses = shieldedAddresses;
 
@@ -395,11 +418,10 @@ export function loadWalletConfig(walletPath?: string): WalletConfig {
   }
 
   const config: WalletConfig = {
-    seed: raw.seed,
     addresses: raw.addresses,
     createdAt: raw.createdAt,
+    isSealed: false,
   };
-  if (raw.mnemonic) config.mnemonic = raw.mnemonic;
 
   const seedBuffer = Buffer.from(raw.seed, 'hex');
   const shieldedAddresses = resolveShieldedAddresses(raw, seedBuffer);
@@ -453,24 +475,81 @@ function resolveShieldedAddresses(
   return { ...derived, ...validStored } as Record<NetworkName, string>;
 }
 
-/**
- * Save wallet config to a file.
- * Creates parent directories if they don't exist.
- */
-export function saveWalletConfig(config: WalletConfig, walletPath?: string): string {
-  const resolvedPath = walletPath
-    ? path.resolve(walletPath)
-    : getDefaultWalletPath();
-
-  if (!walletPath) {
-    ensureMidnightDir();
-  } else {
-    const dir = path.dirname(resolvedPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    }
+/** Writes `value` to `file` whole or not at all: a temporary file, then a rename over it. */
+function writeFileAtomically(file: string, value: unknown, flag: 'w' | 'wx' = 'w'): void {
+  const dir = path.dirname(file);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  if (flag === 'wx' && fs.existsSync(file)) throw new Error(`Wallet file already exists: ${file}`);
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  const fd = fs.openSync(temporary, 'wx', FILE_MODE);
+  try {
+    fs.writeSync(fd, JSON.stringify(value, null, 2) + '\n');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
   }
+  fs.renameSync(temporary, file);
+}
 
-  fs.writeFileSync(resolvedPath, JSON.stringify(config, null, 2) + '\n', { mode: FILE_MODE });
+const sealedSecretsOf = (secrets: WalletSecrets, passphrase: string) =>
+  sealSecret(Buffer.from(JSON.stringify(secrets.mnemonic === undefined ? { seed: secrets.seed } : secrets), 'utf8'), passphrase, 'wallet');
+
+/**
+ * Writes a new wallet: its public part readable, its seed and mnemonic sealed
+ * under `passphrase`. Never over an existing file unless `overwrite` says so
+ * (`--force`), and then in one rename, so the old file is never half replaced.
+ */
+export function writeSealedWallet(walletPath: string, wallet: WalletPublic, secrets: WalletSecrets, passphrase: string, { overwrite = false }: { overwrite?: boolean } = {}): string {
+  const resolvedPath = path.resolve(walletPath);
+  if (!/^[0-9a-fA-F]+$/.test(secrets.seed)) throw new Error('A wallet seed is hex.');
+  writeFileAtomically(resolvedPath, { ...wallet, sealed: sealedSecretsOf(secrets, passphrase) }, overwrite ? 'w' : 'wx');
   return resolvedPath;
+}
+
+/**
+ * Seals a plain-text wallet in place under `passphrase`, keeping every other
+ * field it holds. What was sealed is opened again before the file is
+ * replaced, so a wallet is never left unreadable. A sealed wallet is left as it is.
+ */
+export function sealWalletInPlace(walletPath: string, passphrase: string): boolean {
+  const resolvedPath = path.resolve(walletPath);
+  const config = loadWalletConfig(resolvedPath);
+  if (config.isSealed) return false;
+  const raw = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8'));
+  const secrets: WalletSecrets = typeof raw.mnemonic === 'string' ? { seed: raw.seed, mnemonic: raw.mnemonic } : { seed: raw.seed };
+  const sealed = sealedSecretsOf(secrets, passphrase);
+  const reopened = JSON.parse(openSecret(sealed, passphrase, 'wallet').toString('utf8')) as WalletSecrets;
+  if (reopened.seed !== secrets.seed || reopened.mnemonic !== secrets.mnemonic) throw new Error(`Sealing ${resolvedPath} did not round-trip; the file is unchanged.`);
+  const { seed: _seed, mnemonic: _mnemonic, address: _address, ...kept } = raw;
+  writeFileAtomically(resolvedPath, { ...kept, addresses: config.addresses, ...(config.shieldedAddresses ? { shieldedAddresses: config.shieldedAddresses } : {}), sealed });
+  return true;
+}
+
+/** How a wallet is unlocked: whose home holds mn's passphrase check, where the passphrase comes from, and where a warning goes. */
+export interface UnlockOptions {
+  home?: string;
+  source?: PassphraseSource;
+  warn?: (line: string) => void;
+}
+
+// Each plain-text wallet is warned about once per run.
+const warnedPlain = new Set<string>();
+
+/** A wallet with its secrets: opened with mn's passphrase, or read as it is from a plain-text file an earlier mn wrote. */
+export async function unlockWallet(walletPath: string, options: UnlockOptions = {}): Promise<UnlockedWallet> {
+  const resolvedPath = path.resolve(walletPath);
+  const config = loadWalletConfig(resolvedPath);
+  const raw = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8'));
+  if (!config.isSealed) {
+    if (!warnedPlain.has(resolvedPath) || options.warn !== undefined) {
+      warnedPlain.add(resolvedPath);
+      (options.warn ?? ((line: string) => process.stderr.write(line + '\n')))(
+        `Warning: wallet ${resolvedPath} is not protected: its seed is in plain text. Encrypt it with: midnight wallet protect`,
+      );
+    }
+    return typeof raw.mnemonic === 'string' ? { ...config, seed: raw.seed, mnemonic: raw.mnemonic } : { ...config, seed: raw.seed };
+  }
+  const passphrase = await unlockPassphrase(options.home ?? homedir(), options.source);
+  const secrets = JSON.parse(openSecret(raw.sealed, passphrase, 'wallet').toString('utf8')) as WalletSecrets;
+  return { ...config, ...secrets };
 }

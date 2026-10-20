@@ -115,10 +115,34 @@ export function checkPassphrase(home: string, passphrase: string): void {
   openSecret(check, passphrase, 'keystore-check');
 }
 
-/** mn's passphrase, read and checked against the one set. */
+/** The shortest passphrase mn accepts when one is set. */
+export const MIN_PASSPHRASE_LENGTH = 12;
+
+// The passphrase this process has unlocked, by home: one prompt per run.
+const unlocked = new Map<string, string>();
+
+/** mn's passphrase, read and checked against the one set; asked for once per run. */
 export async function unlockPassphrase(home: string, source: PassphraseSource = {}): Promise<string> {
+  const known = unlocked.get(home);
+  if (known !== undefined) return known;
   if (!isPassphraseSet(home)) throw new UsageError('mn has no passphrase yet. Set one with: midnight wallet protect');
   const passphrase = await readPassphrase(source);
   checkPassphrase(home, passphrase);
+  unlocked.set(home, passphrase);
+  return passphrase;
+}
+
+/**
+ * The passphrase to seal a new secret under: the one set, or, on a machine
+ * with none yet, a new one (asked twice at a terminal), which is then set.
+ */
+export async function passphraseForNewSecret(home: string, source: PassphraseSource = {}): Promise<string> {
+  if (isPassphraseSet(home)) return unlockPassphrase(home, source);
+  const passphrase = await readPassphrase({ ...source, confirm: true });
+  if ([...passphrase].length < MIN_PASSPHRASE_LENGTH) {
+    throw new UsageError(`mn's passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`);
+  }
+  establishPassphrase(home, passphrase);
+  unlocked.set(home, passphrase);
   return passphrase;
 }

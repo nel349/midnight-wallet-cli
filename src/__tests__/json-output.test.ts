@@ -15,7 +15,7 @@ import genesisAddressCommand from '../commands/genesis-address.ts';
 import inspectCostCommand from '../commands/inspect-cost.ts';
 import configCommand from '../commands/config.ts';
 import helpCommand from '../commands/help.ts';
-import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
+import { saveWalletConfig, type PlainWalletConfig as WalletConfig } from './helpers/plain-wallet.ts';
 import { deriveAllAddresses } from '../lib/derive-address.ts';
 import { loadCliConfig } from '../lib/cli-config.ts';
 import { localIndexerFlags } from './helpers/local-indexer.ts';
@@ -32,14 +32,21 @@ const TEST_CONFIG: WalletConfig = {
 
 let io: CapturedOutput;
 
+const ORIGINAL_HOME = process.env.HOME;
+
 beforeEach(() => {
   process.env.NO_COLOR = '';
+  // A home of the test's own: a generated wallet sets mn's passphrase there, never in the real one.
+  process.env.HOME = TEST_DIR;
+  process.env.MN_PASSPHRASE = 'correct horse battery staple';
   fs.mkdirSync(TEST_DIR, { recursive: true });
   io = captureOutput();
 });
 
 afterEach(() => {
   delete process.env.NO_COLOR;
+  delete process.env.MN_PASSPHRASE;
+  process.env.HOME = ORIGINAL_HOME;
   io.restore();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });

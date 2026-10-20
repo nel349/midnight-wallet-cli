@@ -11,7 +11,7 @@ import { writeJsonResult } from '../lib/json-output.ts';
 
 export default async function addressCommand(args: ParsedArgs): Promise<void> {
   // `address` is a seed-derivation tool with no active-wallet notion → requireExplicit.
-  const seedBuffer = resolveSeed(args, { requireExplicit: true, label: 'address' });
+  const seedBuffer = await resolveSeed(args, { requireExplicit: true, label: 'address' });
 
   const indexStr = getFlag(args, 'index');
   const keyIndex = indexStr !== undefined ? parseInt(indexStr, 10) : 0;

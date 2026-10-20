@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import transferCommand from '../commands/transfer.ts';
 import { parseArgs } from '../lib/argv.ts';
-import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
+import { saveWalletConfig, type PlainWalletConfig as WalletConfig } from './helpers/plain-wallet.ts';
 import { deriveUnshieldedAddress, deriveAllAddresses } from '../lib/derive-address.ts';
 import { GENESIS_SEED } from '../lib/constants.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';

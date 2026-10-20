@@ -33,7 +33,7 @@ async function aClosedPort(): Promise<number> {
 
 beforeAll(async () => {
   home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mn-mcp-progress-home-')));
-  const env = { ...process.env, HOME: home, NO_COLOR: '1' } as Record<string, string>;
+  const env = { ...process.env, HOME: home, NO_COLOR: '1', MN_PASSPHRASE: 'correct horse battery staple' } as Record<string, string>;
   const generated = execFileSync(TSX, [path.join(REPO, 'src', 'wallet.ts'), 'wallet', 'generate', 'alice', '--network', 'undeployed', '--json'], { env, encoding: 'utf8' });
   aliceAddress = JSON.parse(generated).addresses.undeployed;
   closedPort = await aClosedPort();

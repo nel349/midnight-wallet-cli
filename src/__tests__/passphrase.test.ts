@@ -12,8 +12,10 @@ import { WrongPassphraseError } from '../lib/keystore.ts';
 import {
   NoPassphraseError,
   PASSPHRASE_ENV,
+  MIN_PASSPHRASE_LENGTH,
   establishPassphrase,
   isPassphraseSet,
+  passphraseForNewSecret,
   readPassphrase,
   unlockPassphrase,
 } from '../lib/passphrase.ts';
@@ -92,3 +94,22 @@ describe('the one passphrase', () => {
     expect(() => establishPassphrase(home, 'another one')).toThrow(/already set/);
   });
 });
+
+describe('a new secret', () => {
+  it('sets the passphrase on a machine with none, and is sealed under it', async () => {
+    const passphrase = await passphraseForNewSecret(home, { env: { [PASSPHRASE_ENV]: PASSPHRASE }, isTTY: false });
+    expect(passphrase).toBe(PASSPHRASE);
+    expect(isPassphraseSet(home)).toBe(true);
+  });
+
+  it(`refuses a new passphrase shorter than ${MIN_PASSPHRASE_LENGTH} characters, setting nothing`, async () => {
+    await expect(passphraseForNewSecret(home, { env: { [PASSPHRASE_ENV]: 'too short' }, isTTY: false })).rejects.toThrow(/at least/);
+    expect(isPassphraseSet(home)).toBe(false);
+  });
+
+  it('takes the passphrase already set, and no other', async () => {
+    establishPassphrase(home, PASSPHRASE);
+    await expect(passphraseForNewSecret(home, { env: { [PASSPHRASE_ENV]: 'another passphrase' }, isTTY: false })).rejects.toThrow(WrongPassphraseError);
+  });
+});
+

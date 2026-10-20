@@ -11,7 +11,8 @@ import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/b
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { deriveAllAddresses } from '../lib/derive-address.ts';
 import { resolveNetworkName } from '../lib/resolve-network.ts';
-import { saveWalletConfig, type WalletConfig } from '../lib/wallet-config.ts';
+import { type WalletPublic, writeSealedWallet } from '../lib/wallet-config.ts';
+import { passphraseForNewSecret } from '../lib/passphrase.ts';
 import { parseSeedHex } from '../lib/seed-resolver.ts';
 import { MIDNIGHT_DIR, DEFAULT_WALLET_FILENAME } from '../lib/constants.ts';
 import { header, keyValue, divider, formatAddress } from '../ui/format.ts';
@@ -68,17 +69,13 @@ export default async function generateCommand(args: ParsedArgs): Promise<void> {
   const addresses = deriveAllAddresses(seedBuffer);
   const activeAddress = addresses[networkName];
 
-  const config: WalletConfig = {
-    seed: seedBuffer.toString('hex'),
+  const config: WalletPublic = {
     addresses,
     createdAt: new Date().toISOString(),
   };
+  const secrets = mnemonic ? { seed: seedBuffer.toString('hex'), mnemonic } : { seed: seedBuffer.toString('hex') };
 
-  if (mnemonic) {
-    config.mnemonic = mnemonic;
-  }
-
-  const savedPath = saveWalletConfig(config, outputPath);
+  const savedPath = writeSealedWallet(targetPath, config, secrets, await passphraseForNewSecret(homedir()), { overwrite: hasFlag(args, 'force') });
 
   // JSON mode
   if (hasFlag(args, 'json')) {

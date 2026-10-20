@@ -6,7 +6,7 @@ import * as ledger from '@midnightntwrk/ledger-v9';
 import { type ParsedArgs, getFlag, hasFlag, isVerbose, isMinimalMode, rejectNoCacheForWrites } from '../lib/argv.ts';
 import { UsageError } from '../lib/errors.ts';
 import { enableVerbose } from '../lib/verbose.ts';
-import { loadWalletConfig, resolveWalletPath } from '../lib/wallet-config.ts';
+import { resolveWalletPath, unlockWallet } from '../lib/wallet-config.ts';
 import { resolveSeed } from '../lib/seed-resolver.ts';
 import { resolveNetwork } from '../lib/resolve-network.ts';
 import { applyEndpointOverrides, type NetworkConfig } from '../lib/network.ts';
@@ -55,7 +55,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
     // The chain-id check connects to the node; keep polkadot-js's RPC-CORE noise off stderr.
     const restoreRpc = suppressRpcNoise();
     try {
-      await dustExport(resolveSeed(args), networkName, networkConfig, isJson, minimal, signal);
+      await dustExport(await resolveSeed(args), networkName, networkConfig, isJson, minimal, signal);
     } finally {
       restoreRpc();
     }
@@ -63,7 +63,7 @@ export default async function dustCommand(args: ParsedArgs, signal?: AbortSignal
   }
 
   // status / register: named wallet + its stored address (used by the registration pre-check).
-  const config = loadWalletConfig(resolveWalletPath(getFlag(args, 'wallet')));
+  const config = await unlockWallet(resolveWalletPath(getFlag(args, 'wallet')));
   const seedBuffer = Buffer.from(config.seed, 'hex');
   const address = config.addresses[networkName];
 

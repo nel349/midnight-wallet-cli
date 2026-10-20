@@ -5,7 +5,7 @@
 
 import { getFlag, type ParsedArgs } from './argv.ts';
 import { UsageError } from './errors.ts';
-import { loadWalletConfig, resolveWalletPath, type WalletConfig } from './wallet-config.ts';
+import { resolveWalletPath, unlockWallet, type WalletConfig } from './wallet-config.ts';
 
 export interface ResolvedSeed {
   /** The wallet seed: 32-byte raw, or 64-byte BIP-39 (mnemonic-derived). */
@@ -52,7 +52,7 @@ export function parseSeedHex(input: string, label: string): Buffer {
  * Returns the seed plus the backing wallet file/config (both null for a `--seed` / `MN_SEED`
  * source), so a caller that caches to the wallet file can skip that when there is none.
  */
-export function resolveSeedSource(args: ParsedArgs, opts: ResolveSeedOptions = {}): ResolvedSeed {
+export async function resolveSeedSource(args: ParsedArgs, opts: ResolveSeedOptions = {}): Promise<ResolvedSeed> {
   const seedFlag = getFlag(args, 'seed');
   const seedSource = seedFlag ?? process.env.MN_SEED;
   if (seedSource) {
@@ -74,11 +74,11 @@ export function resolveSeedSource(args: ParsedArgs, opts: ResolveSeedOptions = {
   }
 
   const walletPath = resolveWalletPath(walletName);
-  const config = loadWalletConfig(walletPath);
-  return { seed: Buffer.from(config.seed, 'hex'), walletPath, config };
+  const { seed, mnemonic: _mnemonic, ...config } = await unlockWallet(walletPath);
+  return { seed: Buffer.from(seed, 'hex'), walletPath, config };
 }
 
 /** Just the seed — for commands that don't touch the wallet file. */
-export function resolveSeed(args: ParsedArgs, opts?: ResolveSeedOptions): Buffer {
-  return resolveSeedSource(args, opts).seed;
+export async function resolveSeed(args: ParsedArgs, opts?: ResolveSeedOptions): Promise<Buffer> {
+  return (await resolveSeedSource(args, opts)).seed;
 }

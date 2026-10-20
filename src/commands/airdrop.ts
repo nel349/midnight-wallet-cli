@@ -107,11 +107,11 @@ function resolveDestination(
   const config = loadWalletConfig(walletPath);
 
   if (isShielded) {
-    const networkId = getNetworkId(networkConfig.networkId);
-    const seedBuffer = Buffer.from(config.seed, 'hex');
-    const raw = deriveShieldedAddress(seedBuffer);
-    const bech32m = MidnightBech32m.encode(networkId, raw).asString();
-    return { kind: 'wallet', raw, bech32m, walletPath };
+    // The wallet's own shielded address, as its file keeps it: receiving needs no passphrase.
+    const stored = config.shieldedAddresses?.[networkName as NetworkName];
+    if (stored === undefined) throw new Error(`Wallet ${walletPath} keeps no shielded address for ${networkName}.`);
+    const decoded = resolveAddressDestination(stored, networkName, networkConfig, true) as ShieldedDestination;
+    return { kind: 'wallet', raw: decoded.raw, bech32m: decoded.bech32m, walletPath };
   }
 
   return { kind: 'address', address: config.addresses[networkName] };

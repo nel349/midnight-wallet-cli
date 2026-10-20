@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { bindCachesToIndexer } from '../cache-indexer.ts';
 import { clearWalletCache } from '../wallet-cache.ts';
-import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
+import { resolveWalletPath, unlockWallet } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
 import type { NetworkConfig, NetworkName } from '../network.ts';
 import { assertLedger9StackReachable, assertLedgerSupported } from '../ledger-guard.ts';
@@ -113,7 +113,7 @@ async function stepBalance(amount: number, config: DappTestConfig, callbacks: Pr
   // On a ledger-8 chain the SDK's sync would retry forever.
   await assertLedgerSupported(network, networkConfig);
 
-  const walletConfig = loadWalletConfig(resolveWalletPath());
+  const walletConfig = await unlockWallet(resolveWalletPath());
   const seedBuffer = Buffer.from(walletConfig.seed, 'hex');
   const address = walletConfig.addresses[network as NetworkName];
 
@@ -192,7 +192,7 @@ async function stepDust(config: DappTestConfig, callbacks: PrepCallbacks): Promi
   });
   await assertLedgerSupported(network, networkConfig);
 
-  const walletConfig = loadWalletConfig(resolveWalletPath());
+  const walletConfig = await unlockWallet(resolveWalletPath());
   const seedBuffer = Buffer.from(walletConfig.seed, 'hex');
   const address = walletConfig.addresses[network as NetworkName];
 

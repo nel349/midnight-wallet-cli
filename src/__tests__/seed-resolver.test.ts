@@ -8,6 +8,11 @@ import { join } from 'node:path';
 
 import { parseArgs } from '../lib/argv.ts';
 import { parseSeedHex, resolveSeedSource, resolveSeed } from '../lib/seed-resolver.ts';
+import { PASSPHRASE_ENV, establishPassphrase } from '../lib/passphrase.ts';
+import { type WalletPublic, writeSealedWallet } from '../lib/wallet-config.ts';
+
+const PASSPHRASE = 'correct horse battery staple';
+const ORIGINAL_HOME = process.env.HOME;
 
 const SEED_A = '11'.repeat(32);
 const SEED_B = '22'.repeat(32);
@@ -56,75 +61,87 @@ describe('parseSeedHex', () => {
 });
 
 describe('resolveSeedSource', () => {
-  it('reads --seed, with no backing wallet file/config', () => {
-    const r = resolveSeedSource(argsFor(['--seed', SEED_A]));
+  it('reads --seed, with no backing wallet file/config', async () => {
+    const r = await resolveSeedSource(argsFor(['--seed', SEED_A]));
     expect(r.seed.toString('hex')).toBe(SEED_A);
     expect(r.walletPath).toBeNull();
     expect(r.config).toBeNull();
   });
 
-  it('reads MN_SEED when --seed is absent', () => {
+  it('reads MN_SEED when --seed is absent', async () => {
     process.env.MN_SEED = SEED_A;
-    const r = resolveSeedSource(argsFor([]));
+    const r = await resolveSeedSource(argsFor([]));
     expect(r.seed.toString('hex')).toBe(SEED_A);
     expect(r.walletPath).toBeNull();
   });
 
-  it('lets --seed win over MN_SEED', () => {
+  it('lets --seed win over MN_SEED', async () => {
     process.env.MN_SEED = SEED_B;
-    const r = resolveSeedSource(argsFor(['--seed', SEED_A]));
+    const r = await resolveSeedSource(argsFor(['--seed', SEED_A]));
     expect(r.seed.toString('hex')).toBe(SEED_A);
   });
 
-  it('strips 0x and trims a trailing newline (MN_SEED from $(cat seed.hex))', () => {
+  it('strips 0x and trims a trailing newline (MN_SEED from $(cat seed.hex))', async () => {
     process.env.MN_SEED = `0x${SEED_A}\n`;
-    const r = resolveSeedSource(argsFor([]));
+    const r = await resolveSeedSource(argsFor([]));
     expect(r.seed.toString('hex')).toBe(SEED_A);
   });
 
-  it('rejects a bad-length --seed', () => {
-    expect(() => resolveSeedSource(argsFor(['--seed', 'aabb']))).toThrow(/64 or 128 hex characters/);
+  it('rejects a bad-length --seed', async () => {
+    await expect(resolveSeedSource(argsFor(['--seed', 'aabb']))).rejects.toThrow(/64 or 128 hex characters/);
   });
 
-  it('accepts a 128-hex (64-byte BIP-39) --seed', () => {
+  it('accepts a 128-hex (64-byte BIP-39) --seed', async () => {
     const seed64 = '33'.repeat(64);
-    const r = resolveSeedSource(argsFor(['--seed', seed64]));
+    const r = await resolveSeedSource(argsFor(['--seed', seed64]));
     expect(r.seed.length).toBe(64);
     expect(r.seed.toString('hex')).toBe(seed64);
   });
 
-  it('rejects in-between lengths (only 32- and 64-byte seeds occur)', () => {
-    expect(() => resolveSeedSource(argsFor(['--seed', '44'.repeat(48)]))).toThrow(/64 or 128 hex characters/);
+  it('rejects in-between lengths (only 32- and 64-byte seeds occur)', async () => {
+    await expect(resolveSeedSource(argsFor(['--seed', '44'.repeat(48)]))).rejects.toThrow(/64 or 128 hex characters/);
   });
 
-  it('names MN_SEED in the error when MN_SEED is the bad source', () => {
+  it('names MN_SEED in the error when MN_SEED is the bad source', async () => {
     process.env.MN_SEED = 'zz';
-    expect(() => resolveSeedSource(argsFor([]))).toThrow(/MN_SEED/);
+    await expect(resolveSeedSource(argsFor([]))).rejects.toThrow(/MN_SEED/);
   });
 
-  it('reads a wallet file via --wallet, exposing walletPath + config', () => {
+  it('reads a wallet file via --wallet, exposing walletPath + config', async () => {
     const p = walletFile(SEED_B);
-    const r = resolveSeedSource(argsFor(['--wallet', p]));
+    const r = await resolveSeedSource(argsFor(['--wallet', p]));
     expect(r.seed.toString('hex')).toBe(SEED_B);
     expect(r.walletPath).toBe(p);
-    expect(r.config?.seed).toBe(SEED_B);
+    expect(r.config).not.toHaveProperty('seed');
+    expect(r.config?.isSealed).toBe(false);
   });
 
-  it('requireExplicit throws a labeled error naming every source when none is given', () => {
-    // No --seed / MN_SEED / --wallet, and requireExplicit disables the active fallback.
-    expect(() => resolveSeedSource(argsFor([]), { requireExplicit: true, label: 'address' }))
-      .toThrow(/address needs a seed source/);
+  it('opens a sealed wallet via --wallet with mn\'s passphrase', async () => {
+    process.env.HOME = TMP;
+    process.env[PASSPHRASE_ENV] = PASSPHRASE;
     try {
-      resolveSeedSource(argsFor([]), { requireExplicit: true, label: 'address' });
-    } catch (e) {
-      const msg = (e as Error).message;
-      expect(msg).toContain('--seed');
-      expect(msg).toContain('MN_SEED');
-      expect(msg).toContain('--wallet');
+      establishPassphrase(TMP, PASSPHRASE);
+      const p = writeSealedWallet(join(TMP, 'sealed.json'), { addresses: {} as WalletPublic['addresses'], createdAt: new Date().toISOString() }, { seed: SEED_B }, PASSPHRASE);
+      const r = await resolveSeedSource(argsFor(['--wallet', p]));
+      expect(r.seed.toString('hex')).toBe(SEED_B);
+      expect(r.config?.isSealed).toBe(true);
+    } finally {
+      process.env.HOME = ORIGINAL_HOME;
+      delete process.env[PASSPHRASE_ENV];
     }
   });
 
-  it('resolveSeed returns just the seed buffer', () => {
-    expect(resolveSeed(argsFor(['--seed', SEED_A])).toString('hex')).toBe(SEED_A);
+  it('requireExplicit throws a labeled error naming every source when none is given', async () => {
+    // No --seed / MN_SEED / --wallet, and requireExplicit disables the active fallback.
+    await expect(resolveSeedSource(argsFor([]), { requireExplicit: true, label: 'address' }))
+      .rejects.toThrow(/address needs a seed source/);
+    const msg = await resolveSeedSource(argsFor([]), { requireExplicit: true, label: 'address' }).then(() => '', (e: Error) => e.message);
+    expect(msg).toContain('--seed');
+    expect(msg).toContain('MN_SEED');
+    expect(msg).toContain('--wallet');
+  });
+
+  it('resolveSeed returns just the seed buffer', async () => {
+    expect((await resolveSeed(argsFor(['--seed', SEED_A]))).toString('hex')).toBe(SEED_A);
   });
 });

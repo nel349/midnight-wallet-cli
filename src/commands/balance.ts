@@ -182,7 +182,7 @@ async function walletBalance(args: ParsedArgs): Promise<void> {
   const { name: networkName, config: networkConfig } = resolveNetwork({ args });
   verbose('balance', `network=${networkName} indexerWS=${networkConfig.indexerWS}`);
   // Seed source: --seed → MN_SEED → --wallet <name> → active wallet (shared resolver).
-  const { seed: seedBuffer, walletPath, config } = resolveSeedSource(args);
+  const { seed: seedBuffer, walletPath, config } = await resolveSeedSource(args);
   verbose('balance', `wallet path=${walletPath ?? '(from --seed/MN_SEED)'}`);
   // Derive the unshielded address from the seed so a --seed/MN_SEED caller (no wallet
   // file) behaves identically to a named wallet — for a wallet this equals the stored one.

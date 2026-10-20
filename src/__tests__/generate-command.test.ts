@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mnemonicToSeedSync } from '@scure/bip39';
 import generateCommand from '../commands/generate.ts';
-import { loadWalletConfig } from '../lib/wallet-config.ts';
+import { unlockWallet } from '../lib/wallet-config.ts';
+import { PASSPHRASE_ENV } from '../lib/passphrase.ts';
 import { parseArgs } from '../lib/argv.ts';
 import { captureOutput, type CapturedOutput } from './helpers/capture-output.ts';
 import * as fs from 'fs';
@@ -11,11 +12,16 @@ import * as os from 'os';
 const TEST_DIR = path.join(os.tmpdir(), `midnight-generate-cmd-test-${process.pid}`);
 const TEST_SEED = '0000000000000000000000000000000000000000000000000000000000000002';
 
+const PASSPHRASE = 'correct horse battery staple';
+const originalHome = process.env.HOME;
 let io: CapturedOutput;
 
 beforeEach(() => {
   process.env.NO_COLOR = '';
   delete process.env.MN_SEED;
+  // A home of the test's own, whose passphrase the first wallet sets.
+  process.env.HOME = TEST_DIR;
+  process.env[PASSPHRASE_ENV] = PASSPHRASE;
   fs.mkdirSync(TEST_DIR, { recursive: true });
   io = captureOutput();
 });
@@ -23,18 +29,29 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.NO_COLOR;
   delete process.env.MN_SEED;
+  delete process.env[PASSPHRASE_ENV];
+  process.env.HOME = originalHome;
   io.restore();
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 describe('generate command — random mode', () => {
+  it('writes no seed or mnemonic in the clear: both are sealed under the passphrase', async () => {
+    const walletFile = path.join(TEST_DIR, 'wallet.json');
+    await generateCommand(parseArgs(['generate', '--network', 'undeployed', '--output', walletFile]));
+    const { seed, mnemonic } = await unlockWallet(walletFile);
+    const text = fs.readFileSync(walletFile, 'utf8');
+    expect(text).not.toContain(seed);
+    expect(text).not.toContain(mnemonic!.split(' ')[0]! + ' ' + mnemonic!.split(' ')[1]!);
+  });
+
   it('creates a wallet file with random mnemonic', async () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     const args = parseArgs(['generate', '--network', 'undeployed', '--output', walletFile]);
     await generateCommand(args);
 
     expect(fs.existsSync(walletFile)).toBe(true);
-    const config = loadWalletConfig(walletFile);
+    const config = await unlockWallet(walletFile);
     expect(config.addresses.undeployed).toBeDefined();
     expect(config.mnemonic).toBeDefined();
     expect(config.mnemonic!.split(' ').length).toBe(24);
@@ -72,7 +89,7 @@ describe('generate command — seed mode', () => {
     const args = parseArgs(['generate', '--network', 'preprod', '--seed', TEST_SEED, '--output', walletFile]);
     await generateCommand(args);
 
-    const config = loadWalletConfig(walletFile);
+    const config = await unlockWallet(walletFile);
     expect(config.seed).toBe(TEST_SEED);
     expect(config.addresses.preprod).toBeDefined();
     expect(config.mnemonic).toBeUndefined();
@@ -87,8 +104,8 @@ describe('generate command — seed mode', () => {
     io.clearStdout();
     await generateCommand(parseArgs(['generate', '--network', 'preprod', '--seed', TEST_SEED, '--output', file2]));
 
-    const config1 = loadWalletConfig(file1);
-    const config2 = loadWalletConfig(file2);
+    const config1 = (await unlockWallet(file1));
+    const config2 = (await unlockWallet(file2));
     expect(config1.addresses.preprod).toBe(config2.addresses.preprod);
     expect(config1.seed).toBe(config2.seed);
   });
@@ -114,9 +131,9 @@ describe('generate command — seed mode', () => {
     // any implementation deriving Midnight addresses from this mnemonic
     // must land here, so --seed and --mnemonic must both produce it.
     const golden = 'mn_addr_preview1dwv2rta0a2skyhrvukaw2q9r2sq6yc4jhj63rf7afxpkrrv6g35q4y8xms';
-    expect(loadWalletConfig(fromSeed).addresses.preview).toBe(golden);
-    expect(loadWalletConfig(fromMnemonic).addresses.preview).toBe(golden);
-    expect(loadWalletConfig(fromSeed).seed).toBe(seedHex);
+    expect((await unlockWallet(fromSeed)).addresses.preview).toBe(golden);
+    expect((await unlockWallet(fromMnemonic)).addresses.preview).toBe(golden);
+    expect((await unlockWallet(fromSeed)).seed).toBe(seedHex);
   });
 
   it('does not include mnemonic in seed mode', async () => {
@@ -131,7 +148,7 @@ describe('generate command — seed mode', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     await generateCommand(parseArgs(['generate', '--network', 'preprod', '--seed', '0x' + TEST_SEED, '--output', walletFile]));
 
-    const config = loadWalletConfig(walletFile);
+    const config = await unlockWallet(walletFile);
     expect(config.seed).toBe(TEST_SEED);
   });
 
@@ -140,7 +157,7 @@ describe('generate command — seed mode', () => {
     process.env.MN_SEED = TEST_SEED;
     await generateCommand(parseArgs(['generate', '--network', 'preprod', '--output', walletFile]));
 
-    const config = loadWalletConfig(walletFile);
+    const config = await unlockWallet(walletFile);
     expect(config.seed).toBe(TEST_SEED);
     expect(config.mnemonic).toBeUndefined();
   });
@@ -150,7 +167,7 @@ describe('generate command — seed mode', () => {
     process.env.MN_SEED = '0000000000000000000000000000000000000000000000000000000000000009';
     await generateCommand(parseArgs(['generate', '--network', 'preprod', '--seed', TEST_SEED, '--output', walletFile]));
 
-    const config = loadWalletConfig(walletFile);
+    const config = await unlockWallet(walletFile);
     expect(config.seed).toBe(TEST_SEED);
   });
 });
@@ -164,7 +181,7 @@ describe('generate command — mnemonic mode', () => {
     const args = parseArgs(['generate', '--network', 'preview', '--mnemonic', VALID_MNEMONIC, '--output', walletFile]);
     await generateCommand(args);
 
-    const config = loadWalletConfig(walletFile);
+    const config = await unlockWallet(walletFile);
     expect(config.addresses.preview).toBeDefined();
     expect(config.mnemonic).toBe(VALID_MNEMONIC);
     expect(config.addresses.preview.startsWith('mn_addr_preview1')).toBe(true);
@@ -177,8 +194,8 @@ describe('generate command — mnemonic mode', () => {
     await generateCommand(parseArgs(['generate', '--network', 'preview', '--mnemonic', VALID_MNEMONIC, '--output', file1]));
     await generateCommand(parseArgs(['generate', '--network', 'preview', '--mnemonic', VALID_MNEMONIC, '--output', file2]));
 
-    const config1 = loadWalletConfig(file1);
-    const config2 = loadWalletConfig(file2);
+    const config1 = (await unlockWallet(file1));
+    const config2 = (await unlockWallet(file2));
     expect(config1.addresses.preview).toBe(config2.addresses.preview);
     expect(config1.seed).toBe(config2.seed);
   });
@@ -232,13 +249,13 @@ describe('generate command — overwrite protection', () => {
     const walletFile = path.join(TEST_DIR, 'wallet.json');
     // Create the file first
     await generateCommand(parseArgs(['generate', '--network', 'undeployed', '--seed', TEST_SEED, '--output', walletFile]));
-    const config1 = loadWalletConfig(walletFile);
+    const config1 = (await unlockWallet(walletFile));
     io.clearStdout();
 
     // Generate again with --force and a different seed
     const newSeed = '0000000000000000000000000000000000000000000000000000000000000003';
     await generateCommand(parseArgs(['generate', '--network', 'undeployed', '--seed', newSeed, '--force', '--output', walletFile]));
-    const config2 = loadWalletConfig(walletFile);
+    const config2 = (await unlockWallet(walletFile));
 
     expect(config2.seed).toBe(newSeed);
     expect(config2.seed).not.toBe(config1.seed);

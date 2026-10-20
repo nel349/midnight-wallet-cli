@@ -27,7 +27,7 @@ import { execSync } from 'node:child_process';
 
 import { WalletDataRepository, defaultRepository } from '../src/lib/wallet-data-repository.ts';
 import { getNetworkConfig, type NetworkName } from '../src/lib/network.ts';
-import { loadWalletConfig, resolveWalletPath } from '../src/lib/wallet-config.ts';
+import { unlockWallet, resolveWalletPath } from '../src/lib/wallet-config.ts';
 
 const WALLET = (process.env.WALLET ?? 'alice') as string;
 const NETWORK = (process.env.NETWORK ?? 'preprod') as NetworkName;
@@ -44,7 +44,7 @@ function wipeDustCacheFor(network: string): void {
 
 async function main() {
   const network = getNetworkConfig(NETWORK);
-  const wallet = loadWalletConfig(resolveWalletPath(WALLET));
+  const wallet = await unlockWallet(resolveWalletPath(WALLET));
   const seed = Buffer.from(wallet.seed, 'hex');
 
   console.log(`Wallet:  ${WALLET}`);
@@ -65,9 +65,9 @@ async function main() {
       import('./src/lib/wallet-data-repository.ts').then(async (repo) => {
         const { Buffer } = await import('node:buffer');
         const { getNetworkConfig } = await import('./src/lib/network.ts');
-        const { loadWalletConfig, resolveWalletPath } = await import('./src/lib/wallet-config.ts');
+        const { unlockWallet, resolveWalletPath } = await import('./src/lib/wallet-config.ts');
         const cfg = getNetworkConfig('${NETWORK}');
-        const wc = loadWalletConfig(resolveWalletPath('${WALLET}'));
+        const wc = await unlockWallet(resolveWalletPath('${WALLET}'));
         const seed = Buffer.from(wc.seed, 'hex');
         const t = Date.now();
         await repo.defaultRepository().dust(seed, cfg);

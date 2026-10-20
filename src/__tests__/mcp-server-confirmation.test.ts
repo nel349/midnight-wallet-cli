@@ -26,7 +26,7 @@ let client: Client;
 
 beforeAll(async () => {
   home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mn-mcp-confirm-home-')));
-  const env = { ...process.env, HOME: home, NO_COLOR: '1' } as Record<string, string>;
+  const env = { ...process.env, HOME: home, NO_COLOR: '1', MN_PASSPHRASE: 'correct horse battery staple' } as Record<string, string>;
   execFileSync(TSX, [path.join(REPO, 'src', 'wallet.ts'), 'wallet', 'generate', 'alice', '--json'], { env, stdio: 'ignore' });
   // An account on record for alice.
   recordsDir = path.join(home, '.midnight', 'accounts', 'undeployed', 'alice');

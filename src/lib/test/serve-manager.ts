@@ -3,7 +3,7 @@
 // instead of blocking on a signal. Always runs in approve-all mode.
 
 import { Socket } from 'node:net';
-import { loadWalletConfig, resolveWalletPath } from '../wallet-config.ts';
+import { loadWalletConfig, resolveWalletPath, unlockWallet } from '../wallet-config.ts';
 import { resolveNetwork } from '../resolve-network.ts';
 import { assertLedgerSupported } from '../ledger-guard.ts';
 import { applyEndpointOverrides, endpointFlags, type EndpointOverrides, type NetworkConfig, type NetworkName } from '../network.ts';
@@ -219,7 +219,7 @@ export async function openConnector(options: ServeManagerOptions): Promise<Opene
   const onMessage = options.onMessage ?? (() => {});
 
   // Load wallet
-  const config = loadWalletConfig(resolveWalletPath(options.wallet));
+  const config = await unlockWallet(resolveWalletPath(options.wallet));
   const seedBuffer = Buffer.from(config.seed, 'hex');
 
   const { networkName, networkConfig } = resolveServeTarget(options);

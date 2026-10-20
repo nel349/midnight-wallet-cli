@@ -1004,6 +1004,10 @@ ERROR CODES
                                 install a current one
   NO_ACCOUNT              1     mn grant: the wallet has no account on this
                                 network; run grant deploy
+  WRONG_PASSPHRASE        2     mn's passphrase was wrong, or a sealed secret
+                                was changed
+  PASSPHRASE_REQUIRED     2     A secret was needed and no passphrase could be
+                                had: set MN_PASSPHRASE, or run at a terminal
   BLOCKFROST_PROJECT_ID_REQUIRED 4
                                 Preprod is served by Blockfrost and no project
                                 id is set: config set blockfrost-project-id

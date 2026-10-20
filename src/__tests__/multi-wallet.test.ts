@@ -9,10 +9,9 @@ import {
   migrateOldWallet,
   setActiveWallet,
   getActiveWalletName,
-  saveWalletConfig,
   loadWalletConfig,
-  type WalletConfig,
 } from '../lib/wallet-config.ts';
+import { saveWalletConfig, type PlainWalletConfig as WalletConfig } from './helpers/plain-wallet.ts';
 import {
   loadCliConfig,
   saveCliConfig,
@@ -257,7 +256,8 @@ describe('wallet config round-trip with named wallets', () => {
     const walletPath = path.join(TEST_WALLETS_DIR, 'test.json');
     saveWalletConfig(VALID_WALLET, walletPath);
     const loaded = loadWalletConfig(walletPath);
-    expect(loaded.seed).toBe(VALID_WALLET.seed);
+    expect(loaded).not.toHaveProperty('seed');
+    expect(loaded.isSealed).toBe(false);
     expect(loaded.addresses).toEqual(VALID_WALLET.addresses);
   });
 });
