@@ -2,33 +2,45 @@
 // carry between machines, `mn-device:<arm>:<x>:<y>:<read key>`, each 32 bytes
 // of hex. The read key is where the account's secret is sealed to the device
 // after a rotation. It is public: it names the device, it does not let anyone
-// act as it or read for it.
+// act as it or read for it. The form is the account library's, which every
+// owner app speaks.
+//
+// The code a new device prints to be added carries one more field, its
+// signature of its read key, so the device adding it can tell the account's
+// other devices of it. A signature is drawn fresh each time, so codes are
+// compared, listed and kept without it.
 
-import type { Arm, DeviceKey } from '@kuiralabs/midnight-account';
-import type { OwnerDevice } from '@kuiralabs/midnight-account-chain/owner';
+import { type Arm, type DeviceKey, type ReadKeyAttestation, deviceCodeOf as libraryDeviceCodeOf, joinCodeOf as libraryJoinCodeOf, parseDeviceCode as libraryParseDeviceCode } from '@kuiralabs/midnight-account';
+import type { LocalOwnerDevice, OwnerDevice } from '@kuiralabs/midnight-account-chain/owner';
 import { UsageError } from '../errors.ts';
 
-const PREFIX = 'mn-device';
-const DEVICE_CODE = /^mn-device:(v1|k1):([0-9a-f]{64}):([0-9a-f]{64}):([0-9a-f]{64})$/;
-
-/** A device named by its arm and public key, with its read key. */
+/** A device named by its arm and public key, with its read key, and its signature of it when the code carries one. */
 export interface DeviceIdentity {
   arm: Arm;
   pk: { x: bigint; y: bigint };
   readKey: Uint8Array;
+  attestation?: ReadKeyAttestation;
 }
 
-const hex32 = (value: bigint): string => value.toString(16).padStart(64, '0');
-
 export function deviceCodeOf(device: Pick<OwnerDevice, 'arm' | 'pk'>, readKey: Uint8Array): string {
-  return `${PREFIX}:${device.arm}:${hex32(device.pk.x)}:${hex32(device.pk.y)}:${Buffer.from(readKey).toString('hex')}`;
+  return libraryDeviceCodeOf(device, readKey);
+}
+
+/** The code a device prints to be added: its code and its signature of its read key. */
+export function joinCodeOf(device: Pick<LocalOwnerDevice, 'attestReadKey'>, readKey: Uint8Array): string {
+  return libraryJoinCodeOf(device.attestReadKey(readKey));
 }
 
 export function parseDeviceCode(code: string): DeviceIdentity {
-  const match = DEVICE_CODE.exec(code.trim());
-  if (match === null) throw new UsageError(`Not a device code: "${code}". A device code reads mn-device:<v1|k1>:<x>:<y>:<read key>, as \`midnight grant device new\` or \`device list\` prints it.`);
-  const [, arm, x, y, readKey] = match as unknown as [string, Arm, string, string, string];
-  return { arm, pk: { x: BigInt(`0x${x}`), y: BigInt(`0x${y}`) }, readKey: new Uint8Array(Buffer.from(readKey, 'hex')) };
+  const parsed = libraryParseDeviceCode(code);
+  if (parsed === undefined) throw new UsageError(`Not a device code: "${code}". A device code reads mn-device:<v1|k1>:<x>:<y>:<read key>, as \`midnight grant device new\` or \`device list\` prints it.`);
+  return { arm: parsed.key.arm, pk: parsed.key.pk, readKey: parsed.readKey, ...(parsed.attestation === undefined ? {} : { attestation: parsed.attestation }) };
+}
+
+/** The code as kept and compared: without its signature. */
+export function identityCodeOf(code: string): string {
+  const device = parseDeviceCode(code);
+  return deviceCodeOf(device, device.readKey);
 }
 
 /**

@@ -496,7 +496,7 @@ const COMMAND_SPECS: CommandSpec[] = [
       '                              grants, private state), opened only with mn\'s passphrase',
       'import <file>                 Bring an account\'s backup in for a wallet with no account',
       'device new                    Make this machine\'s device for an account another owns',
-      'device add <code> --backup <file>  Add that device to the account, and write its backup',
+      'device add <code> [--backup <file>]  Add that device; the account reaches it on chain',
       'device remove <code>          Remove a device (a lost one), rotating the account\'s key after',
       'device list                   The account\'s devices this machine knows of',
       '--yes                         issue: issue the grant (without it the grant is only shown)',
@@ -990,14 +990,18 @@ ledger-9 network.
     → { code, network, wallet, ownerKey }
     On a second machine, for a wallet with no account there: makes this
     machine's own owner device (a JubJub key, kept encrypted), and prints
-    its code (mn-device:v1:<x>:<y>), which is public. Run again, the same.
+    its code (mn-device:v1:<x>:<y>:<read key>:<signature>), which is
+    public. Run again, the same device, its code signed afresh.
 
-  midnight grant device add <code> --backup <file> [--json]
-    → { action, code, backup, ... }
+  midnight grant device add <code> [--backup <file>] [--json]
+    → { action, code, backup?, ... }
     On a machine that owns the account: adds the device with that code,
-    then writes <file>, a backup for it: everything but this machine's
-    owner key. On the new machine, midnight grant import <file> makes it an
-    owner on its own.
+    then seals the account to it on chain, in the account's inbox: its
+    secret, the read keys of the account's devices, and every live grant.
+    An owner app that reads the chain joins from that alone. With --backup,
+    also writes <file>, a backup for another mn: everything but this
+    machine's owner key; on the new machine, midnight grant import <file>
+    makes it an owner on its own.
 
   midnight grant device remove <code> [--json]
     → { action, code, removed, ... }

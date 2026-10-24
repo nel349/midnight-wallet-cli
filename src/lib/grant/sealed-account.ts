@@ -31,7 +31,7 @@ import {
 } from '@kuiralabs/midnight-account-chain/owner';
 import { validatePassword } from '@midnight-ntwrk/midnight-js-utils';
 import { FILE_MODE } from '../constants.ts';
-import { deviceCodeOf } from './device-code.ts';
+import { deviceCodeOf, joinCodeOf } from './device-code.ts';
 import { UsageError } from '../errors.ts';
 import { FileExistsError, readJsonIfPresent, writeJsonDurably } from '../durable-file.ts';
 import { type KeyedSecret, freshDataKey, openSecret, openWithKey, sealSecret, sealWithKey } from '../keystore.ts';
@@ -286,6 +286,11 @@ export function sealedDeviceReadSecret(dir: string, key: Uint8Array): Uint8Array
 /** This machine's device code: its owner device and read key. */
 export function ownDeviceCode(dir: string, key: Uint8Array, device: Pick<LocalOwnerDevice, 'arm' | 'pk'>): string {
   return deviceCodeOf(device, x25519PublicOf(sealedDeviceReadSecret(dir, key)));
+}
+
+/** The code this machine's device prints to be added: its code and its signature of its read key. */
+export function ownJoinCode(dir: string, key: Uint8Array, device: LocalOwnerDevice): string {
+  return joinCodeOf(device, x25519PublicOf(sealedDeviceReadSecret(dir, key)));
 }
 
 /** Keeps `readSecret` as the owner device's read key, sealed under `key`: for a device restored from a backup. Never over one kept. */

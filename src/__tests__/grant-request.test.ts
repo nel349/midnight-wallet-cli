@@ -22,7 +22,7 @@ describe('resolveGrantRequest', () => {
     expect(request('device', 'list')).toEqual({ subcommand: 'device', action: 'list' });
     expect(request('device', 'add', code, '--backup', 'b.json')).toEqual({ subcommand: 'device', action: 'add', code, backup: 'b.json' });
     expect(request('device', 'remove', code)).toEqual({ subcommand: 'device', action: 'remove', code });
-    expect(() => request('device', 'add', code)).toThrow(/--backup <file>/);
+    expect(request('device', 'add', code)).toEqual({ subcommand: 'device', action: 'add', code });
     expect(() => request('device', 'add', 'not-a-code', '--backup', 'b.json')).toThrow(/Not a device code/);
     expect(() => request('device')).toThrow(/device action/);
     expect(() => request('device', 'remove', code, '--backup', 'b.json')).toThrow(/--backup only applies/);

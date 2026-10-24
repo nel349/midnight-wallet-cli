@@ -1,4 +1,4 @@
-import { deviceKeyOf, parseDeviceCode } from '../lib/grant/device-code.ts';
+import { deviceKeyOf, identityCodeOf, parseDeviceCode } from '../lib/grant/device-code.ts';
 import { existsSync } from 'node:fs';
 // grant command — the wallet owner's account, and the grants that let an agent spend from it
 // Usage: midnight grant <deploy|deposit|status|list|issue|revoke|revoke-all> [options]
@@ -95,19 +95,20 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
   const spinner = spinnerFor(SPINNER_LABEL[request.subcommand]);
   // This machine's device, made where no account is yet: it opens no account first.
   if (request.subcommand === 'device' && request.action === 'new') {
-    const { createPendingDevice, openAccountKey, ownDeviceCode } = await import('../lib/grant/sealed-account.ts');
+    const { createPendingDevice, openAccountKey, ownJoinCode } = await import('../lib/grant/sealed-account.ts');
     const { unlockPassphrase, passphraseForNewSecret, isPassphraseSet } = await import('../lib/passphrase.ts');
     const home = homedir();
     const passphrase = isPassphraseSet(home) ? await unlockPassphrase(home) : await passphraseForNewSecret(home);
     const device = createPendingDevice(recordsDir, passphrase);
-    const code = ownDeviceCode(recordsDir, openAccountKey(recordsDir, passphrase), device);
+    const code = ownJoinCode(recordsDir, openAccountKey(recordsDir, passphrase), device);
     spinner.stop('Device ready');
     if (jsonMode) {
       writeJsonResult({ subcommand: 'device', action: 'new', network: target.network, wallet: walletName, ownerKey: 'sealed', code });
     } else {
       process.stderr.write('\n' + dim('  On a machine already an owner of the account, run:') + '\n');
       process.stderr.write(dim(`  midnight grant device add ${code} --backup <file>`) + '\n');
-      process.stderr.write(dim('  then bring that file here: midnight grant import <file>') + '\n\n');
+      process.stderr.write(dim('  then bring that file here: midnight grant import <file>') + '\n');
+      process.stderr.write(dim('  The code is signed afresh each time it is shown; any of them adds this device.') + '\n\n');
       process.stdout.write(code + '\n');
     }
     return;
@@ -252,24 +253,31 @@ async function runOwned(request: GrantRequest, { target, walletName, recordsDir,
           const { addOwnerDevice } = await import('@kuiralabs/midnight-account-chain/owner');
           const { exportAccount } = await import('../lib/grant/account-backup.ts');
           if (named.arm !== 'v1') throw new UsageError('The account adds JubJub devices only (a v1 device code, as midnight grant device new makes).');
+          if (named.attestation === undefined) {
+            throw new UsageError('This device code carries no signature of its read key, which the account\'s other devices need. Show the code again on the new device (midnight grant device new prints it).');
+          }
           // The backup is checked before the device is added, so the add never lands with nowhere to write it.
-          if (existsSync(request.backup)) throw new UsageError(`${request.backup} already exists; a backup is never written over a file.`);
-          await addOwnerDevice(await ownerSession(), named.pk, named.readKey);
-          devices.write([...known, request.code]);
-          const written = await exportAccount(recordsDir, target.network, passphrase, request.backup, { forDevice: named });
+          if (request.backup !== undefined && existsSync(request.backup)) throw new UsageError(`${request.backup} already exists; a backup is never written over a file.`);
+          await addOwnerDevice(await ownerSession(), named.attestation);
+          const added = identityCodeOf(request.code);
+          devices.write([...known.filter((code) => identityCodeOf(code) !== added), added]);
+          const written = request.backup === undefined ? undefined : await exportAccount(recordsDir, target.network, passphrase, request.backup, { forDevice: named });
           spinner.stop('Device added');
           if (jsonMode) {
-            writeJsonResult({ ...common, action: 'add', code: request.code, backup: written.file });
+            writeJsonResult({ ...common, action: 'add', code: added, ...(written === undefined ? {} : { backup: written.file }) });
           } else {
-            process.stderr.write('\n' + keyValue('Added', request.code) + '\n' + keyValue('Backup', written.file) + '\n');
-            process.stderr.write(dim('  On the new device: midnight grant import <that file>. It opens with mn\'s passphrase.') + '\n\n');
+            process.stderr.write('\n' + keyValue('Added', added) + '\n' + (written === undefined ? '' : keyValue('Backup', written.file) + '\n'));
+            process.stderr.write(dim('  The account was sealed to the new device on chain: its secret, the devices\' read keys and every live grant.') + '\n');
+            if (written !== undefined) process.stderr.write(dim('  For another mn: midnight grant import <that file>. It opens with mn\'s passphrase.') + '\n');
+            process.stderr.write('\n');
           }
           return;
         }
         const { removeOwnerDevice } = await import('@kuiralabs/midnight-account-chain/owner');
-        if (request.code === own) throw new UsageError('A device does not remove itself: remove this one from another device on the account.');
+        const removing = identityCodeOf(request.code);
+        if (removing === own) throw new UsageError('A device does not remove itself: remove this one from another device on the account.');
         const { removed } = await removeOwnerDevice(await ownerSession(), deviceKeyOf(named), named.readKey);
-        devices.write(known.filter((code) => code !== request.code));
+        devices.write(known.filter((code) => identityCodeOf(code) !== removing));
         spinner.stop(removed ? 'Device removed' : 'Already removed');
         if (jsonMode) writeJsonResult({ ...common, action: 'remove', code: request.code, removed });
         else process.stderr.write('\n' + keyValue(removed ? 'Removed' : 'Already removed', request.code) + '\n' + dim('  The account\'s encryption key was rotated after, away from the removed device.') + '\n\n');
